@@ -96,6 +96,14 @@ export PLANK_DEP_ROOT=/deps
 export PLANK_ARTIFACT_ROOT=/deps/packages
 export PLANK_RUSTUP_ROOT=/deps/rustup
 export PLANK_CARGO_ROOT=/deps/cargo
+# scripts/package/package-version.sh derives PLANK_BUILD_BRANCH from the
+# current git branch when unset, then requires it to match
+# ^[a-z0-9][a-z0-9-]*$ (no slashes: it becomes part of RPM Release/DEB
+# version strings and package filenames). Our branch policy is bde/main
+# (see fork CLAUDE.md); export the sanitized equivalent explicitly rather
+# than renaming the branch, per AGENTS.md's own "set PLANK_BUILD_BRANCH
+# explicitly for every detached candidate worktree" guidance.
+export PLANK_BUILD_BRANCH=bde-main
 mkdir -p "$PLANK_WORK_ROOT" "$PLANK_DEP_ROOT" "$PLANK_ARTIFACT_ROOT"
 
 echo "===stage:prepare-checkout-tools==="
