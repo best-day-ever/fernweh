@@ -409,11 +409,108 @@ NVENC) machines join in WP6.
 
 ## Build attempt result (`scripts/bde/build-host-rpm.sh`)
 
-<!-- BDE-BUILD-RESULT: filled in after running the attempt; see script for
-     what it does. Do not hand-edit this marker away without re-running the
-     script or replacing it with real, dated evidence. -->
+Ran on this Mac (Apple Silicon, OrbStack) against `rockylinux/rockylinux:9.7`
+under `--platform linux/amd64` (QEMU emulation) on 2026-09-17. **It
+succeeded and produced a real, installable host RPM** — better than the
+"expect it to fail or time out" default assumption, though it took two
+attempts and real x86_64 hardware is still what we should actually use for
+repeated builds (see caveats below).
 
-_To be filled in by the build attempt run in this same session — see below._
+### Attempt 1 — clean, 1200s budget: bootstrap succeeded, packaging failed fast
+
+Went all the way through `scripts/ci/install-linux-deps.sh host` (253
+packages incl. `cuda-compiler-13-0`/`cuda-*-devel-13-0`, GCC Toolset 14) and
+the full `scripts/ci/bootstrap.sh linux-host` stage — Rust 1.89.0 pinned and
+verified, Boost 1.89.0 fetched and checksum-verified, and a **complete
+from-source static FFmpeg 8.1.2 + x264 + x265 4.1 build**, with all 8 tracked
+Host dependency patches independently verified present
+(`host_dependency_patch_source_gate=pass`). That's the single slowest part of
+the whole pipeline and it completed under emulation. It then failed
+immediately at the very start of `scripts/ci/build.sh linux-host` with:
+
+```
+invalid PLANK build branch qualifier: bde/main
+```
+
+Root cause: `scripts/package/package-version.sh` derives `PLANK_BUILD_BRANCH`
+from the current git branch when unset and requires it to match
+`^[a-z0-9][a-z0-9-]*$` — no slashes, because it becomes part of the RPM
+`Release`/DEB version string and package filename. Our branch name `bde/main`
+(chosen to match the `bde/*` convention used across the other `bde-*` repos)
+trips this. This is a real, generic constraint of the packaging pipeline, not
+an emulation artifact — it would fail identically on a real Rocky 9.7
+builder VM.
+
+Two script bugs were also found and fixed along the way (both fixed in a
+follow-up commit before attempt 2): the container script tried
+`git config --global --add safe.directory` before `install-linux-deps.sh`
+had installed `git`, and it assumed `dnf config-manager` (from
+`dnf-plugins-core`) was already available on the bare `rockylinux:9.7` image
+— `build.yml`'s real CI job has a separate "Prepare checkout tools" step for
+exactly this that our first draft skipped.
+
+### Fix
+
+Export `PLANK_BUILD_BRANCH=bde-main` explicitly before calling
+`scripts/ci/build.sh` — exactly what `AGENTS.md` already tells detached
+candidate builds to do ("Set `PLANK_BUILD_BRANCH` explicitly for every
+detached candidate worktree... use the lowercase kebab-case feature branch
+name"). No need to rename our branch; this is the sanctioned mechanism.
+
+### Attempt 2 — same Docker volume (FFmpeg/Boost/Cargo cached), 900s budget: succeeded
+
+Container start `2026-09-17T21:04:20Z`, finished (RPM written)
+`2026-09-17T21:14:46Z` — **~10.5 minutes wall time** under `linux/amd64`
+emulation once the slow dependency bootstrap was cached in the
+`plank-bde-host-deps` Docker volume (OS package install still re-runs every
+attempt since only `/deps` persists, not the container's root filesystem —
+that alone took a couple of minutes here). Compiled the full CMake/CUDA
+target set (`nvenc_sdk_1300`, the `plank-transport` Rust staticlib linked in
+via Cargo, and `sunshine`/`plank-host`, `plank-pam-broker`,
+`plank-host-supervisor`), then `rpmbuild` produced and gated the package.
+Every packaging gate the script prints passed, including
+`host_rpm_log_directory_gate`, `host_rpm_wacom_udev_identity_gate`,
+`host_rpm_upnp_absence_gate`, `host_session_takeover_gate`, and
+`host_plank_transport_link_gate`.
+
+**Output**: `plank-host-1.0.124-0.bde_main.1.el9.x86_64.rpm`, 8,569,187
+bytes, sha256 `379500e44d24b62fd65e919932640b8f2bcbb9790bbb79bba43fe8b924bd154c`,
+saved under `scripts/bde/build/packages/` (git-ignored — this is a local
+build artifact, not something to commit). `rpm -qpi`/`rpm -qpl` confirm a
+sane payload: `plank-host`/`plank-pam-broker`/`plank-host-supervisor`
+binaries under `/usr/libexec/plank/`, the three systemd units, the PAM
+service file, the Wacom udev rule, `/etc/plank/host.conf`, the two packaged
+virtual-display EDIDs, and no `/web/` assets (matches the
+`host_rpm_web_ui_absence` policy in `AGENTS.md`).
+
+### What this does and does not prove
+
+- **Proves**: the repo's documented build path works end-to-end, unmodified
+  except for the branch-name env var, even under x86_64 emulation on Apple
+  Silicon. The dependency list in §(a) above is accurate and sufficient. A
+  real (non-emulated) Rocky 9.7 builder VM should be meaningfully faster,
+  not slower, than what we just measured.
+- **Does not prove**: anything hardware-related. This RPM has not been
+  installed anywhere, and none of `docs/development/acceptance-criteria.md`'s
+  gates (NvFBC/NVENC capture, PAM auth, display topology, Wacom, packet-loss
+  recovery, etc.) have been exercised — the script prints
+  `hardware_acceptance=not-performed` on every successful run, deliberately.
+  That still requires a real GPU host per §(a).
+- **Emulation overhead was real but not disqualifying**: `dnf` package
+  installation and RPM transaction/scriptlet phases were noticeably slower
+  than their network-download component would suggest (consistent with
+  QEMU's per-instruction translation cost hitting CPU-bound `rpm`/Python
+  work harder than I/O-bound downloads); the CMake/CUDA/C++/Rust compile
+  itself, once dependencies were cached, was not the bottleneck it might
+  have been. Total first-attempt-to-working-RPM time across both attempts
+  was roughly 30 minutes including the fixes — right at the task's stated
+  budget, and would be one clean ~10-15 minute run on a from-scratch VM with
+  no branch-name surprise.
+- **Recommendation**: still stand up a real Rocky 9.7 builder VM per the
+  steps in §(a) for repeated/CI-style builds — this container wrapper is
+  useful for quick local iteration on packaging changes, not a replacement
+  for that. If we keep using it, always pass a sanitized
+  `PLANK_BUILD_BRANCH`.
 
 ## Open questions
 
