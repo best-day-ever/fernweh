@@ -97,10 +97,24 @@ export PLANK_ARTIFACT_ROOT=/deps/packages
 export PLANK_RUSTUP_ROOT=/deps/rustup
 export PLANK_CARGO_ROOT=/deps/cargo
 mkdir -p "$PLANK_WORK_ROOT" "$PLANK_DEP_ROOT" "$PLANK_ARTIFACT_ROOT"
-git config --global --add safe.directory /workspace
+
+echo "===stage:prepare-checkout-tools==="
+# Mirrors build.yml's "Prepare checkout tools" step: the base rockylinux:9.7
+# image has neither git nor dnf-plugins-core (needed for `dnf config-manager`,
+# which install-linux-deps.sh uses immediately). Pin the vault repo up front
+# here too, same as that step does.
+dnf --disablerepo='*' \
+  --repofrompath=ci-baseos,https://dl.rockylinux.org/vault/rocky/9.7/BaseOS/x86_64/os/ \
+  --repofrompath=ci-appstream,https://dl.rockylinux.org/vault/rocky/9.7/AppStream/x86_64/os/ \
+  --enablerepo=ci-baseos --enablerepo=ci-appstream \
+  install -y git tar gzip python3 dnf-plugins-core
 
 echo "===stage:install-linux-deps==="
 bash /workspace/scripts/ci/install-linux-deps.sh host
+
+# install-linux-deps.sh is what installs git in the first place; the
+# safe.directory exception can only be set once git itself exists.
+git config --global --add safe.directory /workspace
 
 echo "===stage:bootstrap==="
 # bootstrap.sh does: submodule update, rustup/cargo 1.89.0 pin, cargo fetch
