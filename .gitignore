@@ -1,4 +1,5 @@
 /build/
+/scripts/bde/build/
 /artifacts/qualification/*
 !/artifacts/qualification/README.md
 /artifacts/development/
