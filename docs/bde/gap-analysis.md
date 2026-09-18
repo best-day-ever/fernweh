@@ -238,6 +238,254 @@ actual source tree:
    currently assumes it owns its own window chrome, toolbar, and bookmark
    UI.
 
+## (b.1) macOS client Wacom/pen forwarding — implementation status
+
+First gap-closing pass on item 1 above (client-side pressure/tilt
+forwarding). Scope: the **normalized-pen** path only (the same fallback
+Linux uses for tablets that don't qualify for exact raw-HID forwarding),
+not raw-HID Wacom forwarding — see "What was deliberately not done" below.
+
+### How the Linux path works (studied before designing the macOS one)
+
+- **Capture**: `apps/client/app/streaming/input/linuxwacom.cpp`
+  (`LinuxWacomInput`) opens a dedicated `libinput`/`libudev` context on its
+  own thread, filters to Wacom-vendor (`0x056a`) tablet-tool nodes, and
+  exclusively grabs (`EVIOCGRAB`) each pen node while the client window has
+  focus.
+- **Encoding**: on every relevant `libinput` tablet-tool event it calls
+  `LiSendPenEvent(eventType, toolType, buttons, x, y, pressureOrDistance,
+  contactAreaMajor, contactAreaMinor, rotation, tilt)`
+  (`moonlight-common-c/moonlight-common-c/src/Limelight.h`). `x`/`y` are
+  libinput's tablet-absolute 0..1 coordinates (not window-relative — no
+  presentation-layout mapping is needed on that path since the coordinate
+  space is already normalized). Tilt/rotation are derived from libinput's
+  independent `tilt_x`/`tilt_y` (degrees, -90..90 each) via a
+  magnitude/direction trig transform (now factored out into
+  `apps/client/app/streaming/input/pentiltencoding.h`, see below).
+- **Feature gating**: `LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS`
+  (`0x01`) must be set (negotiated with the host) before any pen event is
+  sent; `LiSendPenEvent()` itself also checks
+  `SunshineFeatureFlags & LI_FF_PEN_TOUCH_EVENTS` and returns
+  `LI_ERR_UNSUPPORTED` otherwise.
+  (`LI_FF_RAW_HID_TABLET`/`0x04` and `LI_FF_RAW_HID_FOCUS_SUSPEND`/`0x20`
+  gate the separate, unrelated raw-HID path in `linuxrawwacom.cpp`.)
+- **Wire transport**: `LiSendPenEvent()` queues an internal `SS_PEN_PACKET`
+  (`InputStream.c`), which the input-send thread's `sendInputPacket()`
+  re-encodes via `plank_transport_input_encode_pen()`
+  (`protocol/plank-transport/include/plank_transport_input.h`) into the
+  32-byte `PLANK_TRANSPORT_INPUT_PEN` ("type7") payload and hands to the
+  native KyProto sender (`LiSetPlankNativeInputSender`). Byte layout:
+  `eventType(1) toolType(1) buttons(1) tilt(1) rotation(u16 LE)
+  reserved(2) x(f32 LE) y(f32 LE) pressureOrDistance(f32 LE)
+  contactAreaMajor(f32 LE) contactAreaMinor(f32 LE) reserved(u32)`.
+  `LI_TOUCH_EVENT_*`/`LI_TOOL_TYPE_*`/`LI_PEN_BUTTON_*` constants and their
+  meanings are documented in `Limelight.h`.
+- **Host consumption confirms the wire format is already generic and
+  already works**: `apps/host/linux/src/input.cpp`
+  (`PLANK_TRANSPORT_INPUT_PEN` case) already decodes this exact packet and
+  hands it to `apps/host/linux/src/platform/virtualhid_input.cpp`
+  `pen_update()`, which reconstructs `tilt_x`/`tilt_y` from the
+  magnitude/direction encoding (the exact inverse of `linuxwacom.cpp`'s
+  transform) and drives `libvirtualhid`. **No host-side change was needed
+  for this gap** — the Rocky 9.7 host was already capability-complete for
+  a macOS client sending this packet; only the client-side capture/encode
+  was missing. (A separate, unrelated consumer of the same wire format
+  exists in `apps/host/macos/input/` for when a *Mac* is the host —
+  confirmed by reading `tests/input/macos-pen-events.m` — which further
+  corroborates the format is a stable, shared contract, not something
+  client-specific to invent.)
+
+### macOS design: SDL3 pen events, no Cocoa/IOKit code
+
+Checked whether the pinned SDL3 version (`SDL3-3.4.2` per
+`docs/development/build/macos-client-build-runbook.md` and
+`scripts/build/bootstrap-macos-client-deps.sh`; `3.4.12` was what was
+actually available via Homebrew in this environment) delivers pen events
+on macOS at all, since that determines whether any native Cocoa/IOKit code
+is needed:
+
+- SDL3's public API (`SDL3/SDL_pen.h`) exposes a full, platform-agnostic
+  pen model: `SDL_EVENT_PEN_PROXIMITY_IN/OUT`, `SDL_EVENT_PEN_DOWN/UP`,
+  `SDL_EVENT_PEN_BUTTON_DOWN/UP`, `SDL_EVENT_PEN_MOTION`,
+  `SDL_EVENT_PEN_AXIS` with axes for pressure, X/Y tilt, distance,
+  rotation, slider, and tangential pressure.
+- Confirmed the installed SDL3 dylib's Cocoa backend actually implements
+  this on macOS (not just declares the API): `strings` on
+  `libSDL3.0.dylib` contains the literal Objective-C selectors
+  `tabletPoint:` and `tabletProximity:` — i.e. it does handle
+  `NSEventTypeTabletPoint`/`NSEventTypeTabletProximity`, the exact AppKit
+  tablet event types, and translates them into SDL's pen events.
+- **Conclusion: the SDL pen path works and needs zero Cocoa/IOKit code.**
+  This is the approach implemented.
+
+### What was implemented
+
+- `apps/client/app/streaming/input/pentiltencoding.h` (new, header-only,
+  no platform dependency): the tilt/rotation magnitude-direction trig
+  transform, extracted verbatim from `linuxwacom.cpp`'s local
+  `encodeTilt()` so both the Linux and macOS paths share one
+  implementation instead of two copies that could drift.
+  `linuxwacom.cpp` was refactored to call it (behavior-preserving; only
+  the function's location changed).
+- `apps/client/app/streaming/input/macpen.h` (new, header-only): the
+  macOS-equivalent translation logic — `PlankMacPenInput`, a small state
+  machine that turns primitive values (already extracted from SDL pen
+  events by the caller) into `LiSendPenEvent()`-shaped packets. Header-only
+  and dependency-free of SDL/Qt/AppKit (only `<Limelight.h>`, a plain C
+  header) specifically so it is unit-testable without a window, session,
+  or transport — mirrors the existing
+  `apps/client/tests/wacomtransportpolicy` pattern (a header-only pure
+  function tested directly). See the file's own comments for the full
+  design rationale, including why it tracks only one logical pen at a
+  time (the wire format has no per-pen identifier) and how a tool swap
+  (pen tip ↔ eraser end) is handled.
+- `apps/client/tests/macpen/` (new): an 18-case QTest suite
+  (`test_macpen.cpp`) covering proximity, position mapping, down/up,
+  pressure/tilt axis updates (cross-checked against
+  `pentiltencoding.h`'s own transform), eraser tool switching, button
+  mapping (including that unsupported button bits 4/5 are dropped),
+  hover-leave/reset, deactivation cancelling an in-progress pen, and
+  tool-swap between two SDL pen IDs. **All 18 pass** (verified locally on
+  this Mac with Homebrew Qt/SDL3, ahead of any full client build — see
+  below). Added to the mac client build script's per-candidate test suite
+  loop (`scripts/build/build-macos-client.sh`), alongside the existing
+  `outputtopology`/`planktoolbarlogic`/etc. suites.
+- Wiring into the existing input pipeline
+  (`apps/client/app/streaming/input/input.{h,cpp}`,
+  `apps/client/app/app.pro`): five new `Q_OS_MACOS`-gated
+  `SdlInputHandler::handlePen{Proximity,Touch,Motion,Button,Axis}Event()`
+  methods, each thin glue that pulls primitive fields out of the SDL event
+  struct (mapping window-relative coordinates into the 0..1 stream-space
+  `PlankPresentation::mapWindowPointToStream()` already uses for absolute
+  mouse positioning) and calls into `PlankMacPenInput`. Dispatched from
+  the same `SDL_Event` switch in `session.cpp` that already handles mouse/
+  keyboard/window events. Activation follows the same window-focus model
+  as `LinuxWacomInput` (`setActive()` on focus gain/loss, with a
+  `LI_TOUCH_EVENT_CANCEL_ALL` sent on deactivation so a mid-stroke focus
+  loss doesn't leave a stuck tip-down state host-side).
+- **Submodule fork**: per this doc's own branch policy above, forked
+  `instinctual/plank-client` to `best-day-ever/plank-client` and pushed
+  this work to its `bde/main` branch (the client submodule's `origin`
+  remote still points at upstream; a new `bde` remote was added locally).
+  **`.gitmodules` was deliberately left unchanged** (still
+  `client/moonlight-qt-fork` → `https://github.com/instinctual/plank-client.git`,
+  `branch = main`) after `scripts/maintenance/verify-upstream-pins.sh`'s
+  `check_submodule_url` turned out to hard-gate exactly that URL — an
+  earlier draft of this change repointed it at the fork and broke that
+  gate; reverted. Practical consequence: the superproject's `apps/client`
+  gitlink now records a commit (`6319bc54`) that exists only on the fork,
+  not in `instinctual/plank-client` — so a plain `git submodule update
+  --init` against the recorded `.gitmodules` URL will not find it. This is
+  exactly the "no blind recursive submodule update" footgun `AGENTS.md`
+  already warns about for host-only candidates; the fix is the same
+  bundle-and-verify pattern (or, day to day, simply `git remote add bde
+  https://github.com/best-day-ever/plank-client.git && git fetch bde` in
+  the `apps/client` checkout before `git checkout <gitlink-commit>`), not
+  a `.gitmodules` change. Revisit `.gitmodules` (and this whole
+  arrangement) once/if the change goes back upstream as a PR (see
+  "Upstream candidates" below) — at that point the gitlink can move back
+  to an upstream commit and this workaround goes away.
+- **Feature flag**: `PLANK_MACOS_PEN_INPUT=1` (an environment variable,
+  matching this codebase's existing convention for this kind of switch —
+  see `PLANK_EXTERNAL_WACOM_BRIDGE` in the same function). **Opt-in,
+  default off.** This is the gap analysis's "feature flag / setting"
+  requirement; see `docs/bde/mac-pen-testplan.md` ("Why opt-in") for why
+  default-off was chosen over default-on for a first, hardware-unqualified
+  landing.
+- Two axes SDL exposes that have **no wire representation and are
+  intentionally not forwarded**: `SDL_PEN_AXIS_ROTATION` (true barrel
+  rotation, e.g. an Art Pen's twist — a different quantity from the wire
+  format's "rotation" field, which is actually tilt *direction*) and
+  `SDL_PEN_AXIS_SLIDER`/`TANGENTIAL_PRESSURE`. Documented in `macpen.h`
+  and the test plan; not a regression versus Linux, which has the same
+  gap.
+
+### What was deliberately not done
+
+- **macOS raw-HID Wacom forwarding** (protocol/wacom-hid.md's exact-format
+  path, the Linux `linuxrawwacom.cpp`/`LI_FF_RAW_HID_TABLET` equivalent).
+  This would need `IOHIDManager`/IOKit entitlements and real Cocoa/IOKit
+  code — the opposite of what this pass could confirm was unnecessary for
+  the normalized-pen path. Left for a follow-up; the normalized-pen path
+  landed here is a reasonable first step precisely because it needs no
+  platform driver code at all, matching how Linux itself falls back to it
+  for tablets that don't qualify for raw-HID.
+- ExpressKeys, pad/ring controls, ≥4-button pens, ≥2 simultaneous tablets:
+  same limitations the Linux normalized-pen fallback already has (see
+  `protocol/wacom-hid.md`), not new gaps introduced here.
+
+### macOS client build attempt
+
+Time-boxed per this task's instructions. The **officially pinned** build
+(`docs/development/build/macos-client-build-runbook.md`,
+`scripts/build/build-macos-client.sh`: exact Qt 6.10.2, exact Rust 1.89.0,
+a from-source-bootstrapped OpenSSL/Opus/SDL3-3.4.2/FreeType/SDL3_ttf, and a
+privately patched FFmpeg 9.0.1 tree via
+`scripts/build/bootstrap-macos-client-deps.sh`) could not be attempted as
+specified: none of that pinned toolchain was present on this machine, and
+`bootstrap-macos-client-deps.sh` bootstrapping all of it from source is,
+by its own script's shape, well past the ~40-minute budget for this task
+on its own (it separately compiles OpenSSL, Opus, SDL3, FreeType, SDL3_ttf,
+and — slowest — a full FFmpeg 9.0.1 rebuild with a private patch). Rust
+1.89.0 was also not installed (`rustup toolchain list` showed only
+1.94.1/1.96.0/1.96.1) and installing it was not attempted given the above.
+
+Given that, this pass instead ran an **unofficial local smoke build** —
+not a qualified candidate, but real evidence the new/changed code actually
+compiles inside the full Qt/SDL client, not just in isolation:
+
+1. `protocol/plank-transport` built cleanly with the locally available
+   Rust 1.96.1 (not the pinned 1.89.0) in ~15s: `cargo build --release`.
+2. `apps/client/moonlight-common-c/moonlight-common-c` and
+   `apps/client/qmdnsengine/qmdnsengine` (nested submodules, not checked
+   out by default) were initialized locally per `AGENTS.md`'s "header-only,
+   no recursive dependencies" description of common-c — both are small,
+   this was not the bundle-and-verify procedure `AGENTS.md` requires for a
+   real candidate builder and must not be treated as one.
+3. `SDL3_ttf-3.2.2` (the pinned SDL_ttf release) was built from source
+   against Homebrew's SDL3 3.4.12, since no `sdl3_ttf`/`sdl3-ttf` Homebrew
+   formula exists at all.
+4. Homebrew's `qt` formula (full Qt 6.11.2, not the pinned 6.10.2 — only
+   `qtbase` was preinstalled; `QtQuick`/`QtQuickControls2`/`QtSvg` etc.
+   needed the full formula) was installed.
+5. `qmake -r moonlight-qt.pro CONFIG+=release CONFIG+=disable-prebuilts
+   CONFIG+=plank-transport CONFIG+=disable-libplacebo
+   CONFIG+=disable-wayland CONFIG+=disable-x11 CONFIG+=disable-libva
+   CONFIG+=disable-libdrm` (the same flags
+   `scripts/build/build-macos-client.sh` uses, minus its exact-version
+   `test` assertions) generated Makefiles successfully against this local,
+   non-canonical dependency set.
+6. `make -j8 release` — **succeeded.** Produced a real, valid
+   `plank-client.app` (`Mach-O 64-bit executable arm64`,
+   `Contents/MacOS/plank-client`, ~13.8 MB) with zero compile or link
+   errors (only pre-existing upstream deprecation warnings unrelated to
+   this change, e.g. `MTLStorageModeManaged`). The link command includes
+   `release/input.o` — the file this change touches most — confirming the
+   new `Q_OS_MACOS`-gated pen-handling code compiled and linked cleanly
+   inside the real project, not just in isolation.
+7. The new `tests/macpen` suite was also built and run the same way
+   `build-macos-client.sh`'s per-candidate test loop does
+   (`qmake ... CONFIG-=app_bundle && make && QT_QPA_PLATFORM=offscreen
+   ./macpen`): **all 18 cases pass.**
+8. `session.cpp`'s `SDL_EVENT_PEN_*` dispatch (added after the initial
+   smoke build above, in the same edit pass) was verified with an
+   incremental rebuild of the same tree — `session.o` recompiled and the
+   whole app relinked cleanly, with only one pre-existing, unrelated
+   warning (`misleading indentation` on an `emit readyForDeletion()` a few
+   lines away from anything touched here).
+
+This smoke build is **not a substitute for a real candidate build**: wrong
+Qt minor, wrong Rust version, wrong FFmpeg (system 8.1.2 via Homebrew, not
+the pinned patched 9.0.1 — meaning the identity-GBR HEVC patch and
+exact-format decode path were not exercised), no code signing, and the two
+nested submodules were seeded ad hoc rather than through the documented
+bundle-and-verify builder procedure. Treat its result as "the new code is
+plausibly syntactically and type-correct inside the real project," nothing
+more. **A real qualified build still needs to happen on properly
+provisioned hardware/toolchain before this path is trusted**, and hardware
+pen qualification (docs/bde/mac-pen-testplan.md) has not been attempted at
+all — there is no Wacom tablet in this environment.
+
 ## (c) What a Windows client would need
 
 `docs/development/platforms.md` states plainly: "Windows Host/Client remain
@@ -553,7 +801,23 @@ virtual-display EDIDs, and no `/web/` assets (matches the
 
 Findings in this doc that are generically true of PLANK (not
 bestdayever.de-specific) and worth upstreaming rather than keeping fork-local:
-none identified yet in this pass — this was a read-only study session, no
-code changes were made. Revisit once we start implementing the Mac Wacom
-path; that's the most likely candidate for a clean upstream PR (it's a
-client-side input feature with no bestdayever-specific assumptions).
+
+- **The macOS client Wacom/pen forwarding work itself** (§(b.1) above,
+  `apps/client` commit `6319bc54` on `best-day-ever/plank-client`
+  `bde/main`). It is a client-side input feature with no
+  bestdayever-specific assumptions — no bde-specific config, hostnames, or
+  workflow baked in anywhere — and was written with exactly this in mind
+  (see `macpen.h`'s own comments). It is, however, **unqualified on real
+  hardware** (no Wacom tablet was available in this environment; see
+  `docs/bde/mac-pen-testplan.md`), opt-in-only
+  (`PLANK_MACOS_PEN_INPUT=1`), and was only verified with an unofficial
+  local smoke build, not the pinned Qt 6.10.2/Rust 1.89.0/FFmpeg 9.0.1
+  toolchain (§(b.1) "macOS client build attempt"). Do not propose this
+  upstream until the manual test plan has passed on real hardware through
+  a properly qualified candidate build — send it as a PR to
+  `instinctual/plank-client` once that's done, not before.
+
+Earlier findings in this doc (host RPM build, config knobs, display
+topology) remain fork-local/bestdayever-specific as noted in their own
+sections; nothing new from those is upstream-worthy beyond what's already
+called out inline.
