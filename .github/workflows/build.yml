@@ -1,9 +1,22 @@
 name: Hosted builds
 
+# bde: full builds cost ~115 billed minutes (macOS bills 10x), so build only
+# what matters: merges to bde/main (which also seeds the dependency cache that
+# PR builds restore), ready-for-review PRs that touch more than docs, and
+# manual dispatch. Draft PRs and plain branch pushes do not build.
 on:
   push:
-    branches: ['**']
+    branches: [bde/main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE*'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE*'
   workflow_dispatch:
     inputs:
       product:
@@ -37,6 +50,7 @@ env:
 
 jobs:
   policy:
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
