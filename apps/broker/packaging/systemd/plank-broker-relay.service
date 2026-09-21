@@ -1,0 +1,50 @@
+[Unit]
+Description=PLANK remote broker relay (nftables DNAT leases)
+Documentation=file:///usr/local/share/doc/plank-broker/README.md
+# Install our table after firewalld so both coexist (firewalld only manages `inet firewalld`).
+After=network-online.target firewalld.service
+Wants=network-online.target
+Before=plank-broker.service
+
+[Service]
+Type=simple
+User=plank-broker-relay
+# Group of the socket: only members of plank-broker (the API user) may connect;
+# the helper additionally checks the peer UID.
+Group=plank-broker
+ExecStart=/usr/local/libexec/plank-broker/plank-broker-relay --config /etc/plank-broker/broker.toml
+Restart=on-failure
+RestartSec=2s
+RuntimeDirectory=plank-broker
+RuntimeDirectoryMode=0750
+UMask=0007
+
+# CAP_NET_ADMIN only, inherited by the nft/conntrack helpers it executes.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+
+[Install]
+WantedBy=multi-user.target

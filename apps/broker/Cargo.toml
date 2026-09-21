@@ -1,0 +1,61 @@
+[package]
+name = "plank-broker"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "PLANK remote broker: Kerberos/OTP login, HBAC host list and per-session relay leases"
+
+# Standalone workspace: not a member of any other Cargo workspace in this repository.
+[workspace]
+resolver = "3"
+
+[features]
+default = ["system"]
+# Real MIT libkrb5/libgssapi_krb5 FFI and LDAP SASL/GSSAPI. Linux (Rocky 9) only;
+# unit tests run everywhere with `--no-default-features` against fakes.
+system = ["dep:ldap3"]
+
+[[bin]]
+name = "plank-broker"
+path = "src/bin/plank-broker.rs"
+
+[[bin]]
+name = "plank-broker-relay"
+path = "src/bin/plank-broker-relay.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
+ipnet = "2"
+libc = "0.2"
+rand = "0.8"
+rustls = { version = "0.23.31", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1.47", features = ["macros", "net", "rt-multi-thread", "sync", "time", "io-util", "signal"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+x509-parser = "0.18"
+zeroize = "1"
+ldap3 = { version = "0.12", default-features = false, features = ["gssapi", "tls-rustls-ring"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["test-util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

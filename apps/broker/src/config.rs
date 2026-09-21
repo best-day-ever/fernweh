@@ -1,0 +1,386 @@
+//! `/etc/plank-broker/broker.toml`. Every field except the identity/directory
+//! basics has a default matching docs (contracts v1).
+
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use serde::Deserialize;
+
+pub const DEFAULT_CONFIG: &str = "/etc/plank-broker/broker.toml";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    /// API listen address (TLS 1.3, HTTP/1.1). Default `0.0.0.0:29000`.
+    #[serde(default = "d_listen")]
+    pub listen: SocketAddr,
+    /// Public broker name returned as `endpoint` when the request carries no
+    /// usable `Host` header (normally the client-supplied host name is echoed).
+    pub public_endpoint: String,
+    pub tls: TlsConfig,
+    pub kerberos: KerberosConfig,
+    pub ldap: LdapConfig,
+    #[serde(default)]
+    pub hosts: HostsConfig,
+    #[serde(default)]
+    pub relay: RelayConfig,
+    #[serde(default)]
+    pub limits: Limits,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsConfig {
+    /// PEM certificate chain served on the API port.
+    pub cert: PathBuf,
+    /// PEM private key (PKCS#8, SEC1 or PKCS#1).
+    pub key: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KerberosConfig {
+    /// Realm of users and hosts, e.g. `EXAMPLE.ORG`.
+    pub realm: String,
+    /// Broker service keytab (FAST armour + LDAP bind).
+    #[serde(default = "d_keytab")]
+    pub keytab: PathBuf,
+    /// Broker principal in the keytab, e.g. `HTTP/broker.example.org@EXAMPLE.ORG`.
+    pub principal: String,
+    /// GSSAPI host-based service name of the PLANK hosts (`plank@<fqdn>`).
+    #[serde(default = "d_host_service")]
+    pub host_service: String,
+    /// Upper bound for the requested user TGT lifetime (seconds).
+    #[serde(default = "d_ticket_lifetime")]
+    pub ticket_lifetime_secs: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LdapConfig {
+    /// Tried in order, e.g. `["ldaps://ipa1.example.org:636", "ldaps://ipa2.example.org:636"]`.
+    /// `ldap://` URIs use StartTLS; plain LDAP is never used.
+    pub uris: Vec<String>,
+    /// CA bundle that signed the directory servers' certificates (`/etc/ipa/ca.crt`).
+    pub ca_cert: PathBuf,
+    /// Directory suffix; derived from the realm (`dc=example,dc=org`) when absent.
+    #[serde(default)]
+    pub base_dn: Option<String>,
+    /// Only members of this host group are ever listed or relayed to.
+    #[serde(default = "d_hostgroup")]
+    pub hostgroup: String,
+    /// HBAC service name whose explicit rules assign hosts to users.
+    #[serde(default = "d_hbac_service")]
+    pub hbac_service: String,
+    /// Directory snapshot / per-user cache lifetime.
+    #[serde(default = "d_cache_ttl")]
+    pub cache_ttl_secs: u64,
+    #[serde(default = "d_ldap_timeout")]
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostsConfig {
+    /// PLANK host HTTPS/QUIC port.
+    #[serde(default = "d_plank_port")]
+    pub port: u16,
+    #[serde(default = "d_probe_interval")]
+    pub probe_interval_secs: u64,
+    #[serde(default = "d_probe_timeout")]
+    pub probe_timeout_secs: u64,
+    /// TOFU host certificate pins.
+    #[serde(default = "d_pins")]
+    pub pins_file: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelayConfig {
+    #[serde(default = "d_socket")]
+    pub socket: PathBuf,
+    #[serde(default = "d_port_min")]
+    pub port_min: u16,
+    #[serde(default = "d_port_max")]
+    pub port_max: u16,
+    /// Lease lifetime right after `connect` (contract: 30 s).
+    #[serde(default = "d_lease_initial")]
+    pub lease_initial_secs: u64,
+    /// Lease lifetime after each keepalive / host list (contract: keepalive at least every 60 s).
+    #[serde(default = "d_lease_keepalive")]
+    pub lease_keepalive_secs: u64,
+    /// Relay side: the only local user allowed to talk to the relay socket.
+    #[serde(default = "d_api_user")]
+    pub api_user: String,
+    /// Relay side: DNAT targets must fall into one of these networks (defence in depth;
+    /// the API already restricts targets to the host group).
+    #[serde(default)]
+    pub allowed_target_cidrs: Vec<String>,
+    #[serde(default = "d_nft")]
+    pub nft: PathBuf,
+    #[serde(default = "d_conntrack")]
+    pub conntrack: PathBuf,
+    #[serde(default = "d_table")]
+    pub table: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Limits {
+    #[serde(default = "d_5")]
+    pub starts_per_minute_per_ip: u32,
+    #[serde(default = "d_3")]
+    pub failures_per_user_ip: u32,
+    #[serde(default = "d_10")]
+    pub failures_per_ip: u32,
+    #[serde(default = "d_900")]
+    pub block_secs: u64,
+    #[serde(default = "d_20")]
+    pub global_failure_burst_per_minute: u32,
+    #[serde(default = "d_120")]
+    pub conversation_ttl_secs: u64,
+    #[serde(default = "d_36000")]
+    pub session_absolute_secs: u64,
+    #[serde(default = "d_3600")]
+    pub session_idle_secs: u64,
+    #[serde(default = "d_500")]
+    pub max_sessions: usize,
+    #[serde(default = "d_1000")]
+    pub max_conversations: usize,
+    #[serde(default = "d_256")]
+    pub max_connections: usize,
+    /// Every `auth/respond` answer takes at least this long (constant-ish timing).
+    #[serde(default = "d_1500")]
+    pub min_respond_ms: u64,
+}
+
+fn d_listen() -> SocketAddr {
+    "0.0.0.0:29000".parse().unwrap()
+}
+fn d_keytab() -> PathBuf {
+    "/etc/plank-broker/broker.keytab".into()
+}
+fn d_host_service() -> String {
+    "plank".into()
+}
+fn d_ticket_lifetime() -> u32 {
+    36000
+}
+fn d_hostgroup() -> String {
+    "plank-remote".into()
+}
+fn d_hbac_service() -> String {
+    "plank-remote".into()
+}
+fn d_cache_ttl() -> u64 {
+    60
+}
+fn d_ldap_timeout() -> u64 {
+    5
+}
+fn d_plank_port() -> u16 {
+    28989
+}
+fn d_probe_interval() -> u64 {
+    15
+}
+fn d_probe_timeout() -> u64 {
+    3
+}
+fn d_pins() -> PathBuf {
+    "/var/lib/plank-broker/pins.json".into()
+}
+fn d_socket() -> PathBuf {
+    "/run/plank-broker/relay.sock".into()
+}
+fn d_port_min() -> u16 {
+    29001
+}
+fn d_port_max() -> u16 {
+    29100
+}
+fn d_lease_initial() -> u64 {
+    30
+}
+fn d_lease_keepalive() -> u64 {
+    90
+}
+fn d_api_user() -> String {
+    "plank-broker".into()
+}
+fn d_nft() -> PathBuf {
+    "/usr/sbin/nft".into()
+}
+fn d_conntrack() -> PathBuf {
+    "/usr/sbin/conntrack".into()
+}
+fn d_table() -> String {
+    "plank_broker".into()
+}
+fn d_3() -> u32 {
+    3
+}
+fn d_5() -> u32 {
+    5
+}
+fn d_10() -> u32 {
+    10
+}
+fn d_20() -> u32 {
+    20
+}
+fn d_120() -> u64 {
+    120
+}
+fn d_900() -> u64 {
+    900
+}
+fn d_1500() -> u64 {
+    1500
+}
+fn d_3600() -> u64 {
+    3600
+}
+fn d_36000() -> u64 {
+    36000
+}
+fn d_256() -> usize {
+    256
+}
+fn d_500() -> usize {
+    500
+}
+fn d_1000() -> usize {
+    1000
+}
+
+impl Default for HostsConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for RelayConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for Limits {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+impl LdapConfig {
+    pub fn base_dn(&self, realm: &str) -> String {
+        match &self.base_dn {
+            Some(b) => b.clone(),
+            None => realm
+                .split('.')
+                .filter(|p| !p.is_empty())
+                .map(|p| format!("dc={}", p.to_ascii_lowercase()))
+                .collect::<Vec<_>>()
+                .join(","),
+        }
+    }
+}
+
+impl Config {
+    pub fn load(path: &Path) -> Result<Config> {
+        let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        Self::parse(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub fn parse(text: &str) -> Result<Config> {
+        let cfg: Config = toml::from_str(text)?;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let r = &self.relay;
+        if r.port_min == 0 || r.port_min > r.port_max {
+            bail!("relay.port_min/port_max: invalid range");
+        }
+        if r.port_max - r.port_min > 4096 {
+            bail!("relay port range too large");
+        }
+        if self.ldap.uris.is_empty() {
+            bail!("ldap.uris is empty");
+        }
+        for u in &self.ldap.uris {
+            if !(u.starts_with("ldaps://") || u.starts_with("ldap://")) {
+                bail!("ldap.uris: unsupported scheme in {u}");
+            }
+        }
+        if self.kerberos.realm.is_empty() || self.kerberos.realm != self.kerberos.realm.to_ascii_uppercase() {
+            bail!("kerberos.realm must be upper case");
+        }
+        if !self.kerberos.principal.ends_with(&format!("@{}", self.kerberos.realm)) {
+            bail!("kerberos.principal must be in kerberos.realm");
+        }
+        for c in &r.allowed_target_cidrs {
+            c.parse::<ipnet::Ipv4Net>().with_context(|| format!("relay.allowed_target_cidrs: {c}"))?;
+        }
+        if r.table.is_empty() || !r.table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            bail!("relay.table: letters, digits and '_' only");
+        }
+        if self.public_endpoint.is_empty() || !crate::util::valid_hostname(&self.public_endpoint) {
+            bail!("public_endpoint must be a host name");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_config() -> Config {
+    Config::parse(
+        r#"
+public_endpoint = "broker.example.org"
+[tls]
+cert = "/nonexistent/cert.pem"
+key = "/nonexistent/key.pem"
+[kerberos]
+realm = "EXAMPLE.ORG"
+principal = "HTTP/broker.example.org@EXAMPLE.ORG"
+[ldap]
+uris = ["ldaps://ipa1.example.org"]
+ca_cert = "/nonexistent/ca.crt"
+[hosts]
+pins_file = "/nonexistent/pins.json"
+[relay]
+port_min = 29001
+port_max = 29003
+allowed_target_cidrs = ["192.0.2.0/24"]
+"#,
+    )
+    .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_and_base_dn() {
+        let c = test_config();
+        assert_eq!(c.listen.port(), 29000);
+        assert_eq!(c.ldap.hbac_service, "plank-remote");
+        assert_eq!(c.ldap.hostgroup, "plank-remote");
+        assert_eq!(c.limits.starts_per_minute_per_ip, 5);
+        assert_eq!(c.ldap.base_dn("EXAMPLE.ORG"), "dc=example,dc=org");
+        assert_eq!(c.hosts.port, 28989);
+    }
+
+    #[test]
+    fn shipped_example_parses() {
+        let c = Config::parse(include_str!("../packaging/broker.toml.example")).unwrap();
+        assert_eq!(c.relay.port_max, 29100);
+        assert_eq!(c.limits.min_respond_ms, 1500);
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        assert!(Config::parse("bogus = 1").is_err());
+    }
+}

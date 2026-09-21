@@ -1,0 +1,58 @@
+# /etc/plank-broker/broker.toml  (root:plank-broker 0640)
+# Example values use reserved names; see README.md for the full layout.
+
+listen = "0.0.0.0:29000"
+# Returned as `endpoint` when a request carries no usable Host header.
+public_endpoint = "remote.example.org"
+
+[tls]
+cert = "/etc/plank-broker/tls.crt"   # clients pin the SPKI: `plank-broker spki /etc/plank-broker/tls.crt`
+key = "/etc/plank-broker/tls.key"    # plank-broker:root 0400
+
+[kerberos]
+realm = "EXAMPLE.ORG"
+principal = "HTTP/broker.example.org@EXAMPLE.ORG"
+keytab = "/etc/plank-broker/broker.keytab"  # plank-broker:root 0400
+host_service = "plank"                      # hosts are plank/<fqdn>@REALM (auth-ind otp)
+ticket_lifetime_secs = 36000
+
+[ldap]
+uris = ["ldaps://ipa1.example.org:636", "ldaps://ipa2.example.org:636"]  # ldap:// = StartTLS
+ca_cert = "/etc/plank-broker/ca.crt"        # the directory CA (FreeIPA: /etc/ipa/ca.crt)
+# base_dn = "dc=example,dc=org"            # default: derived from the realm
+hostgroup = "plank-remote"                  # only these hosts are listed / relayed to
+hbac_service = "plank-remote"               # explicit HBAC rules for this service assign hosts
+cache_ttl_secs = 60
+timeout_secs = 5
+
+[hosts]
+port = 28989
+probe_interval_secs = 15
+probe_timeout_secs = 3
+pins_file = "/var/lib/plank-broker/pins.json"
+
+[relay]
+socket = "/run/plank-broker/relay.sock"
+port_min = 29001
+port_max = 29100
+lease_initial_secs = 30
+lease_keepalive_secs = 90
+api_user = "plank-broker"
+allowed_target_cidrs = ["192.0.2.0/24"]      # workstation network(s); relay refuses anything else
+table = "plank_broker"
+nft = "/usr/sbin/nft"
+conntrack = "/usr/sbin/conntrack"
+
+[limits]
+starts_per_minute_per_ip = 5
+failures_per_user_ip = 3
+failures_per_ip = 10
+block_secs = 900
+global_failure_burst_per_minute = 20
+conversation_ttl_secs = 120
+session_absolute_secs = 36000
+session_idle_secs = 3600
+max_sessions = 500
+max_conversations = 1000
+max_connections = 256
+min_respond_ms = 1500
