@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 
 use crate::audit::Audit;
 use crate::broker::{ApiError, Broker, Deps};
-use crate::config::test_config;
+use crate::config::{test_config, Config};
 use crate::directory::FakeDirectory;
 use crate::hbac::fixtures::*;
 use crate::hbac::UserView;
@@ -26,6 +26,8 @@ use crate::util::FakeClock;
 const IP: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
 const IP2: IpAddr = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20));
 const IP3: IpAddr = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 30));
+/// Office LAN client (inside `routing.direct_client_cidrs` in `harness_direct`).
+const LAN: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 50));
 const WS1: &str = "ws1.example.org";
 const WS2: &str = "ws2.example.org";
 
@@ -40,8 +42,13 @@ struct H {
 }
 
 fn harness_with(krb: FakeKerberos) -> H {
+    harness_cfg(krb, |_| {})
+}
+
+fn harness_cfg(krb: FakeKerberos, tweak: impl FnOnce(&mut Config)) -> H {
     let mut cfg = test_config();
     cfg.limits.min_respond_ms = 0;
+    tweak(&mut cfg);
     let v = view(vec![
         rule("plank_remote_anna", &[user("anna")], &[host("ws1"), hostgroup("remote-nested")], &[svc("plank-remote")]),
         rule("plank_remote_bob", &[user("bob")], &[host("ws1")], &[svc("plank-remote")]),
@@ -73,6 +80,14 @@ fn harness_with(krb: FakeKerberos) -> H {
 
 fn harness() -> H {
     harness_with(FakeKerberos::new(&[("anna", "secret123456"), ("bob", "hunter2654321")]))
+}
+
+fn direct_lan(cfg: &mut Config) {
+    cfg.routing.direct_client_cidrs = vec!["10.1.0.0/24".into()];
+}
+
+fn harness_direct() -> H {
+    harness_cfg(FakeKerberos::new(&[("anna", "secret123456"), ("bob", "hunter2654321")]), direct_lan)
 }
 
 fn z(v: &[&str]) -> Vec<Zeroizing<String>> {
@@ -126,8 +141,9 @@ async fn auth_flow_and_reply_shapes() {
     let cr = h.b.connect(IP, &r.session_token, WS1, "remote.example.org").await.unwrap();
     let j = serde_json::to_value(&cr).unwrap();
     let keys: Vec<&str> = j.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys.len(), 6);
-    for k in ["endpoint", "port", "host_cert_sha256", "username", "gssapi_token", "expires_in"] {
+    assert_eq!(keys.len(), 7);
+    assert_eq!(j["route"], "relay");
+    for k in ["route", "endpoint", "port", "host_cert_sha256", "username", "gssapi_token", "expires_in"] {
         assert!(keys.contains(&k), "{k}");
     }
     assert_eq!(j["endpoint"], "remote.example.org");
@@ -402,6 +418,110 @@ async fn bearer_is_required_and_hashed() {
     assert!(!events.contains("secret"), "password never logged");
 }
 
+// ------------------------------------------------------------------ direct route
+
+#[tokio::test]
+async fn lan_client_gets_the_host_directly_without_a_lease() {
+    let h = harness_direct();
+    let t = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
+    let cr = h.b.connect(LAN, &t, WS1, "remote.example.org").await.unwrap();
+    let j = serde_json::to_value(&cr).unwrap();
+    assert_eq!(j["route"], "direct");
+    assert_eq!(j["endpoint"], "192.0.2.11", "the host's own address, not the broker name");
+    assert_eq!(j["port"], 28989);
+    assert_eq!(j["host_cert_sha256"], hex::encode([1u8; 32]));
+    assert_eq!(j["expires_in"], 30);
+    assert!(!cr.gssapi_token.is_empty(), "single sign-on still goes through the KDC");
+    assert!(h.relay_calls().is_empty(), "nothing is opened on the relay");
+    assert_eq!(h.b.lease_count(), 0);
+    assert_eq!(h.b.direct_count(), 1);
+    let ev = h.audit.events();
+    let c = ev.iter().find(|e| e["event"] == "connect").unwrap();
+    assert_eq!(c["route"], "direct");
+    assert_eq!(c["target"], "192.0.2.11");
+
+    // Reconnecting replaces the grant rather than piling them up.
+    h.b.connect(LAN, &t, WS1, "remote.example.org").await.unwrap();
+    assert_eq!(h.b.direct_count(), 1);
+
+    // The same session from outside is relayed as before.
+    let cr = h.b.connect(IP, &t, WS1, "remote.example.org").await.unwrap();
+    assert_eq!((cr.route, cr.endpoint.as_str(), cr.port), ("relay", "remote.example.org", 29001));
+    assert_eq!(h.b.lease_count(), 1);
+}
+
+#[tokio::test]
+async fn direct_route_is_off_by_default() {
+    let h = harness();
+    let t = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
+    let cr = h.b.connect(LAN, &t, WS1, "remote.example.org").await.unwrap();
+    assert_eq!((cr.route, cr.port), ("relay", 29001));
+    assert_eq!(h.b.direct_count(), 0);
+}
+
+#[tokio::test]
+async fn direct_grant_keepalive_reap_and_logout() {
+    let h = harness_direct();
+    let t = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
+    assert_eq!(h.b.keepalive(LAN, &t, WS1).await.unwrap_err(), ApiError::NoLease, "no grant yet");
+    h.b.connect(LAN, &t, WS1, "e").await.unwrap();
+    // Like a relay lease, the grant starts at 30 s: the first keepalive comes early.
+    h.clock.advance(Duration::from_secs(20));
+    assert_eq!(h.b.keepalive(LAN, &t, WS1).await.unwrap().expires_in, 90);
+    // A long stream: keepalives every 60 s keep the grant and the broker session going
+    // well past the 1 h idle limit.
+    for _ in 0..70 {
+        h.clock.advance(Duration::from_secs(60));
+        assert_eq!(h.b.keepalive(LAN, &t, WS1).await.unwrap().expires_in, 90);
+        h.b.reap().await;
+    }
+    assert_eq!(h.b.direct_count(), 1);
+    assert!(h.relay_calls().is_empty());
+    // Other hosts, other addresses: no grant.
+    assert_eq!(h.b.keepalive(LAN, &t, WS2).await.unwrap_err(), ApiError::NoLease);
+    assert_eq!(h.b.keepalive(IP, &t, WS1).await.unwrap_err(), ApiError::NoLease);
+    // Listing refreshes the grant too.
+    h.clock.advance(Duration::from_secs(80));
+    h.b.list_hosts(LAN, &t).await.unwrap();
+    h.clock.advance(Duration::from_secs(80));
+    h.b.reap().await;
+    assert_eq!(h.b.direct_count(), 1);
+    // Keepalive stops: the grant lapses (nothing to close on the relay).
+    h.clock.advance(Duration::from_secs(91));
+    h.b.reap().await;
+    assert_eq!(h.b.direct_count(), 0);
+    assert_eq!(h.b.keepalive(LAN, &t, WS1).await.unwrap_err(), ApiError::NoLease);
+    assert!(h.relay_calls().is_empty());
+    // Logout drops grants.
+    h.b.connect(LAN, &t, WS1, "e").await.unwrap();
+    h.b.logout(&t).await.unwrap();
+    assert_eq!(h.b.direct_count(), 0);
+    assert_eq!(h.b.keepalive(LAN, &t, WS1).await.unwrap_err(), ApiError::Unauthorized);
+}
+
+#[tokio::test]
+async fn direct_route_keeps_every_admission_check() {
+    let mut k = FakeKerberos::new(&[("anna", "secret123456")]);
+    k.policy_denied_hosts = vec![WS2.into()];
+    let h = harness_cfg(k, direct_lan);
+    let t = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
+    h.b.probe_all().await; // TOFU-pin ws1/ws2
+                           // KDC refuses the service ticket (password-only TGT): no direct answer either.
+    assert_eq!(h.b.connect(LAN, &t, WS2, "e").await.unwrap_err(), ApiError::Denied);
+    // Not assigned / not a remote host.
+    assert_eq!(h.b.connect(LAN, &t, "ws3.example.org", "e").await.unwrap_err(), ApiError::Denied);
+    // Offline.
+    h.prober.certs.lock().unwrap().insert(WS1.into(), None);
+    h.b.probe_all().await;
+    assert_eq!(h.b.connect(LAN, &t, WS1, "e").await.unwrap_err(), ApiError::Unavailable("offline"));
+    // Certificate changed.
+    h.prober.certs.lock().unwrap().insert(WS1.into(), Some([9u8; 32]));
+    h.b.probe_all().await;
+    assert_eq!(h.b.connect(LAN, &t, WS1, "e").await.unwrap_err(), ApiError::Unavailable("certificate changed"));
+    assert_eq!(h.b.direct_count(), 0);
+    assert!(h.relay_calls().is_empty());
+}
+
 // ------------------------------------------------------------------ HTTP layer
 
 async fn call(
@@ -466,6 +586,7 @@ async fn http_contract() {
     let (s, _, j) = call(&app, "POST", &format!("/v1/hosts/{WS1}/connect"), Some(&tok), "").await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(j["endpoint"], "remote.example.org", "Host header without port");
+    assert_eq!(j["route"], "relay");
     let (s, _, j) = call(&app, "POST", &format!("/v1/hosts/{WS1}/keepalive"), Some(&tok), "").await;
     assert_eq!((s, j["state"].clone()), (StatusCode::OK, "ok".into()));
     let (s, _, j) = call(&app, "POST", "/v1/logout", Some(&tok), "").await;

@@ -66,6 +66,8 @@ pub struct HostsReply {
 
 #[derive(Debug, Serialize)]
 pub struct ConnectReply {
+    /// `relay` (endpoint:port is a broker lease) or `direct` (endpoint:port is the host itself).
+    pub route: &'static str,
     pub endpoint: String,
     pub port: u16,
     pub host_cert_sha256: String,
@@ -128,11 +130,23 @@ struct Lease {
     expires: Instant,
 }
 
+/// A `connect` answered with the host itself (client inside `direct_client_cidrs`).
+/// Nothing is opened; it only lets keepalive keep the broker session alive while
+/// the stream runs.
+#[derive(Clone)]
+struct DirectGrant {
+    session: [u8; 32],
+    host: String,
+    client: Ipv4Addr,
+    expires: Instant,
+}
+
 #[derive(Default)]
 struct State {
     conversations: HashMap<String, Conversation>,
     sessions: HashMap<[u8; 32], Session>,
     leases: HashMap<u16, Lease>,
+    direct: Vec<DirectGrant>,
     next_port: u16,
 }
 
@@ -157,6 +171,7 @@ pub struct Deps {
 pub struct Broker {
     pub cfg: Config,
     d: Deps,
+    direct_nets: Vec<ipnet::Ipv4Net>,
     st: Mutex<State>,
     limiter: Mutex<RateLimiter>,
     status: RwLock<HashMap<String, HostStatus>>,
@@ -180,9 +195,11 @@ impl Broker {
     pub fn new(cfg: Config, d: Deps) -> Arc<Broker> {
         let limiter = RateLimiter::new(&cfg.limits);
         let st = State { next_port: cfg.relay.port_min, ..Default::default() };
+        let direct_nets = cfg.routing.direct_nets();
         Arc::new(Broker {
             cfg,
             d,
+            direct_nets,
             st: Mutex::new(st),
             limiter: Mutex::new(limiter),
             status: RwLock::new(HashMap::new()),
@@ -386,6 +403,7 @@ impl Broker {
             let ports: Vec<u16> = st.leases.iter().filter(|(_, l)| l.session == key).map(|(p, _)| *p).collect();
             let leases: Vec<(u16, Lease)> =
                 ports.into_iter().filter_map(|p| st.leases.remove(&p).map(|l| (p, l))).collect();
+            st.direct.retain(|g| g.session != key);
             (sess, leases)
         };
         let krb = self.d.krb.clone();
@@ -581,6 +599,7 @@ impl Broker {
         }
         // Listing is a keepalive for every lease of this session from this address.
         if let Some(c) = v4(ip) {
+            self.refresh_direct(key, c, None);
             self.refresh_leases(key, c, None).await;
         }
         Ok(HostsReply { hosts })
@@ -619,10 +638,30 @@ impl Broker {
         n
     }
 
+    /// Extend this session's direct grants from `client` (to `host`, or all). Returns how many.
+    fn refresh_direct(&self, key: [u8; 32], client: Ipv4Addr, host: Option<&str>) -> usize {
+        let now = self.now();
+        let until = now + Duration::from_secs(self.cfg.relay.lease_keepalive_secs);
+        let mut st = self.st.lock().unwrap();
+        let mut n = 0;
+        for g in st.direct.iter_mut() {
+            if g.session == key && g.client == client && g.expires > now && host.is_none_or(|h| h == g.host) {
+                g.expires = until;
+                n += 1;
+            }
+        }
+        n
+    }
+
+    fn is_direct_client(&self, client: Ipv4Addr) -> bool {
+        self.direct_nets.iter().any(|n| n.contains(&client))
+    }
+
     pub async fn keepalive(&self, ip: IpAddr, token: &str, host: &str) -> Result<KeepaliveReply, ApiError> {
         let (key, _, _) = self.session(token).await?;
         let client = v4(ip).ok_or(ApiError::NoLease)?;
-        if self.refresh_leases(key, client, Some(host)).await == 0 {
+        let direct = self.refresh_direct(key, client, Some(host));
+        if direct == 0 && self.refresh_leases(key, client, Some(host)).await == 0 {
             return Err(ApiError::NoLease);
         }
         Ok(KeepaliveReply { state: "ok", expires_in: self.cfg.relay.lease_keepalive_secs })
@@ -646,6 +685,8 @@ impl Broker {
         None
     }
 
+    /// Clients inside `routing.direct_client_cidrs` get the host's own address and
+    /// port (route `direct`, no lease); everyone else gets a relay lease.
     pub async fn connect(&self, ip: IpAddr, token: &str, host: &str, endpoint: &str) -> Result<ConnectReply, ApiError> {
         let (key, user, ccache) = self.session(token).await?;
         let Some(client) = v4(ip) else { return Err(ApiError::Unavailable("IPv6 clients are not supported")) };
@@ -694,6 +735,41 @@ impl Broker {
 
         let now = self.now();
         let initial = self.cfg.relay.lease_initial_secs;
+
+        if self.is_direct_client(client) {
+            let still_logged_in = {
+                let mut st = self.st.lock().unwrap();
+                if st.sessions.contains_key(&key) {
+                    st.direct.retain(|g| !(g.session == key && g.host == host && g.client == client));
+                    st.direct.push(DirectGrant {
+                        session: key,
+                        host: host.to_string(),
+                        client,
+                        expires: now + Duration::from_secs(initial),
+                    });
+                    true
+                } else {
+                    false
+                }
+            };
+            if !still_logged_in {
+                return Err(ApiError::Unauthorized);
+            }
+            self.audit(
+                "connect",
+                json!({"user": user, "ip": ip.to_string(), "host": host, "route": "direct", "target": target.to_string()}),
+            );
+            return Ok(ConnectReply {
+                route: "direct",
+                endpoint: target.to_string(),
+                port: self.cfg.hosts.port,
+                host_cert_sha256: hex::encode(cert),
+                username: user,
+                gssapi_token: STANDARD.encode(tok),
+                expires_in: initial,
+            });
+        }
+
         // Reuse this session's lease to the same host from the same address.
         let port = {
             let mut st = self.st.lock().unwrap();
@@ -749,9 +825,10 @@ impl Broker {
         }
         self.audit(
             "connect",
-            json!({"user": user, "ip": ip.to_string(), "host": host, "port": port, "target": target.to_string()}),
+            json!({"user": user, "ip": ip.to_string(), "host": host, "route": "relay", "port": port, "target": target.to_string()}),
         );
         Ok(ConnectReply {
+            route: "relay",
             endpoint: endpoint.to_string(),
             port,
             host_cert_sha256: hex::encode(cert),
@@ -772,6 +849,8 @@ impl Broker {
             st.conversations.retain(|_, c| now.duration_since(c.created) < conv_ttl);
             let expired: Vec<([u8; 32], &'static str)> =
                 st.sessions.iter().filter_map(|(k, s)| self.session_expired(s, now).map(|r| (*k, r))).collect();
+            // Direct grants hold nothing open: they simply stop keeping the session alive.
+            st.direct.retain(|g| g.expires > now);
             let ports: Vec<u16> = st.leases.iter().filter(|(_, l)| l.expires <= now).map(|(p, _)| *p).collect();
             let lapsed: Vec<(u16, Lease, String)> = ports
                 .into_iter()
@@ -821,6 +900,11 @@ impl Broker {
     #[cfg(test)]
     pub(crate) fn lease_count(&self) -> usize {
         self.st.lock().unwrap().leases.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn direct_count(&self) -> usize {
+        self.st.lock().unwrap().direct.len()
     }
 }
 

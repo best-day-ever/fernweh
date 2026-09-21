@@ -43,6 +43,11 @@ table = "plank_broker"
 nft = "/usr/sbin/nft"
 conntrack = "/usr/sbin/conntrack"
 
+# Office clients: requests from these networks get the host itself from `connect`
+# (route "direct", no relay lease). Private networks only. Default: relay everyone.
+# [routing]
+# direct_client_cidrs = ["10.0.0.0/24"]
+
 [limits]
 starts_per_minute_per_ip = 5
 failures_per_user_ip = 3
