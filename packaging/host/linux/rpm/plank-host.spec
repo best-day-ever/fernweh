@@ -11,6 +11,7 @@ URL:            https://github.com/instinctual/plank
 Source0:        plank-host-payload.tar.gz
 
 Requires:       pam
+Requires:       krb5-libs
 Requires:       systemd
 Requires:       systemd-udev
 Requires:       firewalld-filesystem
@@ -74,6 +75,7 @@ fi
 %license /usr/share/licenses/plank-host/LICENSE-Kyber-Notice
 %doc /usr/share/doc/plank-host/README.md
 /etc/pam.d/plank-host
+/etc/pam.d/plank-remote
 %config(noreplace) /etc/plank/host.conf
 %config(noreplace) /etc/logrotate.d/plank-host
 %dir %attr(0755,root,root) /etc/plank

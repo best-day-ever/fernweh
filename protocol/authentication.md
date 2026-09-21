@@ -69,6 +69,64 @@ Concurrent streams may share it. Releasing the last stream closes PAM and
 invalidates the token; a later resume requires a new login. Pending
 conversations expire after 120 seconds, and unclaimed tokens after 300 seconds.
 
+## Brokered Kerberos Admission
+
+An optional second admission path lets a trusted remote-access broker hand
+the client one Kerberos AP-REQ for the host's `plank/<fqdn>@REALM` service,
+so the user signs in once at the broker instead of on every host. The host
+verifies the ticket against its own keytab, so the broker holds no key that
+hosts trust and a compromised broker cannot mint sessions. The path is off
+unless `security.gssapi_keytab` is configured. The password path is
+unchanged.
+
+`POST /plank/auth/start` accepts an optional `gssapi_token` field
+(standard padded base64, at most 32 KiB decoded) next to `username`. With a
+token, the exchange is a single round trip. The reply is `authenticated`
+with a `session_token`, or `denied`, in the same shapes as the password
+path; there is never a `challenge`. A malformed or oversize token is denied.
+Each token is single-use because the Kerberos replay cache is enabled, so a
+retry needs a new token from the broker.
+
+The token must use the raw Kerberos V5 mechanism, not SPNEGO. Its channel
+bindings are `application_data = "tls-server-end-point:" || SHA-256(host leaf
+certificate DER)`, with initiator and acceptor address types
+`GSS_C_AF_UNSPEC` and no addresses. The host computes the digest from the
+certificate its TLS listener serves (`cert`), and the client pins that same
+leaf. A token without bindings is denied.
+
+The media worker forwards the decoded token to the root `plank-pam-broker` in
+a `begin_gssapi` message (type 6, framing version 1). The payload is the
+`begin` payload plus one length-prefixed opaque token field. The broker
+accepts the context with `gss_acquire_cred_from` and the keytab credential
+store. It then requires all of the following:
+
+- verified channel bindings;
+- a `plank/<host>` acceptor in the default realm;
+- a single-component initiator in the default realm whose `gss_localname`
+  equals the requested account;
+- the KDC-authenticated auth indicator `security.gssapi_required_indicator`
+  (default `otp`).
+
+`security.allow_root_login` is still checked first. After admission the
+broker skips `pam_authenticate()` and runs `pam_acct_mgmt()`,
+`pam_setcred(PAM_ESTABLISH_CRED)` and `pam_open_session()` under the
+separate PAM service `security.gssapi_pam_service` (default `plank-remote`,
+installed as `/etc/pam.d/plank-remote` with the same stack as
+`plank-host`). Its conversation is non-interactive: any prompt fails closed.
+From there the session lifetime is identical to the password path. Because
+FreeIPA HBAC is evaluated per PAM service name, brokered remote access and LAN
+password logins can be granted independently. Token bytes are never logged.
+
+With `security.lock_on_disconnect = true`, the media worker locks the
+attached user session through logind (`LockSession`, with a
+`loginctl lock-session` fallback) 5 seconds after the last authenticated
+stream ends. It skips the lock if a stream or launch is active again by then,
+so a reconnect or takeover by the desktop owner does not land on a lock
+screen. The GDM greeter is never locked.
+
+The host implementation, verification tools and the full admission checklist
+are described in `apps/host/linux/docs/plank-gssapi-admission.md`.
+
 ## TLS and Network Policy
 
 Generate an RSA-3072/SHA-256 certificate with a DNS-only SAN using

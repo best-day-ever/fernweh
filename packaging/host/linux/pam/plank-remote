@@ -1,0 +1,13 @@
+#%PAM-1.0
+# PLANK brokered remote admission. The PAM broker admits the account with a
+# Kerberos GSSAPI ticket (security.gssapi_keytab) and never calls
+# pam_authenticate for this service; the auth lines only provide
+# pam_setcred. Account policy (for example FreeIPA HBAC rules for the
+# plank-remote service) is evaluated separately from plank-host. The broker
+# enforces security.allow_root_login before entering this stack.
+auth       substack     system-auth
+
+account    include      system-auth
+
+session    optional     pam_keyinit.so force revoke
+session    include      system-auth
