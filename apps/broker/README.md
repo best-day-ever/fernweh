@@ -32,7 +32,7 @@ inside the session range, sane client address, target inside
 | `POST /v1/auth/start {"username"}` | `challenge` + `conversation_id` + two prompts | 429 `{"state":"denied","retry_after":s}` |
 | `POST /v1/auth/respond {"conversation_id","responses":[pw, otp]}` | `authenticated`, `session_token`, `expires_in`, `username` | 200 `{"state":"denied"}` (always generic, ≥ `min_respond_ms`), 429 |
 | `GET /v1/hosts` (Bearer) | `{"hosts":[{id,name,online,in_use_by,connectable,reason}]}`; also refreshes this session's leases from this address | 401 `{"state":"denied"}`, 503 directory unavailable |
-| `POST /v1/hosts/{fqdn}/connect` (Bearer), body `{}` or `{"route":"relay"}` | `{route,endpoint,port,host_cert_sha256,username,gssapi_token,expires_in:30}`; `route` is `"relay"` (endpoint = broker name, port = lease) or `"direct"` (endpoint = host IPv4, port = `hosts.port`) | 401; 403 `denied` (not assigned, or the KDC refused the host ticket); 409 `{"state":"unavailable","reason":"offline"\|"certificate changed"\|"no address"}`; 503 no free port / relay / KDC |
+| `POST /v1/hosts/{fqdn}/connect` (Bearer) | `{route,endpoint,port,host_cert_sha256,username,gssapi_token,expires_in:30}`; `route` is `"relay"` (endpoint = broker name, port = lease) or `"direct"` (endpoint = host IPv4, port = `hosts.port`) | 401; 403 `denied` (not assigned, or the KDC refused the host ticket); 409 `{"state":"unavailable","reason":"offline"\|"certificate changed"\|"no address"}`; 503 no free port / relay / KDC |
 | `POST /v1/hosts/{fqdn}/keepalive` (Bearer) | `{"state":"ok","expires_in":90}` (lease or direct grant) | 404 `{"state":"no_lease"}` → call `connect` again |
 | `POST /v1/logout` (Bearer) | `{"state":"logged_out"}` | 401 |
 
@@ -68,9 +68,9 @@ reveal a session owner.
   `routing.direct_client_cidrs` runs every check above (assignment, probe, pin,
   AP-REQ) but opens no lease and answers `route:"direct"` with the host's own
   address and port. The broker only keeps a grant so keepalive/host list keep
-  the session alive during the stream. A client that cannot reach the host sends
-  `{"route":"relay"}` to get a lease instead; `direct` can never be requested.
-  Off unless the list is set. Private networks only.
+  the session alive during the stream. There is no relay fallback for inside
+  clients: on the office LAN the host is always directly reachable. Off unless
+  the list is set. Private networks only.
 - Limits: 5 `auth/start` per minute per IP; 3 failed responds per (user, IP) or 10
   per IP → 15 min block, enforced before the KDC is asked; bursts ≥ 20
   failures/min are audited (`failure_burst`).

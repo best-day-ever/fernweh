@@ -12,7 +12,7 @@ use tower::ServiceExt;
 use zeroize::Zeroizing;
 
 use crate::audit::Audit;
-use crate::broker::{ApiError, Broker, Deps, RouteRequest};
+use crate::broker::{ApiError, Broker, Deps};
 use crate::config::{test_config, Config};
 use crate::directory::FakeDirectory;
 use crate::hbac::fixtures::*;
@@ -451,16 +451,6 @@ async fn lan_client_gets_the_host_directly_without_a_lease() {
 }
 
 #[tokio::test]
-async fn lan_client_can_downgrade_to_relay() {
-    let h = harness_direct();
-    let t = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
-    let cr = h.b.connect_via(LAN, &t, WS1, "remote.example.org", RouteRequest::Relay).await.unwrap();
-    assert_eq!((cr.route, cr.port), ("relay", 29001));
-    assert_eq!(h.b.direct_count(), 0);
-    assert_eq!(h.b.lease_count(), 1);
-}
-
-#[tokio::test]
 async fn direct_route_is_off_by_default() {
     let h = harness();
     let t = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
@@ -597,14 +587,6 @@ async fn http_contract() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(j["endpoint"], "remote.example.org", "Host header without port");
     assert_eq!(j["route"], "relay");
-    let (s, _, j) = call(&app, "POST", &format!("/v1/hosts/{WS1}/connect"), Some(&tok), "{}").await;
-    assert_eq!((s, j["route"].clone()), (StatusCode::OK, "relay".into()));
-    let (s, _, j) = call(&app, "POST", &format!("/v1/hosts/{WS1}/connect"), Some(&tok), r#"{"route":"relay"}"#).await;
-    assert_eq!((s, j["route"].clone()), (StatusCode::OK, "relay".into()));
-    for bad in [r#"{"route":"direct"}"#, r#"{"bogus":1}"#, "nope"] {
-        let (s, _, _) = call(&app, "POST", &format!("/v1/hosts/{WS1}/connect"), Some(&tok), bad).await;
-        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
-    }
     let (s, _, j) = call(&app, "POST", &format!("/v1/hosts/{WS1}/keepalive"), Some(&tok), "").await;
     assert_eq!((s, j["state"].clone()), (StatusCode::OK, "ok".into()));
     let (s, _, j) = call(&app, "POST", "/v1/logout", Some(&tok), "").await;

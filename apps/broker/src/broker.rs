@@ -150,16 +150,6 @@ struct State {
     next_port: u16,
 }
 
-/// Which route the client asked for in `connect`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RouteRequest {
-    /// Broker decides from the client address.
-    Auto,
-    /// Client could not reach the host directly: always lease (downgrade only;
-    /// a client can never ask for `direct`).
-    Relay,
-}
-
 #[derive(Clone, Debug)]
 pub struct HostStatus {
     pub online: bool,
@@ -695,20 +685,9 @@ impl Broker {
         None
     }
 
+    /// Clients inside `routing.direct_client_cidrs` get the host's own address and
+    /// port (route `direct`, no lease); everyone else gets a relay lease.
     pub async fn connect(&self, ip: IpAddr, token: &str, host: &str, endpoint: &str) -> Result<ConnectReply, ApiError> {
-        self.connect_via(ip, token, host, endpoint, RouteRequest::Auto).await
-    }
-
-    /// `connect` with an explicit route request. Clients inside `routing.direct_client_cidrs`
-    /// get the host's own address and port (no lease) unless they ask for `Relay`.
-    pub async fn connect_via(
-        &self,
-        ip: IpAddr,
-        token: &str,
-        host: &str,
-        endpoint: &str,
-        route: RouteRequest,
-    ) -> Result<ConnectReply, ApiError> {
         let (key, user, ccache) = self.session(token).await?;
         let Some(client) = v4(ip) else { return Err(ApiError::Unavailable("IPv6 clients are not supported")) };
         let (view, fqdns) = self.assigned(&user, false).await?;
@@ -757,7 +736,7 @@ impl Broker {
         let now = self.now();
         let initial = self.cfg.relay.lease_initial_secs;
 
-        if route == RouteRequest::Auto && self.is_direct_client(client) {
+        if self.is_direct_client(client) {
             let still_logged_in = {
                 let mut st = self.st.lock().unwrap();
                 if st.sessions.contains_key(&key) {
