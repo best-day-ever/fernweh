@@ -64,6 +64,8 @@ install -D -m 0644 "$repo_dir/packaging/host/linux/systemd/90-plank.preset" \
   "$payload_dir/usr/lib/systemd/system-preset/90-plank.preset"
 install -D -m 0644 "$repo_dir/packaging/host/linux/pam/plank-host" \
   "$payload_dir/etc/pam.d/plank-host"
+install -D -m 0644 "$repo_dir/packaging/host/linux/pam/plank-remote" \
+  "$payload_dir/etc/pam.d/plank-remote"
 install -D -m 0644 "$repo_dir/packaging/host/linux/config/plank-host.conf" \
   "$payload_dir/etc/plank/host.conf"
 install -D -m 0644 "$repo_dir/packaging/host/linux/logrotate/plank-host" \
@@ -177,6 +179,7 @@ if rpm -qpl "$rpm_file" | rg -q '/etc/plank/plank\.conf$'; then
 fi
 echo "host_rpm_config_identity_gate=pass"
 rpm -qpl "$rpm_file" | rg -q '/etc/pam\.d/plank-host$'
+rpm -qpl "$rpm_file" | rg -q '/etc/pam\.d/plank-remote$'
 rpm -qpl "$rpm_file" | rg -q \
   '/usr/lib/udev/rules\.d/70-plank-host-wacom\.rules$'
 if rpm -qpl "$rpm_file" | rg -q \

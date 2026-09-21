@@ -24,7 +24,7 @@ case "$role:$ID:$VERSION_ID" in
       libX11-devel libxcb-devel libXcomposite-devel libXcursor-devel libXfixes-devel \
       libXi-devel libXinerama-devel libXrandr-devel libXtst-devel libxkbcommon-devel \
       mesa-libgbm-devel mesa-libGL-devel numactl-devel openssl-devel opus-devel \
-      pam-devel pipewire-devel pulseaudio-libs-devel python3-devel systemd-devel \
+      krb5-devel pam-devel pipewire-devel pulseaudio-libs-devel python3-devel systemd-devel \
       vulkan-loader-devel wayland-devel wayland-protocols-devel
     /usr/local/cuda/bin/nvcc --version
     python3 -c 'import jinja2' # Fail before the long FFmpeg bootstrap.

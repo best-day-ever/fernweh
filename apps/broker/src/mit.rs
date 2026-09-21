@@ -1,0 +1,604 @@
+//! MIT Kerberos implementation of [`Kerberos`] (libkrb5 + libgssapi_krb5 FFI).
+//!
+//! * Armour: a TGT for the broker principal from its keytab in `MEMORY:` ccache,
+//!   refreshed before it expires.
+//! * Login: `krb5_get_init_creds_password` with FAST (`set_fast_ccache_name`) and a
+//!   prompter that answers the KDC's OTP prompt with password‖otp; the resulting
+//!   TGT is written to a fresh per-session `MEMORY:` ccache (`set_out_ccache`).
+//! * Connect: `gss_acquire_cred_from(ccache=…)` + `gss_init_sec_context` for
+//!   `<service>@<fqdn>` (host-based) with `tls-server-end-point` channel bindings,
+//!   no mutual auth, so a single AP-REQ token is produced.
+
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ptr;
+use std::sync::RwLock;
+
+use zeroize::Zeroizing;
+
+use crate::kerberos::{channel_binding_data, Kerberos, KrbError, UserTicket};
+use crate::util::{random_hex, unix_now};
+
+type KrbCtx = *mut c_void;
+type KrbPrincipal = *mut c_void;
+type KrbCcache = *mut c_void;
+type KrbKeytab = *mut c_void;
+type KrbOpt = *mut c_void;
+
+#[repr(C)]
+struct KrbData {
+    magic: i32,
+    length: u32,
+    data: *mut c_char,
+}
+
+#[repr(C)]
+struct KrbKeyblock {
+    magic: i32,
+    enctype: i32,
+    length: u32,
+    contents: *mut u8,
+}
+
+#[repr(C)]
+struct KrbTimes {
+    authtime: i32,
+    starttime: i32,
+    endtime: i32,
+    renew_till: i32,
+}
+
+#[repr(C)]
+struct KrbCreds {
+    magic: i32,
+    client: KrbPrincipal,
+    server: KrbPrincipal,
+    keyblock: KrbKeyblock,
+    times: KrbTimes,
+    is_skey: u32,
+    ticket_flags: i32,
+    addresses: *mut *mut c_void,
+    ticket: KrbData,
+    second_ticket: KrbData,
+    authdata: *mut *mut c_void,
+}
+
+#[repr(C)]
+struct KrbPrompt {
+    prompt: *mut c_char,
+    hidden: c_int,
+    reply: *mut KrbData,
+}
+
+type Prompter = unsafe extern "C" fn(KrbCtx, *mut c_void, *const c_char, *const c_char, c_int, *mut KrbPrompt) -> i32;
+
+#[link(name = "krb5")]
+extern "C" {
+    fn krb5_init_context(ctx: *mut KrbCtx) -> i32;
+    fn krb5_free_context(ctx: KrbCtx);
+    fn krb5_parse_name(ctx: KrbCtx, name: *const c_char, out: *mut KrbPrincipal) -> i32;
+    fn krb5_free_principal(ctx: KrbCtx, p: KrbPrincipal);
+    fn krb5_cc_resolve(ctx: KrbCtx, name: *const c_char, out: *mut KrbCcache) -> i32;
+    fn krb5_cc_close(ctx: KrbCtx, cc: KrbCcache) -> i32;
+    fn krb5_cc_destroy(ctx: KrbCtx, cc: KrbCcache) -> i32;
+    fn krb5_kt_resolve(ctx: KrbCtx, name: *const c_char, out: *mut KrbKeytab) -> i32;
+    fn krb5_kt_close(ctx: KrbCtx, kt: KrbKeytab) -> i32;
+    fn krb5_get_init_creds_opt_alloc(ctx: KrbCtx, out: *mut KrbOpt) -> i32;
+    fn krb5_get_init_creds_opt_free(ctx: KrbCtx, opt: KrbOpt);
+    fn krb5_get_init_creds_opt_set_tkt_life(opt: KrbOpt, life: i32);
+    fn krb5_get_init_creds_opt_set_forwardable(opt: KrbOpt, v: c_int);
+    fn krb5_get_init_creds_opt_set_proxiable(opt: KrbOpt, v: c_int);
+    fn krb5_get_init_creds_opt_set_fast_ccache_name(ctx: KrbCtx, opt: KrbOpt, name: *const c_char) -> i32;
+    fn krb5_get_init_creds_opt_set_out_ccache(ctx: KrbCtx, opt: KrbOpt, cc: KrbCcache) -> i32;
+    fn krb5_get_init_creds_password(
+        ctx: KrbCtx,
+        creds: *mut KrbCreds,
+        client: KrbPrincipal,
+        password: *const c_char,
+        prompter: Option<Prompter>,
+        data: *mut c_void,
+        start_time: i32,
+        in_tkt_service: *const c_char,
+        opt: KrbOpt,
+    ) -> i32;
+    fn krb5_get_init_creds_keytab(
+        ctx: KrbCtx,
+        creds: *mut KrbCreds,
+        client: KrbPrincipal,
+        keytab: KrbKeytab,
+        start_time: i32,
+        in_tkt_service: *const c_char,
+        opt: KrbOpt,
+    ) -> i32;
+    fn krb5_free_cred_contents(ctx: KrbCtx, creds: *mut KrbCreds);
+    fn krb5_get_error_message(ctx: KrbCtx, code: i32) -> *const c_char;
+    fn krb5_free_error_message(ctx: KrbCtx, msg: *const c_char);
+    fn krb5_get_prompt_types(ctx: KrbCtx) -> *mut i32;
+}
+
+type OmUint32 = u32;
+type GssName = *mut c_void;
+type GssCred = *mut c_void;
+type GssCtx = *mut c_void;
+
+#[repr(C)]
+struct GssBuffer {
+    length: usize,
+    value: *mut c_void,
+}
+
+#[repr(C)]
+struct GssOidDesc {
+    length: OmUint32,
+    elements: *mut c_void,
+}
+type GssOid = *mut GssOidDesc;
+
+#[repr(C)]
+struct GssChannelBindings {
+    initiator_addrtype: OmUint32,
+    initiator_address: GssBuffer,
+    acceptor_addrtype: OmUint32,
+    acceptor_address: GssBuffer,
+    application_data: GssBuffer,
+}
+
+#[repr(C)]
+struct GssKeyValueElement {
+    key: *const c_char,
+    value: *const c_char,
+}
+
+#[repr(C)]
+struct GssKeyValueSet {
+    count: OmUint32,
+    elements: *mut GssKeyValueElement,
+}
+
+#[link(name = "gssapi_krb5")]
+extern "C" {
+    static GSS_C_NT_HOSTBASED_SERVICE: GssOid;
+    static gss_mech_krb5: GssOid;
+    fn gss_import_name(minor: *mut OmUint32, input: *mut GssBuffer, ntype: GssOid, out: *mut GssName) -> OmUint32;
+    fn gss_release_name(minor: *mut OmUint32, name: *mut GssName) -> OmUint32;
+    fn gss_acquire_cred_from(
+        minor: *mut OmUint32,
+        desired_name: GssName,
+        time_req: OmUint32,
+        desired_mechs: *mut c_void,
+        usage: c_int,
+        cred_store: *const GssKeyValueSet,
+        out_cred: *mut GssCred,
+        actual_mechs: *mut *mut c_void,
+        time_rec: *mut OmUint32,
+    ) -> OmUint32;
+    fn gss_release_cred(minor: *mut OmUint32, cred: *mut GssCred) -> OmUint32;
+    fn gss_init_sec_context(
+        minor: *mut OmUint32,
+        cred: GssCred,
+        ctx: *mut GssCtx,
+        target: GssName,
+        mech: GssOid,
+        req_flags: OmUint32,
+        time_req: OmUint32,
+        cb: *mut GssChannelBindings,
+        input: *mut GssBuffer,
+        actual_mech: *mut GssOid,
+        output: *mut GssBuffer,
+        ret_flags: *mut OmUint32,
+        time_rec: *mut OmUint32,
+    ) -> OmUint32;
+    fn gss_delete_sec_context(minor: *mut OmUint32, ctx: *mut GssCtx, out: *mut GssBuffer) -> OmUint32;
+    fn gss_release_buffer(minor: *mut OmUint32, buf: *mut GssBuffer) -> OmUint32;
+    fn gss_display_status(
+        minor: *mut OmUint32,
+        status: OmUint32,
+        status_type: c_int,
+        mech: GssOid,
+        msg_ctx: *mut OmUint32,
+        out: *mut GssBuffer,
+    ) -> OmUint32;
+}
+
+const GSS_C_INITIATE: c_int = 1;
+const GSS_C_INDEFINITE: OmUint32 = 0xffff_ffff;
+const GSS_C_GSS_CODE: c_int = 1;
+const GSS_C_MECH_CODE: c_int = 2;
+const GSS_S_COMPLETE: OmUint32 = 0;
+const GSS_C_AF_UNSPEC: OmUint32 = 0;
+
+const KRB5_KDC_UNREACH: i32 = -1765328228;
+const KRB5_REALM_CANT_RESOLVE: i32 = -1765328164;
+const KRB5_PROMPT_TYPE_PASSWORD: i32 = 1;
+const KRB5_PROMPT_TYPE_PREAUTH: i32 = 4;
+/// Returned from the prompter to abort the exchange (maps to "denied").
+const PROMPT_ABORT: i32 = libc::ECANCELED;
+
+/// RAII krb5 context.
+struct Ctx(KrbCtx);
+impl Ctx {
+    fn new() -> Result<Ctx, KrbError> {
+        let mut c = ptr::null_mut();
+        let rc = unsafe { krb5_init_context(&mut c) };
+        if rc != 0 {
+            return Err(KrbError::Unavailable(format!("krb5_init_context failed ({rc})")));
+        }
+        Ok(Ctx(c))
+    }
+    fn msg(&self, code: i32) -> String {
+        unsafe {
+            let m = krb5_get_error_message(self.0, code);
+            if m.is_null() {
+                return format!("krb5 error {code}");
+            }
+            let s = CStr::from_ptr(m).to_string_lossy().into_owned();
+            krb5_free_error_message(self.0, m);
+            s
+        }
+    }
+    fn err(&self, code: i32, what: &str) -> KrbError {
+        let m = format!("{what}: {}", self.msg(code));
+        if code == KRB5_KDC_UNREACH || code == KRB5_REALM_CANT_RESOLVE {
+            KrbError::Unavailable(m)
+        } else {
+            KrbError::Denied(m)
+        }
+    }
+}
+impl Drop for Ctx {
+    fn drop(&mut self) {
+        unsafe { krb5_free_context(self.0) }
+    }
+}
+
+struct Opt<'a>(&'a Ctx, KrbOpt);
+impl<'a> Opt<'a> {
+    fn new(ctx: &'a Ctx) -> Result<Opt<'a>, KrbError> {
+        let mut o = ptr::null_mut();
+        let rc = unsafe { krb5_get_init_creds_opt_alloc(ctx.0, &mut o) };
+        if rc != 0 {
+            return Err(KrbError::Unavailable(ctx.msg(rc)));
+        }
+        Ok(Opt(ctx, o))
+    }
+}
+impl Drop for Opt<'_> {
+    fn drop(&mut self) {
+        unsafe { krb5_get_init_creds_opt_free(self.0 .0, self.1) }
+    }
+}
+
+struct Princ<'a>(&'a Ctx, KrbPrincipal);
+impl<'a> Princ<'a> {
+    fn parse(ctx: &'a Ctx, name: &str) -> Result<Princ<'a>, KrbError> {
+        let c = CString::new(name).map_err(|_| KrbError::Denied("bad principal".into()))?;
+        let mut p = ptr::null_mut();
+        let rc = unsafe { krb5_parse_name(ctx.0, c.as_ptr(), &mut p) };
+        if rc != 0 {
+            return Err(ctx.err(rc, "parse principal"));
+        }
+        Ok(Princ(ctx, p))
+    }
+}
+impl Drop for Princ<'_> {
+    fn drop(&mut self) {
+        unsafe { krb5_free_principal(self.0 .0, self.1) }
+    }
+}
+
+struct Cc<'a>(&'a Ctx, KrbCcache);
+impl<'a> Cc<'a> {
+    fn resolve(ctx: &'a Ctx, name: &str) -> Result<Cc<'a>, KrbError> {
+        let c = CString::new(name).map_err(|_| KrbError::Unavailable("bad ccache name".into()))?;
+        let mut cc = ptr::null_mut();
+        let rc = unsafe { krb5_cc_resolve(ctx.0, c.as_ptr(), &mut cc) };
+        if rc != 0 {
+            return Err(KrbError::Unavailable(ctx.msg(rc)));
+        }
+        Ok(Cc(ctx, cc))
+    }
+    fn destroy(mut self) {
+        unsafe { krb5_cc_destroy(self.0 .0, self.1) };
+        self.1 = ptr::null_mut();
+    }
+}
+impl Drop for Cc<'_> {
+    fn drop(&mut self) {
+        if !self.1.is_null() {
+            unsafe { krb5_cc_close(self.0 .0, self.1) };
+        }
+    }
+}
+
+fn zero_creds() -> KrbCreds {
+    // SAFETY: plain C struct, all-zero is the documented initial state.
+    unsafe { std::mem::zeroed() }
+}
+
+struct PromptState<'a> {
+    secret: &'a [u8],
+    calls: u32,
+}
+
+/// Answers password / pre-auth (OTP) prompts with password‖otp, once per prompt,
+/// at most twice per exchange. Refuses anything else (new-password prompts on an
+/// expired password, token selection menus) so a login can never change a password.
+unsafe extern "C" fn prompter(
+    ctx: KrbCtx,
+    data: *mut c_void,
+    _name: *const c_char,
+    _banner: *const c_char,
+    num: c_int,
+    prompts: *mut KrbPrompt,
+) -> i32 {
+    let st = &mut *(data as *mut PromptState);
+    st.calls += 1;
+    if st.calls > 2 || num <= 0 || prompts.is_null() {
+        return PROMPT_ABORT;
+    }
+    let types = krb5_get_prompt_types(ctx);
+    for i in 0..num as usize {
+        let p = &mut *prompts.add(i);
+        let ty = if types.is_null() { 0 } else { *types.add(i) };
+        let text = if p.prompt.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(p.prompt).to_string_lossy().to_ascii_lowercase()
+        };
+        let ok_type = ty == KRB5_PROMPT_TYPE_PASSWORD
+            || ty == KRB5_PROMPT_TYPE_PREAUTH
+            || (ty == 0
+                && p.hidden != 0
+                && (text.contains("otp") || text.contains("password") || text.contains("factor")));
+        if !ok_type || text.contains("new password") || p.reply.is_null() {
+            return PROMPT_ABORT;
+        }
+        let r = &mut *p.reply;
+        if (r.length as usize) < st.secret.len() || r.data.is_null() {
+            return PROMPT_ABORT;
+        }
+        ptr::copy_nonoverlapping(st.secret.as_ptr(), r.data as *mut u8, st.secret.len());
+        r.length = st.secret.len() as u32;
+    }
+    0
+}
+
+pub struct MitKerberos {
+    realm: String,
+    principal: String,
+    keytab: String,
+    host_service: String,
+    ticket_lifetime: i32,
+    armor_ccache: String,
+    /// End time of the current armour TGT (0 = none). Logins hold the read lock.
+    armor: RwLock<u64>,
+}
+
+impl MitKerberos {
+    pub fn new(cfg: &crate::config::KerberosConfig) -> MitKerberos {
+        MitKerberos {
+            realm: cfg.realm.clone(),
+            principal: cfg.principal.clone(),
+            keytab: format!("FILE:{}", cfg.keytab.display()),
+            host_service: cfg.host_service.clone(),
+            ticket_lifetime: cfg.ticket_lifetime_secs as i32,
+            armor_ccache: format!("MEMORY:plank-broker-armor-{}", std::process::id()),
+            armor: RwLock::new(0),
+        }
+    }
+
+    /// Obtain / refresh the FAST armour TGT from the keytab.
+    pub fn refresh_armor(&self, force: bool) -> Result<(), KrbError> {
+        {
+            let end = *self.armor.read().unwrap();
+            if !force && end > unix_now() + 600 {
+                return Ok(());
+            }
+        }
+        let mut end = self.armor.write().unwrap();
+        if !force && *end > unix_now() + 600 {
+            return Ok(());
+        }
+        let ctx = Ctx::new()?;
+        let princ = Princ::parse(&ctx, &self.principal)?;
+        let ktname = CString::new(self.keytab.clone()).unwrap();
+        let mut kt = ptr::null_mut();
+        let rc = unsafe { krb5_kt_resolve(ctx.0, ktname.as_ptr(), &mut kt) };
+        if rc != 0 {
+            return Err(KrbError::Unavailable(format!("keytab: {}", ctx.msg(rc))));
+        }
+        let cc = Cc::resolve(&ctx, &self.armor_ccache)?;
+        let opt = Opt::new(&ctx)?;
+        let mut creds = zero_creds();
+        let rc = unsafe {
+            krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
+            krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
+            let rc = krb5_get_init_creds_opt_set_out_ccache(ctx.0, opt.1, cc.1);
+            if rc != 0 {
+                rc
+            } else {
+                krb5_get_init_creds_keytab(ctx.0, &mut creds, princ.1, kt, 0, ptr::null(), opt.1)
+            }
+        };
+        unsafe { krb5_kt_close(ctx.0, kt) };
+        if rc != 0 {
+            let m = format!("armour TGT from keytab: {}", ctx.msg(rc));
+            return Err(KrbError::Unavailable(m));
+        }
+        *end = creds.times.endtime as u32 as u64;
+        unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+        Ok(())
+    }
+
+    fn gss_error(major: OmUint32, minor: OmUint32) -> String {
+        let mut out = String::new();
+        for (code, ty) in [(major, GSS_C_GSS_CODE), (minor, GSS_C_MECH_CODE)] {
+            if code == 0 {
+                continue;
+            }
+            let mut ctx_id: OmUint32 = 0;
+            loop {
+                let mut min = 0;
+                let mut buf = GssBuffer { length: 0, value: ptr::null_mut() };
+                let maj = unsafe { gss_display_status(&mut min, code, ty, ptr::null_mut(), &mut ctx_id, &mut buf) };
+                if maj != GSS_S_COMPLETE {
+                    break;
+                }
+                if !buf.value.is_null() {
+                    let s = unsafe { std::slice::from_raw_parts(buf.value as *const u8, buf.length) };
+                    if !out.is_empty() {
+                        out.push_str("; ");
+                    }
+                    out.push_str(&String::from_utf8_lossy(s));
+                }
+                unsafe { gss_release_buffer(&mut min, &mut buf) };
+                if ctx_id == 0 {
+                    break;
+                }
+            }
+        }
+        out
+    }
+}
+
+impl Kerberos for MitKerberos {
+    fn login(&self, username: &str, secret: &Zeroizing<String>) -> Result<UserTicket, KrbError> {
+        self.refresh_armor(false)?;
+        let _armor = self.armor.read().unwrap();
+        let ctx = Ctx::new()?;
+        let princ = Princ::parse(&ctx, &format!("{username}@{}", self.realm))?;
+        let ccname = format!("MEMORY:pb-{}", random_hex(16));
+        let cc = Cc::resolve(&ctx, &ccname)?;
+        let opt = Opt::new(&ctx)?;
+        let armor = CString::new(self.armor_ccache.clone()).unwrap();
+        let mut st = PromptState { secret: secret.as_bytes(), calls: 0 };
+        let mut creds = zero_creds();
+        let rc = unsafe {
+            krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
+            krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
+            krb5_get_init_creds_opt_set_tkt_life(opt.1, self.ticket_lifetime);
+            let mut rc = krb5_get_init_creds_opt_set_fast_ccache_name(ctx.0, opt.1, armor.as_ptr());
+            if rc == 0 {
+                rc = krb5_get_init_creds_opt_set_out_ccache(ctx.0, opt.1, cc.1);
+            }
+            if rc == 0 {
+                rc = krb5_get_init_creds_password(
+                    ctx.0,
+                    &mut creds,
+                    princ.1,
+                    ptr::null(),
+                    Some(prompter),
+                    &mut st as *mut PromptState as *mut c_void,
+                    0,
+                    ptr::null(),
+                    opt.1,
+                );
+            }
+            rc
+        };
+        if rc != 0 {
+            cc.destroy();
+            return Err(ctx.err(rc, "AS exchange"));
+        }
+        let end = creds.times.endtime as u32 as u64;
+        unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+        Ok(UserTicket { ccache: ccname, end_unix: end })
+    }
+
+    fn ap_req(&self, ccache: &str, fqdn: &str, cert_sha256: &[u8; 32]) -> Result<Vec<u8>, KrbError> {
+        let key = CString::new("ccache").unwrap();
+        let val = CString::new(ccache).map_err(|_| KrbError::Unavailable("bad ccache".into()))?;
+        let mut elem = GssKeyValueElement { key: key.as_ptr(), value: val.as_ptr() };
+        let store = GssKeyValueSet { count: 1, elements: &mut elem };
+        let target = format!("{}@{}", self.host_service, fqdn);
+        let mut minor: OmUint32 = 0;
+        let mut name: GssName = ptr::null_mut();
+        let mut cred: GssCred = ptr::null_mut();
+        let mut ctx: GssCtx = ptr::null_mut();
+        let mut cb_data = channel_binding_data(cert_sha256);
+        let mut out = GssBuffer { length: 0, value: ptr::null_mut() };
+        let result = unsafe {
+            let mut nbuf = GssBuffer { length: target.len(), value: target.as_ptr() as *mut c_void };
+            let maj = gss_import_name(&mut minor, &mut nbuf, GSS_C_NT_HOSTBASED_SERVICE, &mut name);
+            if maj != GSS_S_COMPLETE {
+                Err(KrbError::Unavailable(format!("import name: {}", Self::gss_error(maj, minor))))
+            } else {
+                let maj = gss_acquire_cred_from(
+                    &mut minor,
+                    ptr::null_mut(),
+                    GSS_C_INDEFINITE,
+                    ptr::null_mut(),
+                    GSS_C_INITIATE,
+                    &store,
+                    &mut cred,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                );
+                if maj != GSS_S_COMPLETE {
+                    Err(KrbError::Denied(format!("acquire cred: {}", Self::gss_error(maj, minor))))
+                } else {
+                    let mut cb = GssChannelBindings {
+                        initiator_addrtype: GSS_C_AF_UNSPEC,
+                        initiator_address: GssBuffer { length: 0, value: ptr::null_mut() },
+                        acceptor_addrtype: GSS_C_AF_UNSPEC,
+                        acceptor_address: GssBuffer { length: 0, value: ptr::null_mut() },
+                        application_data: GssBuffer {
+                            length: cb_data.len(),
+                            value: cb_data.as_mut_ptr() as *mut c_void,
+                        },
+                    };
+                    let maj = gss_init_sec_context(
+                        &mut minor,
+                        cred,
+                        &mut ctx,
+                        name,
+                        gss_mech_krb5,
+                        0,
+                        0,
+                        &mut cb,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        &mut out,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                    );
+                    if maj != GSS_S_COMPLETE {
+                        let m = Self::gss_error(maj, minor);
+                        if minor as i32 == KRB5_KDC_UNREACH {
+                            Err(KrbError::Unavailable(format!("init_sec_context: {m}")))
+                        } else {
+                            Err(KrbError::Denied(format!("init_sec_context: {m}")))
+                        }
+                    } else if out.value.is_null() || out.length == 0 {
+                        Err(KrbError::Unavailable("empty AP-REQ".into()))
+                    } else {
+                        Ok(std::slice::from_raw_parts(out.value as *const u8, out.length).to_vec())
+                    }
+                }
+            }
+        };
+        unsafe {
+            let mut m = 0;
+            if !out.value.is_null() {
+                gss_release_buffer(&mut m, &mut out);
+            }
+            if !ctx.is_null() {
+                gss_delete_sec_context(&mut m, &mut ctx, ptr::null_mut());
+            }
+            if !cred.is_null() {
+                gss_release_cred(&mut m, &mut cred);
+            }
+            if !name.is_null() {
+                gss_release_name(&mut m, &mut name);
+            }
+        }
+        result
+    }
+
+    fn destroy(&self, ccache: &str) {
+        if let Ok(ctx) = Ctx::new() {
+            if let Ok(cc) = Cc::resolve(&ctx, ccache) {
+                cc.destroy();
+            }
+        }
+    }
+}

@@ -471,6 +471,16 @@ if rg -q 'pam_succeed_if|ingroup' "$pam_policy"; then
   echo "PAM service retained product-specific account authorization" >&2
   exit 1
 fi
+# Brokered Kerberos admission uses its own PAM service with the same stack,
+# so account policy (FreeIPA HBAC) can grant remote access separately.
+pam_remote_policy="${repo_dir}/packaging/host/linux/pam/plank-remote"
+cmp -s <(rg -v '^#' "$pam_policy") <(rg -v '^#' "$pam_remote_policy") || {
+  echo "plank-remote PAM stack must match plank-host" >&2
+  exit 1
+}
+rg -Fq 'service_name = policy.gssapi_pam_service' "$pam_broker_source"
+rg -Fxq 'gssapi_pam_service = plank-remote' \
+  "$repo_dir/packaging/host/linux/config/plank-host.conf"
 rg -Fxq 'allow_root_login = false' \
   "$repo_dir/packaging/host/linux/config/plank-host.conf"
 rg -Fxq '/etc/pam.d/plank-host' "$host_spec"

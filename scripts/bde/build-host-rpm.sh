@@ -24,6 +24,9 @@
 #   PLANK_BDE_PLATFORM         docker --platform value (default linux/amd64)
 #   PLANK_BDE_IMAGE            base image ref (default pinned digest below,
 #                               same one build.yml uses)
+#   PLANK_BDE_BUILD_BRANCH     package branch qualifier (default bde-main);
+#                               lowercase kebab-case, becomes the RPM Release
+#                               (e.g. bde-broker -> ...0.bde_broker.1.el9)
 #   PLANK_BUILD_JOBS           parallel build jobs inside the container
 #                               (default 4, matching CI's PLANK_BUILD_JOBS)
 #
@@ -47,6 +50,11 @@ image=${PLANK_BDE_IMAGE:-rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd9320
 build_jobs=${PLANK_BUILD_JOBS:-4}
 deps_volume=${PLANK_BDE_DEPS_VOLUME:-plank-bde-host-deps}
 container_name=${PLANK_BDE_CONTAINER_NAME:-plank-bde-host-build}
+build_branch=${PLANK_BDE_BUILD_BRANCH:-bde-main}
+[[ $build_branch =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
+  echo "PLANK_BDE_BUILD_BRANCH must be lowercase kebab-case: $build_branch" >&2
+  exit 2
+}
 
 while (($#)); do
   case "$1" in
@@ -74,7 +82,7 @@ if [[ -n $(git -C "$repo_dir" status --porcelain --untracked-files=normal) ]]; t
   exit 1
 fi
 
-echo "==> budget: ${budget_seconds}s, platform: ${platform}, image: ${image}"
+echo "==> budget: ${budget_seconds}s, platform: ${platform}, image: ${image}, branch: ${build_branch}"
 echo "==> full log: $log_file"
 
 # The in-container script mirrors scripts/ci/{install-linux-deps,bootstrap,build}.sh
@@ -103,7 +111,7 @@ export PLANK_CARGO_ROOT=/deps/cargo
 # (see fork CLAUDE.md); export the sanitized equivalent explicitly rather
 # than renaming the branch, per AGENTS.md's own "set PLANK_BUILD_BRANCH
 # explicitly for every detached candidate worktree" guidance.
-export PLANK_BUILD_BRANCH=bde-main
+export PLANK_BUILD_BRANCH=${PLANK_BUILD_BRANCH:?}
 mkdir -p "$PLANK_WORK_ROOT" "$PLANK_DEP_ROOT" "$PLANK_ARTIFACT_ROOT"
 
 echo "===stage:prepare-checkout-tools==="
@@ -149,6 +157,7 @@ docker rm -f "$container_name" >/dev/null 2>&1 || true
 # script is normally launched from caps a single foreground call at 10
 # minutes, and macOS zsh has no GNU `timeout` by default.
 docker run --rm --platform "$platform" --name "$container_name" \
+  -e PLANK_BUILD_BRANCH="$build_branch" \
   -v "$repo_dir:/workspace" \
   -v "${deps_volume}:/deps" \
   "$image" \
