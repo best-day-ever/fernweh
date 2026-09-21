@@ -21,6 +21,7 @@ use crate::kerberos::FakeKerberos;
 use crate::pins::PinStore;
 use crate::probe::FakeProber;
 use crate::relay::{FakeRelay, RelayRequest};
+use crate::sessions::SessionStore;
 use crate::util::FakeClock;
 
 const IP: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
@@ -39,6 +40,9 @@ struct H {
     pins: Arc<PinStore>,
     audit: Arc<Audit>,
     clock: Arc<FakeClock>,
+    sessions: Arc<SessionStore>,
+    dir: Arc<FakeDirectory>,
+    cfg: Config,
 }
 
 fn harness_with(krb: FakeKerberos) -> H {
@@ -63,19 +67,40 @@ fn harness_cfg(krb: FakeKerberos, tweak: impl FnOnce(&mut Config)) -> H {
     let pins = Arc::new(PinStore::memory());
     let audit = Arc::new(Audit::memory());
     let clock = FakeClock::new();
+    let sessions = Arc::new(SessionStore::memory());
     let b = Broker::new(
-        cfg,
+        cfg.clone(),
         Deps {
             krb: krb.clone(),
-            dir,
+            dir: dir.clone(),
             relay: relay.clone(),
             prober: prober.clone(),
             pins: pins.clone(),
             audit: audit.clone(),
             clock: clock.clone(),
+            sessions: sessions.clone(),
         },
     );
-    H { b, krb, relay, prober, pins, audit, clock }
+    H { b, krb, relay, prober, pins, audit, clock, sessions, dir, cfg }
+}
+
+impl H {
+    /// A new broker process on the same disk state (session store), KDC and clock.
+    fn restart(&self) -> Arc<Broker> {
+        Broker::new(
+            self.cfg.clone(),
+            Deps {
+                krb: self.krb.clone(),
+                dir: self.dir.clone(),
+                relay: self.relay.clone(),
+                prober: self.prober.clone(),
+                pins: self.pins.clone(),
+                audit: self.audit.clone(),
+                clock: self.clock.clone(),
+                sessions: self.sessions.clone(),
+            },
+        )
+    }
 }
 
 fn harness() -> H {
@@ -974,4 +999,271 @@ async fn otp_method_unaffected_by_passkeys() {
     assert_eq!(Method::parse(None), Some(Method::PasswordOtp));
     assert_eq!(Method::parse(Some("passkey")), Some(Method::Passkey));
     assert_eq!(Method::parse(Some("PASSKEY")), None);
+}
+
+// ------------------------------------------------------------------ device-bound sessions (§14)
+
+mod device_sessions {
+    use super::*;
+    use crate::device::testkey::TestDevice;
+    use crate::device::{proof_message, DeviceKey, DeviceProof};
+    use crate::kerberos::LoginOptions;
+
+    const T0: u64 = 1_800_000_000; // FakeClock::unix() at start
+    const DAY: u64 = 86_400;
+
+    /// KDC issuing 24 h tickets renewable for 30 days (the §14.4 IPA policy).
+    fn kdc() -> FakeKerberos {
+        let mut k = FakeKerberos::new(&[("anna", "secret123456"), ("bob", "hunter2654321")]);
+        k.end_unix = T0 + DAY;
+        k.renew_till_unix = T0 + 30 * DAY;
+        k
+    }
+
+    fn device_key(d: &TestDevice) -> DeviceKey {
+        DeviceKey::from_spki(&d.spki()).unwrap()
+    }
+
+    fn proof(d: &TestDevice, method: &str, path: &str, time: u64, token: &str, body: &[u8]) -> DeviceProof {
+        let body_sha256 = crate::util::sha256(body);
+        DeviceProof {
+            method: method.into(),
+            path: path.into(),
+            time,
+            signature: d.sign(&proof_message(method, path, time, token, &body_sha256)),
+            body_sha256,
+        }
+    }
+
+    fn hosts_bearer<'a>(d: &TestDevice, token: &'a str, time: u64) -> Bearer<'a> {
+        Bearer { token, proof: Some(proof(d, "GET", "/v1/hosts", time, token, b"")) }
+    }
+
+    impl H {
+        async fn bound_login(&self, d: &TestDevice) -> crate::broker::AuthenticatedReply {
+            let c = self.b.auth_start_method(IP, "anna", Method::PasswordOtp, Some(device_key(d))).await.unwrap();
+            self.b.auth_respond(IP, &c.conversation_id, z(&["secret", "123456"])).await.unwrap()
+        }
+        fn now(&self) -> u64 {
+            crate::util::Clock::unix(&*self.clock)
+        }
+    }
+
+    use crate::broker::Bearer;
+
+    #[tokio::test]
+    async fn bound_login_is_renewable_persistent_and_long() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let r = h.bound_login(&d).await;
+        let j = serde_json::to_value(&r).unwrap();
+        assert_eq!(j["device_bound"], true);
+        assert_eq!(r.expires_in, 30 * DAY);
+        let want = LoginOptions { renew_life_secs: Some(30 * DAY as u32), persistent: true };
+        assert!(h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login anna {want:?}")));
+        let recs = h.sessions.load_all();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].username, "anna");
+        assert!(recs[0].ccache.starts_with("FILE:"));
+        assert_eq!(recs[0].device().unwrap(), device_key(&d));
+        assert_eq!(recs[0].key, hex::encode(crate::util::sha256(r.session_token.as_bytes())));
+        assert!(!serde_json::to_string(&recs[0]).unwrap().contains(&r.session_token), "token never stored");
+
+        // Unbound logins are unchanged: 10 h, in-memory ticket, no record, no flag.
+        let t = h.login_from(IP2, "bob", "hunter2", "654321").await.unwrap();
+        let bob = h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login bob {:?}", LoginOptions::default()));
+        assert!(bob);
+        assert_eq!(h.sessions.load_all().len(), 1);
+        assert!(h.b.list_hosts(IP2, &t).await.is_ok(), "unbound sessions need no proof");
+    }
+
+    #[tokio::test]
+    async fn bound_session_needs_a_fresh_unreplayed_proof() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let t = h.bound_login(&d).await.session_token;
+        let now = h.now();
+        // The token alone is useless.
+        assert_eq!(h.b.list_hosts(IP, &t).await.unwrap_err(), ApiError::Unauthorized);
+        let good = hosts_bearer(&d, &t, now);
+        assert!(h.b.list_hosts(IP, good.clone()).await.is_ok());
+        assert_eq!(h.b.list_hosts(IP, good).await.unwrap_err(), ApiError::Unauthorized, "replay");
+        // Stale / future times, a proof for another path, another key, another token.
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, now - 61)).await.is_err());
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, now + 61)).await.is_err());
+        let other_path = Bearer { token: &t, proof: Some(proof(&d, "POST", "/v1/logout", now, &t, b"{}")) };
+        assert!(h.b.list_hosts(IP, other_path).await.is_err(), "path/method are signed (GET /v1/hosts expected)");
+        assert!(h.b.list_hosts(IP, hosts_bearer(&TestDevice::new(), &t, now)).await.is_err());
+        let mut wrong_token = hosts_bearer(&d, "another-token", now);
+        wrong_token.token = &t;
+        assert!(h.b.list_hosts(IP, wrong_token).await.is_err());
+        // Failed proofs never end the session.
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, now + 1)).await.is_ok());
+        // connect / keepalive / logout carry proofs over their own path and body.
+        let path = format!("/v1/hosts/{WS1}/connect");
+        let b = Bearer { token: &t, proof: Some(proof(&d, "POST", &path, now, &t, b"{}")) };
+        assert!(h.b.connect(IP, b, WS1, "e").await.is_ok());
+        let path = format!("/v1/hosts/{WS1}/keepalive");
+        let b = Bearer { token: &t, proof: Some(proof(&d, "POST", &path, now, &t, b"{}")) };
+        assert!(h.b.keepalive(IP, b, WS1).await.is_ok());
+        let b = Bearer { token: &t, proof: Some(proof(&d, "POST", "/v1/logout", now, &t, b"{}")) };
+        h.b.logout(b).await.unwrap();
+        assert!(h.sessions.load_all().is_empty(), "logout removes the record");
+    }
+
+    #[tokio::test]
+    async fn tgt_is_renewed_and_the_session_lives_thirty_days() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let t = h.bound_login(&d).await.session_token;
+        // The reaper renews an hour before each ticket end (renew_before 2 h); the KDC
+        // extends by 24 h, capped at renew_till. Use it roughly every 5 days (idle 7 d).
+        let mut ticket_end = T0 + DAY;
+        let mut last_use = T0;
+        while ticket_end < T0 + 30 * DAY {
+            h.clock.advance(Duration::from_secs(ticket_end - 3600 - h.now()));
+            let next = (h.now() + DAY).min(T0 + 30 * DAY);
+            *h.krb.renewed_end_unix.lock().unwrap() = next;
+            h.b.reap().await;
+            ticket_end = next;
+            if h.now() - last_use >= 5 * DAY {
+                let r = h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await;
+                assert!(r.is_ok(), "{}: {:?}", (h.now() - T0) / DAY, r.err());
+                last_use = h.now();
+            }
+        }
+        assert!(h.krb.renewals() >= 28, "{} renewals", h.krb.renewals());
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.is_ok(), "still alive before day 30");
+        h.clock.advance(Duration::from_secs(DAY + 10));
+        h.b.reap().await;
+        assert_eq!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.unwrap_err(), ApiError::Unauthorized);
+        assert!(h.sessions.load_all().is_empty());
+    }
+
+    #[tokio::test]
+    async fn idle_week_and_refused_renewal_end_the_session() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        // Idle: renewed in the background, but nobody uses it for 7 days.
+        let t = h.bound_login(&d).await.session_token;
+        let mut ticket_end = T0 + DAY;
+        while h.now() < T0 + 7 * DAY {
+            h.clock.advance(Duration::from_secs(ticket_end - 3600 - h.now()));
+            ticket_end = h.now() + DAY;
+            *h.krb.renewed_end_unix.lock().unwrap() = ticket_end;
+            h.b.reap().await;
+        }
+        h.b.reap().await;
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.is_err());
+        assert!(h.audit.events().iter().any(|e| e["event"] == "session_end" && e["reason"] == "idle"));
+    }
+
+    #[tokio::test]
+    async fn refused_renewal_ends_the_session() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let t = h.bound_login(&d).await.session_token;
+        // Account disabled: the KDC refuses the renewal an hour before the ticket ends.
+        *h.krb.renew_fails.lock().unwrap() = true;
+        h.clock.advance(Duration::from_secs(DAY - 3600));
+        h.b.reap().await;
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.is_err());
+        assert!(h.audit.events().iter().any(|e| e["event"] == "session_end" && e["reason"] == "renewal_refused"));
+        assert!(h.sessions.load_all().is_empty());
+        // An unreachable KDC only postpones renewal; the ticket end is the backstop.
+        let h2 = harness_with(kdc());
+        let t2 = h2.bound_login(&d).await.session_token;
+        *h2.krb.renew_unavailable.lock().unwrap() = true;
+        h2.clock.advance(Duration::from_secs(DAY - 3600));
+        h2.b.reap().await;
+        assert_eq!(h2.krb.renewals(), 1);
+        assert!(h2.b.list_hosts(IP, hosts_bearer(&d, &t2, h2.now())).await.is_ok(), "postponed, still valid");
+        h2.clock.advance(Duration::from_secs(3600));
+        h2.b.reap().await;
+        assert!(h2.b.list_hosts(IP, hosts_bearer(&d, &t2, h2.now())).await.is_err(), "ticket ran out");
+    }
+
+    #[tokio::test]
+    async fn bound_sessions_survive_a_restart() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let bound = h.bound_login(&d).await.session_token;
+        let unbound = h.login_from(IP2, "bob", "hunter2", "654321").await.unwrap();
+        h.b.shutdown().await;
+        let destroyed = h.krb.destroyed.lock().unwrap().clone();
+        assert_eq!(destroyed.len(), 1, "only the unbound ticket is destroyed: {destroyed:?}");
+        assert!(destroyed[0].starts_with("MEMORY:"));
+
+        h.clock.advance(Duration::from_secs(600));
+        let b2 = h.restart();
+        assert_eq!(b2.restore_sessions(), 1);
+        assert!(b2.list_hosts(IP, hosts_bearer(&d, &bound, h.now())).await.is_ok());
+        assert_eq!(b2.list_hosts(IP2, &unbound).await.unwrap_err(), ApiError::Unauthorized);
+        // A record that expired while the broker was down is dropped on restore.
+        b2.shutdown().await;
+        h.clock.advance(Duration::from_secs(8 * DAY));
+        let b3 = h.restart();
+        assert_eq!(b3.restore_sessions(), 0);
+        assert!(h.sessions.load_all().is_empty());
+    }
+
+    #[tokio::test]
+    async fn passkey_login_binds_too() {
+        let mut k = FakeKerberos::new(&[]).with_passkey("anna", &CRED);
+        k.end_unix = T0 + DAY;
+        k.renew_till_unix = T0 + 30 * DAY;
+        let h = harness_cfg(k, |c| c.passkey.rp_id = Some(RP.into()));
+        let d = TestDevice::new();
+        let c = h.b.auth_start_method(IP, "anna", Method::Passkey, Some(device_key(&d))).await.unwrap();
+        let prompt = serde_json::to_value(&c).unwrap()["prompts"][0].clone();
+        let r = h.b.auth_respond_passkey(IP, &c.conversation_id, Some(sign(&prompt))).await.unwrap();
+        assert!(r.device_bound);
+        assert_eq!(r.expires_in, 30 * DAY);
+        let want = LoginOptions { renew_life_secs: Some(30 * DAY as u32), persistent: true };
+        assert!(h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login_passkey anna {want:?}")));
+        assert!(h.b.list_hosts(IP, &r.session_token).await.is_err());
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &r.session_token, h.now())).await.is_ok());
+        h.workers_settle(0).await;
+    }
+
+    #[tokio::test]
+    async fn http_device_key_and_proof_headers() {
+        let h = harness_with(kdc());
+        let app = crate::api::router(h.b.clone());
+        let d = TestDevice::new();
+        let spki = B64.encode(d.spki());
+        // A malformed key is a generic denial.
+        let (s, _, j) = call(&app, "POST", "/v1/auth/start", None, r#"{"username":"anna","device_key":"AAAA"}"#).await;
+        assert_eq!((s, j), (StatusCode::OK, serde_json::json!({"state":"denied"})));
+        let body = format!(r#"{{"username":"anna","device_key":"{spki}"}}"#);
+        let (_, _, j) = call(&app, "POST", "/v1/auth/start", None, &body).await;
+        let conv = j["conversation_id"].as_str().unwrap().to_string();
+        let body = format!(r#"{{"conversation_id":"{conv}","responses":["secret","123456"]}}"#);
+        let (_, _, j) = call(&app, "POST", "/v1/auth/respond", None, &body).await;
+        assert_eq!(j["device_bound"], true);
+        let tok = j["session_token"].as_str().unwrap().to_string();
+        // No proof → 401; proof headers → 200.
+        let (s, _, _) = call(&app, "GET", "/v1/hosts", Some(&tok), "").await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        let now = h.now();
+        let sig = B64.encode(proof(&d, "GET", "/v1/hosts", now, &tok, b"").signature);
+        let mut req = Request::builder()
+            .method("GET")
+            .uri("/v1/hosts")
+            .header("host", "remote.example.org:29000")
+            .header("authorization", format!("Bearer {tok}"))
+            .header("x-plank-device-time", now.to_string())
+            .header("x-plank-device-proof", sig)
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(std::net::SocketAddr::from(([203, 0, 113, 7], 50000))));
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Password-only clients keep the old shape: no device_bound field.
+        let (_, _, j) = call(&app, "POST", "/v1/auth/start", None, r#"{"username":"bob"}"#).await;
+        let conv = j["conversation_id"].as_str().unwrap().to_string();
+        let body = format!(r#"{{"conversation_id":"{conv}","responses":["hunter2","654321"]}}"#);
+        let (_, _, j) = call(&app, "POST", "/v1/auth/respond", None, &body).await;
+        assert!(j.get("device_bound").is_none());
+    }
 }

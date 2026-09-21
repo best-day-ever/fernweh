@@ -8,6 +8,7 @@ pub mod api;
 pub mod audit;
 pub mod broker;
 pub mod config;
+pub mod device;
 pub mod directory;
 pub mod hbac;
 pub mod kerberos;
@@ -20,6 +21,7 @@ pub mod pins;
 pub mod probe;
 pub mod ratelimit;
 pub mod relay;
+pub mod sessions;
 pub mod util;
 
 #[cfg(test)]

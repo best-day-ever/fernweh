@@ -97,9 +97,18 @@ reveal a session owner.
   it is not a filter. What keeps the paths apart is the KDC (IPA offers a user OTP
   or passkey, never both) and the prompters (the password prompter refuses the
   passkey plugin's prompts; the passkey prompter refuses all).
-- Sessions: 256-bit bearer, stored as SHA-256; 10 h absolute, 1 h idle, never past
-  the TGT end. In memory only: restarting the service signs everyone out and the
-  API resets the relay on start.
+- Sessions: 256-bit bearer, stored as SHA-256. Unbound: 10 h absolute, 1 h idle,
+  never past the TGT end, in memory only (a restart signs them out).
+- Device-bound sessions (bde-linux `docs/plank-broker.md` §14): `auth/start` may carry
+  `"device_key"` (P-256 SPKI, both methods); the reply then says `"device_bound":true`.
+  Every bearer call must carry `X-Plank-Device-Time` (±`device_proof_skew_secs`) and
+  `X-Plank-Device-Proof`, an ECDSA-P256-SHA256 signature over
+  `plank-device-proof-v1\n<METHOD>\n<path>\n<time>\n<hex sha256(token)>\n<hex sha256(body)>`
+  for the operation actually performed; replays and bad proofs are 401 without ending
+  the session. The login asks for a renewable TGT in a `FILE:` ccache under
+  `kerberos.session_dir`; the reaper renews it `renew_before_secs` before it ends (a
+  refusal ends the session). 30 d absolute / 7 d idle (`limits.device_session_*`).
+  Records (token hash, user, device key, times) survive restarts; leases do not.
 - Host set: members of host group `ldap.hostgroup` (nested groups included) ∩
   hosts named by enabled `allow` HBAC rules for `ldap.hbac_service` (directly or
   through a service group) that name the user (directly or through nested user

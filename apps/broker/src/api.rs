@@ -6,10 +6,12 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -21,8 +23,10 @@ use tower::ServiceExt;
 use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
 
-use crate::broker::{ApiError, Broker, Method};
+use crate::broker::{ApiError, Bearer, Broker, Method};
+use crate::device::{DeviceKey, DeviceProof};
 use crate::passkey::Assertion;
+use crate::util::sha256;
 use crate::util::valid_hostname;
 
 impl IntoResponse for ApiError {
@@ -68,6 +72,27 @@ fn bearer(h: &HeaderMap) -> Result<&str, ApiError> {
         .ok_or(ApiError::Unauthorized)
 }
 
+/// Bearer plus the optional device proof (§14.2) of this request. Malformed
+/// proof headers count as absent: a bound session then refuses the request.
+fn device_bearer<'a>(h: &'a HeaderMap, method: &str, path: &str, body: &[u8]) -> Result<Bearer<'a>, ApiError> {
+    let token = bearer(h)?;
+    let header = |name: &str| h.get(name).and_then(|v| v.to_str().ok()).map(str::trim);
+    let proof = match (header("x-plank-device-time"), header("x-plank-device-proof")) {
+        (Some(t), Some(sig)) if t.len() <= 20 && sig.len() <= 200 => match (t.parse::<u64>(), STANDARD.decode(sig)) {
+            (Ok(time), Ok(signature)) => Some(DeviceProof {
+                method: method.to_string(),
+                path: path.to_string(),
+                time,
+                signature,
+                body_sha256: sha256(body),
+            }),
+            _ => None,
+        },
+        _ => None,
+    };
+    Ok(Bearer { token, proof })
+}
+
 /// The host name the client used (Host header without port), else the configured name.
 fn endpoint(h: &HeaderMap, fallback: &str) -> String {
     h.get(header::HOST)
@@ -95,6 +120,9 @@ struct StartReq {
     /// Absent or `"password_otp"`: password + OTP; `"passkey"`: passkey (contract §13.3).
     #[serde(default)]
     method: Option<String>,
+    /// Base64 P-256 SPKI of the client's device key: binds the session (§14.2).
+    #[serde(default)]
+    device_key: Option<String>,
 }
 
 /// Exactly one of `responses` (password + OTP) and `passkey`.
@@ -120,7 +148,15 @@ struct PasskeyResp {
 async fn auth_start(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo<SocketAddr>, body: Bytes) -> Response {
     let Ok(req) = serde_json::from_slice::<StartReq>(&body) else { return auth_error(ApiError::BadRequest) };
     let Some(method) = Method::parse(req.method.as_deref()) else { return auth_error(ApiError::BadRequest) };
-    match b.auth_start_method(client_ip(&ci), &req.username, method).await {
+    let device = match req.device_key.as_deref() {
+        None => None,
+        Some(k) if k.len() <= 200 => match STANDARD.decode(k).ok().and_then(|der| DeviceKey::from_spki(&der)) {
+            Some(d) => Some(d),
+            None => return auth_error(ApiError::BadRequest),
+        },
+        Some(_) => return auth_error(ApiError::BadRequest),
+    };
+    match b.auth_start_method(client_ip(&ci), &req.username, method, device).await {
         Ok(r) => Json(r).into_response(),
         Err(e) => auth_error(e),
     }
@@ -151,8 +187,14 @@ async fn auth_respond(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo
     }
 }
 
-async fn hosts(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo<SocketAddr>, h: HeaderMap) -> Response {
-    let r = async { b.list_hosts(client_ip(&ci), bearer(&h)?).await }.await;
+async fn hosts(
+    State(b): State<Arc<Broker>>,
+    ConnectInfo(ci): ConnectInfo<SocketAddr>,
+    uri: Uri,
+    h: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let r = async { b.list_hosts(client_ip(&ci), device_bearer(&h, "GET", uri.path(), &body)?).await }.await;
     match r {
         Ok(r) => Json(r).into_response(),
         Err(e) => e.into_response(),
@@ -163,11 +205,13 @@ async fn connect(
     State(b): State<Arc<Broker>>,
     ConnectInfo(ci): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
+    uri: Uri,
     h: HeaderMap,
+    body: Bytes,
 ) -> Response {
     let ep = endpoint(&h, &b.cfg.public_endpoint);
     let r = async {
-        let t = bearer(&h)?;
+        let t = device_bearer(&h, "POST", uri.path(), &body)?;
         if !valid_hostname(&id) {
             return Err(ApiError::Denied);
         }
@@ -184,17 +228,19 @@ async fn keepalive(
     State(b): State<Arc<Broker>>,
     ConnectInfo(ci): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
+    uri: Uri,
     h: HeaderMap,
+    body: Bytes,
 ) -> Response {
-    let r = async { b.keepalive(client_ip(&ci), bearer(&h)?, &id).await }.await;
+    let r = async { b.keepalive(client_ip(&ci), device_bearer(&h, "POST", uri.path(), &body)?, &id).await }.await;
     match r {
         Ok(r) => Json(r).into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-async fn logout(State(b): State<Arc<Broker>>, h: HeaderMap) -> Response {
-    let r = async { b.logout(bearer(&h)?).await }.await;
+async fn logout(State(b): State<Arc<Broker>>, uri: Uri, h: HeaderMap, body: Bytes) -> Response {
+    let r = async { b.logout(device_bearer(&h, "POST", uri.path(), &body)?).await }.await;
     match r {
         Ok(()) => Json(json!({"state": "logged_out"})).into_response(),
         Err(e) => e.into_response(),
