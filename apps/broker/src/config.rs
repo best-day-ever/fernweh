@@ -58,6 +58,10 @@ pub struct KerberosConfig {
     /// Upper bound for the requested user TGT lifetime (seconds).
     #[serde(default = "d_ticket_lifetime")]
     pub ticket_lifetime_secs: u32,
+    /// Device-bound sessions (§14): session records and their `FILE:` ccaches.
+    /// Must be private to the broker (the systemd StateDirectory).
+    #[serde(default = "d_session_dir")]
+    pub session_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,10 +202,37 @@ pub struct Limits {
     /// Every `auth/respond` answer takes at least this long (constant-ish timing).
     #[serde(default = "d_1500")]
     pub min_respond_ms: u64,
+    /// Device-bound sessions (§14): absolute and idle lifetime. The TGT is renewed
+    /// in the background up to the absolute lifetime.
+    #[serde(default = "d_30_days")]
+    pub device_session_absolute_secs: u64,
+    #[serde(default = "d_7_days")]
+    pub device_session_idle_secs: u64,
+    /// Renew a device-bound session's TGT when less than this is left.
+    #[serde(default = "d_7200")]
+    pub renew_before_secs: u64,
+    /// Accepted clock skew of `X-Plank-Device-Time`; also the replay window.
+    #[serde(default = "d_60")]
+    pub device_proof_skew_secs: u64,
 }
 
 fn d_listen() -> SocketAddr {
     "0.0.0.0:29000".parse().unwrap()
+}
+fn d_session_dir() -> PathBuf {
+    "/var/lib/plank-broker/sessions".into()
+}
+fn d_30_days() -> u64 {
+    30 * 86400
+}
+fn d_7_days() -> u64 {
+    7 * 86400
+}
+fn d_7200() -> u64 {
+    7200
+}
+fn d_60() -> u64 {
+    60
 }
 fn d_keytab() -> PathBuf {
     "/etc/plank-broker/broker.keytab".into()
@@ -354,6 +385,16 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        let l = &self.limits;
+        if l.device_session_idle_secs == 0 || l.device_session_idle_secs > l.device_session_absolute_secs {
+            bail!("limits.device_session_idle_secs must be 1..=device_session_absolute_secs");
+        }
+        if l.device_proof_skew_secs == 0 || l.device_proof_skew_secs > 300 {
+            bail!("limits.device_proof_skew_secs must be 1..=300");
+        }
+        if !self.kerberos.session_dir.is_absolute() {
+            bail!("kerberos.session_dir must be absolute");
+        }
         let r = &self.relay;
         if r.port_min == 0 || r.port_min > r.port_max {
             bail!("relay.port_min/port_max: invalid range");

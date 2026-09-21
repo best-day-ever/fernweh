@@ -25,6 +25,7 @@ use std::sync::RwLock;
 
 use zeroize::Zeroizing;
 
+use crate::kerberos::LoginOptions;
 use crate::kerberos::{channel_binding_data, Kerberos, KrbError, PasskeyAsk, UserTicket};
 use crate::passkey::{Challenge, PA_TYPE as PA_REDHAT_PASSKEY};
 use crate::util::{random_hex, unix_now};
@@ -98,6 +99,17 @@ extern "C" {
     fn krb5_get_init_creds_opt_alloc(ctx: KrbCtx, out: *mut KrbOpt) -> i32;
     fn krb5_get_init_creds_opt_free(ctx: KrbCtx, opt: KrbOpt);
     fn krb5_get_init_creds_opt_set_tkt_life(opt: KrbOpt, life: i32);
+    fn krb5_get_init_creds_opt_set_renew_life(opt: KrbOpt, life: i32);
+    fn krb5_get_renewed_creds(
+        ctx: KrbCtx,
+        creds: *mut KrbCreds,
+        client: KrbPrincipal,
+        cc: KrbCcache,
+        in_tkt_service: *const c_char,
+    ) -> i32;
+    fn krb5_cc_get_principal(ctx: KrbCtx, cc: KrbCcache, out: *mut KrbPrincipal) -> i32;
+    fn krb5_cc_initialize(ctx: KrbCtx, cc: KrbCcache, principal: KrbPrincipal) -> i32;
+    fn krb5_cc_store_cred(ctx: KrbCtx, cc: KrbCcache, creds: *mut KrbCreds) -> i32;
     fn krb5_get_init_creds_opt_set_forwardable(opt: KrbOpt, v: c_int);
     fn krb5_get_init_creds_opt_set_proxiable(opt: KrbOpt, v: c_int);
     fn krb5_get_init_creds_opt_set_fast_ccache_name(ctx: KrbCtx, opt: KrbOpt, name: *const c_char) -> i32;
@@ -438,6 +450,8 @@ pub struct MitKerberos {
     keytab: String,
     host_service: String,
     ticket_lifetime: i32,
+    /// Directory for `FILE:` ccaches of device-bound sessions (§14).
+    session_dir: std::path::PathBuf,
     armor_ccache: String,
     /// End time of the current armour TGT (0 = none). Logins hold the read lock.
     armor: RwLock<u64>,
@@ -451,6 +465,7 @@ impl MitKerberos {
             keytab: format!("FILE:{}", cfg.keytab.display()),
             host_service: cfg.host_service.clone(),
             ticket_lifetime: cfg.ticket_lifetime_secs as i32,
+            session_dir: cfg.session_dir.clone(),
             armor_ccache: format!("MEMORY:plank-broker-armor-{}", std::process::id()),
             armor: RwLock::new(0),
         }
@@ -530,22 +545,48 @@ impl MitKerberos {
     }
 }
 
+impl MitKerberos {
+    fn user_ccache(&self, opts: LoginOptions) -> String {
+        if opts.persistent {
+            format!("FILE:{}/pb-{}.ccache", self.session_dir.display(), random_hex(16))
+        } else {
+            format!("MEMORY:pb-{}", random_hex(16))
+        }
+    }
+}
+
+/// Ticket options shared by both login paths.
+unsafe fn set_ticket_opts(opt: KrbOpt, lifetime: i32, opts: LoginOptions) {
+    krb5_get_init_creds_opt_set_forwardable(opt, 0);
+    krb5_get_init_creds_opt_set_proxiable(opt, 0);
+    krb5_get_init_creds_opt_set_tkt_life(opt, lifetime);
+    if let Some(renew) = opts.renew_life_secs {
+        krb5_get_init_creds_opt_set_renew_life(opt, renew.min(i32::MAX as u32) as i32);
+    }
+}
+
+fn ticket_of(ccache: String, creds: &KrbCreds) -> UserTicket {
+    UserTicket {
+        ccache,
+        end_unix: creds.times.endtime as u32 as u64,
+        renew_till_unix: creds.times.renew_till as u32 as u64,
+    }
+}
+
 impl Kerberos for MitKerberos {
-    fn login(&self, username: &str, secret: &Zeroizing<String>) -> Result<UserTicket, KrbError> {
+    fn login(&self, username: &str, secret: &Zeroizing<String>, opts: LoginOptions) -> Result<UserTicket, KrbError> {
         self.refresh_armor(false)?;
         let _armor = self.armor.read().unwrap();
         let ctx = Ctx::new()?;
         let princ = Princ::parse(&ctx, &format!("{username}@{}", self.realm))?;
-        let ccname = format!("MEMORY:pb-{}", random_hex(16));
+        let ccname = self.user_ccache(opts);
         let cc = Cc::resolve(&ctx, &ccname)?;
         let opt = Opt::new(&ctx)?;
         let armor = CString::new(self.armor_ccache.clone()).unwrap();
         let mut st = PromptState { secret: secret.as_bytes(), calls: 0 };
         let mut creds = zero_creds();
         let rc = unsafe {
-            krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
-            krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
-            krb5_get_init_creds_opt_set_tkt_life(opt.1, self.ticket_lifetime);
+            set_ticket_opts(opt.1, self.ticket_lifetime, opts);
             let mut preauth = [KRB5_PADATA_OTP_CHALLENGE];
             krb5_get_init_creds_opt_set_preauth_list(opt.1, preauth.as_mut_ptr(), preauth.len() as c_int);
             let mut rc = krb5_get_init_creds_opt_set_fast_ccache_name(ctx.0, opt.1, armor.as_ptr());
@@ -571,25 +612,28 @@ impl Kerberos for MitKerberos {
             cc.destroy();
             return Err(ctx.err(rc, "AS exchange"));
         }
-        let end = creds.times.endtime as u32 as u64;
+        let ticket = ticket_of(ccname, &creds);
         unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
-        Ok(UserTicket { ccache: ccname, end_unix: end })
+        Ok(ticket)
     }
 
-    fn login_passkey(&self, username: &str, ask: &mut PasskeyAsk<'_>) -> Result<UserTicket, KrbError> {
+    fn login_passkey(
+        &self,
+        username: &str,
+        ask: &mut PasskeyAsk<'_>,
+        opts: LoginOptions,
+    ) -> Result<UserTicket, KrbError> {
         self.refresh_armor(false)?;
         let ctx = Ctx::new()?;
         let princ = Princ::parse(&ctx, &format!("{username}@{}", self.realm))?;
-        let ccname = format!("MEMORY:pb-{}", random_hex(16));
+        let ccname = self.user_ccache(opts);
         let cc = Cc::resolve(&ctx, &ccname)?;
         let opt = Opt::new(&ctx)?;
         let armor = CString::new(self.armor_ccache.clone()).unwrap();
         let mut st = PasskeyState { ask, armor: Some(self.armor.read().unwrap()), asked: false };
         let mut creds = zero_creds();
         let rc = unsafe {
-            krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
-            krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
-            krb5_get_init_creds_opt_set_tkt_life(opt.1, self.ticket_lifetime);
+            set_ticket_opts(opt.1, self.ticket_lifetime, opts);
             let mut preauth = [PA_REDHAT_PASSKEY];
             krb5_get_init_creds_opt_set_preauth_list(opt.1, preauth.as_mut_ptr(), preauth.len() as c_int);
             let mut rc = krb5_get_init_creds_opt_set_fast_ccache_name(ctx.0, opt.1, armor.as_ptr());
@@ -624,9 +668,35 @@ impl Kerberos for MitKerberos {
             cc.destroy();
             return Err(ctx.err(rc, "AS exchange (passkey)"));
         }
-        let end = creds.times.endtime as u32 as u64;
+        let ticket = ticket_of(ccname, &creds);
         unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
-        Ok(UserTicket { ccache: ccname, end_unix: end })
+        Ok(ticket)
+    }
+
+    fn renew(&self, ccache: &str) -> Result<UserTicket, KrbError> {
+        let ctx = Ctx::new()?;
+        let cc = Cc::resolve(&ctx, ccache)?;
+        let mut client = ptr::null_mut();
+        let rc = unsafe { krb5_cc_get_principal(ctx.0, cc.1, &mut client) };
+        if rc != 0 {
+            return Err(ctx.err(rc, "renew: ccache principal"));
+        }
+        let client = Princ(&ctx, client);
+        let mut creds = zero_creds();
+        // Same as `kinit -R`: TGS renewal of the TGT, then replace the cache content.
+        let mut rc = unsafe { krb5_get_renewed_creds(ctx.0, &mut creds, client.1, cc.1, ptr::null()) };
+        if rc == 0 {
+            rc = unsafe { krb5_cc_initialize(ctx.0, cc.1, client.1) };
+        }
+        if rc == 0 {
+            rc = unsafe { krb5_cc_store_cred(ctx.0, cc.1, &mut creds) };
+        }
+        let ticket = ticket_of(ccache.to_string(), &creds);
+        unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+        if rc != 0 {
+            return Err(ctx.err(rc, "renew"));
+        }
+        Ok(ticket)
     }
 
     fn ap_req(&self, ccache: &str, fqdn: &str, cert_sha256: &[u8; 32]) -> Result<Vec<u8>, KrbError> {

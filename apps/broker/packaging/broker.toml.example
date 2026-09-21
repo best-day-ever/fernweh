@@ -15,6 +15,7 @@ principal = "HTTP/broker.example.org@EXAMPLE.ORG"
 keytab = "/etc/plank-broker/broker.keytab"  # plank-broker:root 0400
 host_service = "plank"                      # hosts are plank/<fqdn>@REALM (auth-ind otp)
 ticket_lifetime_secs = 36000
+session_dir = "/var/lib/plank-broker/sessions"  # device-bound sessions (records + FILE: ccaches)
 
 [ldap]
 uris = ["ldaps://ipa1.example.org:636", "ldaps://ipa2.example.org:636"]  # ldap:// = StartTLS
@@ -61,6 +62,10 @@ max_sessions = 500
 max_conversations = 1000
 max_connections = 256
 min_respond_ms = 1500
+device_session_absolute_secs = 2592000  # device-bound sessions: 30 d
+device_session_idle_secs = 604800       # 7 d
+renew_before_secs = 7200
+device_proof_skew_secs = 60
 
 # Passkey sign-in (auth/start with method "passkey"). Needs the SSSD client
 # plugin on this host (package sssd-passkey). Defaults shown.
