@@ -302,14 +302,14 @@ grep -Fq './usr/share/metainfo/la.instinctual.Plank.Client.appdata.xml' \
 }
 desktop_entry=$(dpkg-deb --fsys-tarfile "$deb_file" | \
   tar -xOf - ./usr/share/applications/la.instinctual.Plank.Client.desktop)
-grep -Fxq 'Name=PLANK Client' <<<"$desktop_entry" || {
-  echo "client desktop metadata does not identify PLANK Client" >&2
+grep -Fxq 'Name=BDE Fernweh Client' <<<"$desktop_entry" || {
+  echo "client desktop metadata does not identify BDE Fernweh Client" >&2
   exit 1
 }
 appstream_metadata=$(dpkg-deb --fsys-tarfile "$deb_file" | \
   tar -xOf - ./usr/share/metainfo/la.instinctual.Plank.Client.appdata.xml)
-grep -Fq '<name>PLANK Client</name>' <<<"$appstream_metadata" || {
-  echo "client AppStream metadata does not identify PLANK Client" >&2
+grep -Fq '<name>BDE Fernweh Client</name>' <<<"$appstream_metadata" || {
+  echo "client AppStream metadata does not identify BDE Fernweh Client" >&2
   exit 1
 }
 grep -Fq './usr/share/icons/hicolor/512x512/apps/plank-client.png' \

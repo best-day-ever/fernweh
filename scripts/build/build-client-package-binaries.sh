@@ -1143,8 +1143,8 @@ done
 echo "client_reconnect_local_event_gate=pass"
 
 for required_client_identity_token in \
-  'QGuiApplication::setApplicationDisplayName("PLANK Client");' \
-  'SDL_SetAppMetadata("PLANK Client",' \
+  'QGuiApplication::setApplicationDisplayName("BDE Fernweh Client");' \
+  'SDL_SetAppMetadata("BDE Fernweh Client",' \
   '"la.instinctual.Plank.Client");' \
   'app.setDesktopFileName("la.instinctual.Plank.Client");'; do
   rg -Fq "$required_client_identity_token" "$source_dir/app/main.cpp" || {
@@ -1174,8 +1174,8 @@ cmp --silent "$approved_client_logo" "$runtime_client_logo" || {
 echo "client_approved_logo_source_gate=pass"
 client_desktop="$source_dir/app/deploy/linux/la.instinctual.Plank.Client.desktop"
 client_appstream="$source_dir/app/deploy/linux/la.instinctual.Plank.Client.appdata.xml"
-rg -Fxq 'Name=PLANK Client' "$client_desktop" || {
-  echo "client desktop display name is not PLANK Client" >&2
+rg -Fxq 'Name=BDE Fernweh Client' "$client_desktop" || {
+  echo "client desktop display name is not BDE Fernweh Client" >&2
   exit 1
 }
 rg -Fxq 'StartupWMClass=la.instinctual.Plank.Client' \

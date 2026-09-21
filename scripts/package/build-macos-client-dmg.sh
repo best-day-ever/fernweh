@@ -17,7 +17,7 @@ build=${PLANK_MAC_CLIENT_BUILD:-"$output/build"}
 # An explicitly retained build is reconfigured/rebuilt, never trusted blindly.
 bash "$source_root/scripts/build/build-macos-client.sh" "$source_root" "$build"
 mkdir "$output/image"
-app="$output/image/PLANK Client.app"
+app="$output/image/BDE Fernweh Client.app"
 ditto "$build/app/plank-client.app" "$app"
 "$PLANK_QT_ROOT/bin/macdeployqt" "$app" \
     "-qmldir=$source_root/apps/client/app/gui" -always-overwrite -no-strip
@@ -95,7 +95,7 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :PLANKVersion' "$app/Contents/Info.pli
 ln -s /Applications "$output/image/Applications"
 dmg="$output/plank-client_${PLANK_PACKAGE_VERSION}_arm64.dmg"
 python3 "$source_root/scripts/test/check-package-build-paths.py" "$app"
-hdiutil create -volname "PLANK Client $PLANK_PACKAGE_VERSION" -srcfolder "$output/image" -format UDZO "$dmg"
+hdiutil create -volname "BDE Fernweh Client $PLANK_PACKAGE_VERSION" -srcfolder "$output/image" -format UDZO "$dmg"
 codesign --timestamp --sign "$PLANK_MACOS_SIGNING_IDENTITY" "$dmg"
 notary_flags=(--keychain-profile "$PLANK_NOTARY_PROFILE")
 if [[ -n ${PLANK_NOTARY_KEYCHAIN:-} ]]; then
