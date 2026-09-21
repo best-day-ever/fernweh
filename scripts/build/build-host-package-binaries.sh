@@ -1090,7 +1090,7 @@ env \
   -DPLANK_TRANSPORT_DIR="$plank_transport_dir" \
   -DPLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features"
 cmake --build "$build_dir" --parallel "$build_jobs" \
-  --target sunshine plank-pam-broker plank-host-supervisor
+  --target sunshine plank-pam-broker plank-host-supervisor pam_plank_handoff
 
 nm -C "$build_dir/plank-host" | \
   rg ' [Tt] plank_transport_abi_version$' >/dev/null || {
@@ -1242,4 +1242,9 @@ echo "host_web_ui_absence_gate=pass"
 echo "host_binary=${build_dir}/plank-host"
 echo "pam_broker_binary=${build_dir}/plank-pam-broker"
 echo "host_supervisor_binary=${build_dir}/plank-host-supervisor"
+readelf -d "$build_dir/pam_plank_handoff.so" | rg -q '\(NEEDED\).*libpam\.so' || {
+  echo "GDM handoff PAM module does not link libpam" >&2
+  exit 1
+}
+echo "pam_handoff_module=${build_dir}/pam_plank_handoff.so"
 echo "host_package_binary_gate=pass"

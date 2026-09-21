@@ -124,6 +124,13 @@ stream ends. It skips the lock if a stream or launch is active again by then,
 so a reconnect or takeover by the desktop owner does not land on a lock
 screen. The GDM greeter is never locked.
 
+With `security.desktop_handoff = true`, an admitted stream finishes the login
+on the workstation: at the GDM greeter the host signs the account in through a
+one-shot root-only pass consumed by `pam_plank_handoff.so` in `gdm-password`
+(no second prompt), and on the account's own locked desktop it calls logind
+`UnlockSession`. Only one account streams at a time. Details:
+`apps/host/linux/docs/plank-desktop-handoff.md`.
+
 The host implementation, verification tools and the full admission checklist
 are described in `apps/host/linux/docs/plank-gssapi-admission.md`.
 

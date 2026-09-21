@@ -89,6 +89,7 @@ fi
 /usr/libexec/plank/plank-host
 /usr/libexec/plank/plank-host-supervisor
 /usr/libexec/plank/plank-pam-broker
+/usr/lib64/security/pam_plank_handoff.so
 /usr/libexec/plank/plank-host-certificate
 /usr/libexec/plank/plank-host-state
 /usr/libexec/plank/plank-display-prepare
