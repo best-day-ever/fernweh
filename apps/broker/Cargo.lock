@@ -1044,6 +1044,7 @@ dependencies = [
  "ldap3",
  "libc",
  "rand",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

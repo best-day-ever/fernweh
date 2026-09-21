@@ -14,13 +14,26 @@ use crate::passkey::{Assertion, Challenge};
 /// (conversation expired or abandoned) and aborts the exchange.
 pub type PasskeyAsk<'a> = dyn FnMut(&Challenge) -> Option<Assertion> + 'a;
 
-/// A user TGT living in a per-session `MEMORY:` credential cache.
+/// A user TGT in a per-session credential cache: `MEMORY:<random>`, or for a
+/// device-bound session (§14) `FILE:<sessions dir>/<random>.ccache`, which
+/// survives broker restarts.
 #[derive(Debug, Clone)]
 pub struct UserTicket {
-    /// Full ccache name, `MEMORY:<random>`.
+    /// Full ccache name.
     pub ccache: String,
-    /// Ticket end time (unix seconds). Sessions never outlive it.
+    /// Ticket end time (unix seconds).
     pub end_unix: u64,
+    /// Renewable until (unix seconds); `0` when the ticket is not renewable.
+    pub renew_till_unix: u64,
+}
+
+/// Per-login ticket options.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LoginOptions {
+    /// Request a renewable TGT for this many seconds (the KDC may shorten it).
+    pub renew_life_secs: Option<u32>,
+    /// Keep the TGT in a `FILE:` ccache under the sessions directory.
+    pub persistent: bool,
 }
 
 #[derive(Debug)]
@@ -44,13 +57,23 @@ impl std::fmt::Display for KrbError {
 pub trait Kerberos: Send + Sync {
     /// FAST-armoured AS exchange for `username@REALM`; `secret` is password‖otp and
     /// answers the KDC's single OTP prompt.
-    fn login(&self, username: &str, secret: &Zeroizing<String>) -> Result<UserTicket, KrbError>;
+    fn login(&self, username: &str, secret: &Zeroizing<String>, opts: LoginOptions) -> Result<UserTicket, KrbError>;
 
     /// FAST-armoured AS exchange answered with a passkey (`PA-REDHAT-PASSKEY`). The
     /// KDC challenge goes to `ask`; its assertion becomes the phase-2 answer. Nothing
     /// else is ever answered (no password prompts). A user the KDC offers no passkey
     /// challenge for fails without calling `ask`.
-    fn login_passkey(&self, username: &str, ask: &mut PasskeyAsk<'_>) -> Result<UserTicket, KrbError>;
+    fn login_passkey(
+        &self,
+        username: &str,
+        ask: &mut PasskeyAsk<'_>,
+        opts: LoginOptions,
+    ) -> Result<UserTicket, KrbError>;
+
+    /// Renew the TGT in `ccache` in place (TGS renewal, like `kinit -R`). Fails once
+    /// the renew limit is reached or the KDC refuses (account disabled, locked,
+    /// policy); the caller then ends the session.
+    fn renew(&self, ccache: &str) -> Result<UserTicket, KrbError>;
 
     /// One-shot GSSAPI AP-REQ (no mutual auth) for `<host_service>@<fqdn>` from the
     /// session ccache, with `tls-server-end-point` channel bindings over `cert_sha256`.
@@ -88,6 +111,11 @@ pub struct FakeKerberos {
     /// Hosts for which the KDC refuses a service ticket (e.g. password-only TGT).
     pub policy_denied_hosts: Vec<String>,
     pub end_unix: u64,
+    /// `renew_till` of issued tickets (0 = not renewable) and what `renew` returns.
+    pub renew_till_unix: u64,
+    pub renewed_end_unix: Mutex<u64>,
+    pub renew_fails: Mutex<bool>,
+    pub renew_unavailable: Mutex<bool>,
     pub unavailable: bool,
     pub log: Mutex<Vec<String>>,
     pub destroyed: Mutex<Vec<String>>,
@@ -102,6 +130,10 @@ impl FakeKerberos {
             passkey_domain: "ipa.example.org".into(),
             policy_denied_hosts: Vec::new(),
             end_unix: u64::MAX,
+            renew_till_unix: 0,
+            renewed_end_unix: Mutex::new(u64::MAX),
+            renew_fails: Mutex::new(false),
+            renew_unavailable: Mutex::new(false),
             unavailable: false,
             log: Mutex::new(Vec::new()),
             destroyed: Mutex::new(Vec::new()),
@@ -122,10 +154,19 @@ impl FakeKerberos {
         self.log.lock().unwrap().iter().filter(|l| l.starts_with("login_passkey ")).count()
     }
 
-    fn ticket(&self) -> UserTicket {
+    pub fn renewals(&self) -> usize {
+        self.log.lock().unwrap().iter().filter(|l| l.starts_with("renew ")).count()
+    }
+
+    fn ticket(&self, opts: LoginOptions) -> UserTicket {
         let mut c = self.counter.lock().unwrap();
         *c += 1;
-        UserTicket { ccache: format!("MEMORY:fake{}", *c), end_unix: self.end_unix }
+        let kind = if opts.persistent { "FILE:/fake/sessions/" } else { "MEMORY:" };
+        UserTicket {
+            ccache: format!("{kind}fake{}", *c),
+            end_unix: self.end_unix,
+            renew_till_unix: if opts.renew_life_secs.is_some() { self.renew_till_unix } else { 0 },
+        }
     }
 }
 
@@ -157,21 +198,26 @@ fn fake_verify(answer: &str, ch: &Challenge, credential_id: &[u8]) -> bool {
 }
 
 impl Kerberos for FakeKerberos {
-    fn login(&self, username: &str, secret: &Zeroizing<String>) -> Result<UserTicket, KrbError> {
-        self.log.lock().unwrap().push(format!("login {username}"));
+    fn login(&self, username: &str, secret: &Zeroizing<String>, opts: LoginOptions) -> Result<UserTicket, KrbError> {
+        self.log.lock().unwrap().push(format!("login {username} {opts:?}"));
         if self.unavailable {
             return Err(KrbError::Unavailable("fake kdc down".into()));
         }
         match self.users.get(username) {
-            Some(s) if s.as_str() == secret.as_str() => Ok(self.ticket()),
+            Some(s) if s.as_str() == secret.as_str() => Ok(self.ticket(opts)),
             _ => Err(KrbError::Denied("Preauthentication failed".into())),
         }
     }
 
-    fn login_passkey(&self, username: &str, ask: &mut PasskeyAsk<'_>) -> Result<UserTicket, KrbError> {
+    fn login_passkey(
+        &self,
+        username: &str,
+        ask: &mut PasskeyAsk<'_>,
+        opts: LoginOptions,
+    ) -> Result<UserTicket, KrbError> {
         use base64::engine::general_purpose::STANDARD;
         use base64::Engine;
-        self.log.lock().unwrap().push(format!("login_passkey {username}"));
+        self.log.lock().unwrap().push(format!("login_passkey {username} {opts:?}"));
         if self.unavailable {
             return Err(KrbError::Unavailable("fake kdc down".into()));
         }
@@ -193,7 +239,7 @@ impl Kerberos for FakeKerberos {
         let Some(a) = ask(&ch) else { return Err(KrbError::Denied("responder gave up".into())) };
         let Some(answer) = ch.answer(&a) else { return Err(KrbError::Denied("no answer".into())) };
         if fake_verify(&answer, &ch, cred) {
-            Ok(self.ticket())
+            Ok(self.ticket(opts))
         } else {
             Err(KrbError::Denied("Preauthentication failed".into()))
         }
@@ -211,6 +257,24 @@ impl Kerberos for FakeKerberos {
         tok.extend_from_slice(fqdn.as_bytes());
         tok.extend_from_slice(&channel_binding_data(cert_sha256));
         Ok(tok)
+    }
+
+    fn renew(&self, ccache: &str) -> Result<UserTicket, KrbError> {
+        self.log.lock().unwrap().push(format!("renew {ccache}"));
+        if self.destroyed.lock().unwrap().iter().any(|d| d == ccache) {
+            return Err(KrbError::Denied("No credentials cache found".into()));
+        }
+        if *self.renew_unavailable.lock().unwrap() {
+            return Err(KrbError::Unavailable("fake kdc down".into()));
+        }
+        if *self.renew_fails.lock().unwrap() {
+            return Err(KrbError::Denied("Client's credentials have been revoked".into()));
+        }
+        Ok(UserTicket {
+            ccache: ccache.to_string(),
+            end_unix: *self.renewed_end_unix.lock().unwrap(),
+            renew_till_unix: self.renew_till_unix,
+        })
     }
 
     fn destroy(&self, ccache: &str) {

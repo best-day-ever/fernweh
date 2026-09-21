@@ -18,14 +18,16 @@ use zeroize::Zeroizing;
 
 use crate::audit::Audit;
 use crate::config::Config;
+use crate::device::{proof_message, DeviceKey, DeviceProof};
 use crate::directory::{DirError, Directory};
 use crate::hbac::{assigned_hosts, DirectoryView, UserView};
-use crate::kerberos::{Kerberos, KrbError, UserTicket};
+use crate::kerberos::{Kerberos, KrbError, LoginOptions, UserTicket};
 use crate::passkey::{Assertion, Challenge, PromptData};
 use crate::pins::{PinCheck, PinStore};
 use crate::probe::Prober;
 use crate::ratelimit::RateLimiter;
 use crate::relay::{Relay, RelayRequest};
+use crate::sessions::{SessionRecord, SessionStore};
 use crate::util::{random_token, sha256, valid_username, Clock};
 
 // ---------------------------------------------------------------- replies
@@ -78,6 +80,29 @@ pub struct AuthenticatedReply {
     pub session_token: String,
     pub expires_in: u64,
     pub username: String,
+    /// Present (true) only for sessions bound to a device key (§14.2).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub device_bound: bool,
+}
+
+/// A bearer credential as presented on one request: the token plus, for a
+/// device-bound session, the proof headers (§14.2).
+#[derive(Debug, Clone)]
+pub struct Bearer<'a> {
+    pub token: &'a str,
+    pub proof: Option<DeviceProof>,
+}
+
+impl<'a> From<&'a str> for Bearer<'a> {
+    fn from(token: &'a str) -> Self {
+        Bearer { token, proof: None }
+    }
+}
+
+impl<'a> From<&'a String> for Bearer<'a> {
+    fn from(token: &'a String) -> Self {
+        Bearer { token, proof: None }
+    }
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -138,6 +163,8 @@ struct Conversation {
     ip: IpAddr,
     created: Instant,
     auth: ConvAuth,
+    /// Device key from `auth/start` (§14): the session will be bound to it.
+    device: Option<DeviceKey>,
 }
 
 enum ConvAuth {
@@ -181,17 +208,47 @@ impl Drop for WorkerCount {
 /// How long `respond` waits for the KDC to judge a passkey answer.
 const PASSKEY_VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Session times are unix seconds: device-bound sessions are persisted and
+/// outlive both the process and (after a reboot) any monotonic clock.
 struct Session {
     /// Short correlation id for logs (prefix of the token hash).
     id: String,
     username: String,
     ccache: String,
-    created: Instant,
-    last_used: Instant,
-    /// Absolute end: min(10 h, TGT end).
-    ends: Instant,
+    created_unix: u64,
+    last_used_unix: u64,
+    /// Absolute end. Unbound: min(session_absolute, TGT end). Bound: min(device
+    /// absolute, renew_till); the TGT itself is renewed before `ticket_end_unix`.
+    ends_unix: u64,
+    /// Device key the session is bound to (§14), `None` for an unbound session.
+    device: Option<DeviceKey>,
+    ticket_end_unix: u64,
+    renew_till_unix: u64,
+    /// Accepted proofs (SHA-256 of the signature → proof time), for replay refusal.
+    proofs: HashMap<[u8; 32], u64>,
+    /// `last_used_unix` as last written to the session record.
+    persisted_last_used: u64,
     /// Every (client, port) this session ever leased: flushed from conntrack at the end.
     ports_used: Vec<(Ipv4Addr, u16)>,
+}
+
+impl Session {
+    fn record(&self, key: &[u8; 32]) -> Option<SessionRecord> {
+        let device = self.device.as_ref()?;
+        Some(SessionRecord {
+            v: 1,
+            key: hex::encode(key),
+            id: self.id.clone(),
+            username: self.username.clone(),
+            ccache: self.ccache.clone(),
+            device_key: SessionRecord::encode_device(device),
+            created_unix: self.created_unix,
+            last_used_unix: self.last_used_unix,
+            ends_unix: self.ends_unix,
+            ticket_end_unix: self.ticket_end_unix,
+            renew_till_unix: self.renew_till_unix,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -241,6 +298,7 @@ pub struct Deps {
     pub pins: Arc<PinStore>,
     pub audit: Arc<Audit>,
     pub clock: Arc<dyn Clock>,
+    pub sessions: Arc<SessionStore>,
 }
 
 pub struct Broker {
@@ -331,8 +389,17 @@ impl Broker {
     }
 
     pub fn auth_start(&self, ip: IpAddr, username: &str) -> Result<ChallengeReply, ApiError> {
+        self.auth_start_device(ip, username, None)
+    }
+
+    fn auth_start_device(
+        &self,
+        ip: IpAddr,
+        username: &str,
+        device: Option<DeviceKey>,
+    ) -> Result<ChallengeReply, ApiError> {
         let username = self.start_checks(ip, username)?;
-        let conv = Conversation { username, ip, created: self.now(), auth: ConvAuth::PasswordOtp };
+        let conv = Conversation { username, ip, created: self.now(), auth: ConvAuth::PasswordOtp, device };
         let id = self.insert_conversation(&mut self.st.lock().unwrap(), conv)?;
         Ok(ChallengeReply { state: "challenge", conversation_id: id, prompts: PROMPTS.to_vec() })
     }
@@ -342,10 +409,23 @@ impl Broker {
         ip: IpAddr,
         username: &str,
         method: Method,
+        device: Option<DeviceKey>,
     ) -> Result<ChallengeReply, ApiError> {
         match method {
-            Method::PasswordOtp => self.auth_start(ip, username),
-            Method::Passkey => self.auth_start_passkey(ip, username).await,
+            Method::PasswordOtp => self.auth_start_device(ip, username, device),
+            Method::Passkey => self.auth_start_passkey_device(ip, username, device).await,
+        }
+    }
+
+    /// Ticket options for a login: device-bound logins get a renewable TGT in a
+    /// persistent ccache (§14.3).
+    fn login_options(&self, device: &Option<DeviceKey>) -> LoginOptions {
+        match device {
+            Some(_) => LoginOptions {
+                renew_life_secs: Some(self.cfg.limits.device_session_absolute_secs.min(u32::MAX as u64) as u32),
+                persistent: true,
+            },
+            None => LoginOptions::default(),
         }
     }
 
@@ -354,9 +434,19 @@ impl Broker {
     /// passkey challenge (unknown, OTP user, invalid name, KDC down or slow) gets a
     /// synthetic challenge of the same shape, so the reply never reveals which.
     pub async fn auth_start_passkey(&self, ip: IpAddr, username: &str) -> Result<ChallengeReply, ApiError> {
+        self.auth_start_passkey_device(ip, username, None).await
+    }
+
+    async fn auth_start_passkey_device(
+        &self,
+        ip: IpAddr,
+        username: &str,
+        device: Option<DeviceKey>,
+    ) -> Result<ChallengeReply, ApiError> {
         let username = self.start_checks(ip, username)?;
         let slot = self.reserve_passkey_slot()?;
-        let worker = if valid_username(&username) { self.spawn_passkey(&username).await } else { None };
+        let opts = self.login_options(&device);
+        let worker = if valid_username(&username) { self.spawn_passkey(&username, opts).await } else { None };
         let passkey = match &worker {
             Some(w) => {
                 if w.challenge.domain != self.passkey_rp_id {
@@ -369,7 +459,7 @@ impl Broker {
             }
             None => PromptData::synthetic(&self.passkey_rp_id),
         };
-        let conv = Conversation { username, ip, created: self.now(), auth: ConvAuth::Passkey(worker) };
+        let conv = Conversation { username, ip, created: self.now(), auth: ConvAuth::Passkey(worker), device };
         let id = {
             let mut st = self.st.lock().unwrap();
             st.passkey_starting -= 1;
@@ -407,7 +497,7 @@ impl Broker {
 
     /// Start the KDC exchange for `username` on a worker thread and wait for its
     /// challenge. `None` when the KDC offers none within the timeout.
-    async fn spawn_passkey(&self, username: &str) -> Option<PasskeyWorker> {
+    async fn spawn_passkey(&self, username: &str, opts: LoginOptions) -> Option<PasskeyWorker> {
         let (ch_tx, ch_rx) = tokio::sync::oneshot::channel::<Challenge>();
         let (ans_tx, ans_rx) = std::sync::mpsc::sync_channel::<Assertion>(1);
         let (res_tx, mut res_rx) = tokio::sync::oneshot::channel();
@@ -424,7 +514,7 @@ impl Broker {
                 // conversation lifetime passes in real time (backstop).
                 ans_rx.recv_timeout(wait).ok()
             };
-            let r = krb.login_passkey(&user, &mut ask);
+            let r = krb.login_passkey(&user, &mut ask, opts);
             if let Err(Ok(t)) = res_tx.send(r) {
                 krb.destroy(&t.ccache);
             }
@@ -485,12 +575,12 @@ impl Broker {
         ip: IpAddr,
         conversation_id: &str,
         method: Method,
-    ) -> Result<(String, ConvAuth), ApiError> {
+    ) -> Result<(String, ConvAuth, Option<DeviceKey>), ApiError> {
         let now = self.now();
         let conv = self.st.lock().unwrap().conversations.remove(conversation_id);
         let Some(conv) = conv else { return Err(ApiError::Denied) };
         let conv_method = conv.method();
-        let Conversation { username: user, ip: conv_ip, created, auth } = conv;
+        let Conversation { username: user, ip: conv_ip, created, auth, device } = conv;
         if now.duration_since(created) >= Duration::from_secs(self.cfg.limits.conversation_ttl_secs) || conv_ip != ip {
             self.audit(
                 "login_fail",
@@ -505,7 +595,7 @@ impl Broker {
             self.fail(&user, ip, conv_method, "malformed");
             return Err(ApiError::Denied);
         }
-        Ok((user, auth))
+        Ok((user, auth, device))
     }
 
     /// Make room for one more session, or refuse.
@@ -527,7 +617,7 @@ impl Broker {
         responses: Vec<Zeroizing<String>>,
     ) -> Result<AuthenticatedReply, ApiError> {
         let m = Method::PasswordOtp;
-        let (user, _) = self.take_conversation(ip, conversation_id, m)?;
+        let (user, _, device) = self.take_conversation(ip, conversation_id, m)?;
         let well_formed = responses.len() == 2
             && !responses[0].is_empty()
             && responses[0].len() <= 1024
@@ -545,10 +635,11 @@ impl Broker {
         drop(responses);
         let krb = self.d.krb.clone();
         let u = user.clone();
-        let res = tokio::task::spawn_blocking(move || krb.login(&u, &secret))
+        let opts = self.login_options(&device);
+        let res = tokio::task::spawn_blocking(move || krb.login(&u, &secret, opts))
             .await
             .unwrap_or_else(|_| Err(KrbError::Unavailable("login task panicked".into())));
-        self.finish_login(user, ip, m, res)
+        self.finish_login(user, ip, m, res, device)
     }
 
     /// Passkey respond; `assertion` is `None` when the client's fields failed
@@ -572,7 +663,7 @@ impl Broker {
         assertion: Option<Assertion>,
     ) -> Result<AuthenticatedReply, ApiError> {
         let m = Method::Passkey;
-        let (user, auth) = self.take_conversation(ip, conversation_id, m)?;
+        let (user, auth, device) = self.take_conversation(ip, conversation_id, m)?;
         let ConvAuth::Passkey(worker) = auth else { return Err(ApiError::Denied) };
         let Some(a) = assertion else {
             self.fail(&user, ip, m, "malformed");
@@ -603,7 +694,7 @@ impl Broker {
             Ok(Err(_)) => Err(KrbError::Unavailable("passkey worker ended without a result".into())),
             Err(_) => Err(KrbError::Unavailable("no KDC verdict on the passkey answer in time".into())),
         };
-        self.finish_login(user, ip, m, res)
+        self.finish_login(user, ip, m, res, device)
     }
 
     /// Turn a KDC result into a session (or a generic denial).
@@ -613,6 +704,7 @@ impl Broker {
         ip: IpAddr,
         m: Method,
         res: Result<UserTicket, KrbError>,
+        device: Option<DeviceKey>,
     ) -> Result<AuthenticatedReply, ApiError> {
         let ticket = match res {
             Ok(t) => t,
@@ -630,7 +722,6 @@ impl Broker {
                 return Err(ApiError::Denied);
             }
         };
-        let now = self.now();
         let unix = self.d.clock.unix();
         let tgt_left = ticket.end_unix.saturating_sub(unix);
         if tgt_left < 60 {
@@ -638,65 +729,154 @@ impl Broker {
             self.fail(&user, ip, m, "ticket_lifetime");
             return Err(ApiError::Denied);
         }
-        let life = tgt_left.min(self.cfg.limits.session_absolute_secs);
+        // A bound session lives as long as the TGT can be renewed (the KDC may grant
+        // less than asked); without a renewable ticket it falls back to the TGT end.
+        let life = match &device {
+            Some(_) => ticket
+                .renew_till_unix
+                .max(ticket.end_unix)
+                .saturating_sub(unix)
+                .min(self.cfg.limits.device_session_absolute_secs),
+            None => tgt_left.min(self.cfg.limits.session_absolute_secs),
+        };
         let token = random_token();
         let key = sha256(token.as_bytes());
         let id = hex::encode(&key[..6]);
         self.limiter.lock().unwrap().success(&user, ip);
-        self.st.lock().unwrap().sessions.insert(
-            key,
-            Session {
-                id: id.clone(),
-                username: user.clone(),
-                ccache: ticket.ccache,
-                created: now,
-                last_used: now,
-                ends: now + Duration::from_secs(life),
-                ports_used: Vec::new(),
-            },
-        );
+        let bound = device.is_some();
+        let session = Session {
+            id: id.clone(),
+            username: user.clone(),
+            ccache: ticket.ccache,
+            created_unix: unix,
+            last_used_unix: unix,
+            ends_unix: unix + life,
+            device,
+            ticket_end_unix: ticket.end_unix,
+            renew_till_unix: ticket.renew_till_unix,
+            proofs: HashMap::new(),
+            persisted_last_used: unix,
+            ports_used: Vec::new(),
+        };
+        if let Some(rec) = session.record(&key) {
+            if let Err(e) = self.d.sessions.save(&rec) {
+                error!("session record: {e:#}");
+            }
+        }
+        self.st.lock().unwrap().sessions.insert(key, session);
         self.audit(
             "login_ok",
-            json!({"user": user, "ip": ip.to_string(), "method": m.as_str(), "session": id, "expires_in": life}),
+            json!({"user": user, "ip": ip.to_string(), "method": m.as_str(), "session": id, "expires_in": life,
+                   "device_bound": bound}),
         );
-        Ok(AuthenticatedReply { state: "authenticated", session_token: token, expires_in: life, username: user })
+        Ok(AuthenticatedReply {
+            state: "authenticated",
+            session_token: token,
+            expires_in: life,
+            username: user,
+            device_bound: bound,
+        })
     }
 
-    fn session_expired(&self, s: &Session, now: Instant) -> Option<&'static str> {
-        if now >= s.ends {
+    fn session_expired(&self, s: &Session, now: u64) -> Option<&'static str> {
+        let l = &self.cfg.limits;
+        let (absolute, idle) = if s.device.is_some() {
+            (l.device_session_absolute_secs, l.device_session_idle_secs)
+        } else {
+            (l.session_absolute_secs, l.session_idle_secs)
+        };
+        if now >= s.ends_unix || now >= s.ticket_end_unix || now.saturating_sub(s.created_unix) >= absolute {
             Some("expired")
-        } else if now.duration_since(s.last_used) >= Duration::from_secs(self.cfg.limits.session_idle_secs) {
+        } else if now.saturating_sub(s.last_used_unix) >= idle {
             Some("idle")
-        } else if now.duration_since(s.created) >= Duration::from_secs(self.cfg.limits.session_absolute_secs) {
-            Some("expired")
         } else {
             None
         }
     }
 
-    /// Validate a bearer and bump its idle timer. Returns (key, username, ccache).
-    async fn session(&self, token: &str) -> Result<([u8; 32], String, String), ApiError> {
-        let key = sha256(token.as_bytes());
-        let now = self.now();
+    /// A device-bound session needs a fresh, unreplayed proof over this request
+    /// signed by its key (§14.2); unbound sessions ignore proofs.
+    fn proof_ok(
+        &self,
+        s: &mut Session,
+        token: &str,
+        proof: Option<&DeviceProof>,
+        expect: (&str, &str),
+        now: u64,
+    ) -> bool {
+        let Some(device) = &s.device else { return true };
+        let Some(p) = proof else { return false };
+        // The proof must be for the operation being performed, not just any request.
+        if !p.method.eq_ignore_ascii_case(expect.0) || p.path != expect.1 {
+            return false;
+        }
+        let skew = self.cfg.limits.device_proof_skew_secs;
+        if p.time.abs_diff(now) > skew {
+            return false;
+        }
+        let tag = sha256(&p.signature);
+        s.proofs.retain(|_, t| t.abs_diff(now) <= skew * 2);
+        if s.proofs.contains_key(&tag) {
+            return false;
+        }
+        if !device.verify(&proof_message(&p.method, &p.path, p.time, token, &p.body_sha256), &p.signature) {
+            return false;
+        }
+        s.proofs.insert(tag, p.time);
+        true
+    }
+
+    /// Validate a bearer (and its device proof) and bump its idle timer.
+    /// Returns (key, username, ccache).
+    async fn session<'a>(
+        &self,
+        bearer: impl Into<Bearer<'a>>,
+        expect: (&str, &str),
+    ) -> Result<([u8; 32], String, String), ApiError> {
+        let bearer = bearer.into();
+        let key = sha256(bearer.token.as_bytes());
+        let now = self.d.clock.unix();
         let expired = {
             let mut st = self.st.lock().unwrap();
             match st.sessions.get_mut(&key) {
                 None => return Err(ApiError::Unauthorized),
-                Some(s) => match self.session_expired(s, now) {
-                    None => {
-                        s.last_used = now;
-                        return Ok((key, s.username.clone(), s.ccache.clone()));
+                Some(s) => {
+                    if !self.proof_ok(s, bearer.token, bearer.proof.as_ref(), expect, now) {
+                        // Refuse the request but keep the session: the proof, not the
+                        // token, is what an attacker without the device key lacks.
+                        debug!(session = %s.id, "device proof missing or invalid");
+                        return Err(ApiError::Unauthorized);
                     }
-                    Some(r) => r,
-                },
+                    match self.session_expired(s, now) {
+                        None => {
+                            s.last_used_unix = now;
+                            // Keep the idle clock on disk coarse-grained (§14.3).
+                            let record = if s.device.is_some() && now.saturating_sub(s.persisted_last_used) >= 300 {
+                                s.persisted_last_used = now;
+                                s.record(&key)
+                            } else {
+                                None
+                            };
+                            let out = (key, s.username.clone(), s.ccache.clone());
+                            drop(st);
+                            if let Some(rec) = record {
+                                if let Err(e) = self.d.sessions.save(&rec) {
+                                    error!("session record: {e:#}");
+                                }
+                            }
+                            return Ok(out);
+                        }
+                        Some(r) => r,
+                    }
+                }
             }
         };
         self.end_session(key, expired).await;
         Err(ApiError::Unauthorized)
     }
 
-    pub async fn logout(&self, token: &str) -> Result<(), ApiError> {
-        let (key, _, _) = self.session(token).await?;
+    pub async fn logout<'a>(&self, bearer: impl Into<Bearer<'a>>) -> Result<(), ApiError> {
+        let (key, _, _) = self.session(bearer, ("POST", "/v1/logout")).await?;
         self.end_session(key, "logout").await;
         Ok(())
     }
@@ -706,6 +886,9 @@ impl Broker {
         let (sess, leases) = {
             let mut st = self.st.lock().unwrap();
             let Some(sess) = st.sessions.remove(&key) else { return };
+            if sess.device.is_some() {
+                self.d.sessions.remove(&hex::encode(key));
+            }
             let ports: Vec<u16> = st.leases.iter().filter(|(_, l)| l.session == key).map(|(p, _)| *p).collect();
             let leases: Vec<(u16, Lease)> =
                 ports.into_iter().filter_map(|p| st.leases.remove(&p).map(|l| (p, l))).collect();
@@ -890,8 +1073,8 @@ impl Broker {
 
     // ------------------------------------------------------------ hosts / connect
 
-    pub async fn list_hosts(&self, ip: IpAddr, token: &str) -> Result<HostsReply, ApiError> {
-        let (key, user, _) = self.session(token).await?;
+    pub async fn list_hosts<'a>(&self, ip: IpAddr, bearer: impl Into<Bearer<'a>>) -> Result<HostsReply, ApiError> {
+        let (key, user, _) = self.session(bearer, ("GET", "/v1/hosts")).await?;
         let (view, fqdns) = self.assigned(&user, false).await?;
         let mut hosts = Vec::new();
         for fqdn in &fqdns {
@@ -963,8 +1146,14 @@ impl Broker {
         self.direct_nets.iter().any(|n| n.contains(&client))
     }
 
-    pub async fn keepalive(&self, ip: IpAddr, token: &str, host: &str) -> Result<KeepaliveReply, ApiError> {
-        let (key, _, _) = self.session(token).await?;
+    pub async fn keepalive<'a>(
+        &self,
+        ip: IpAddr,
+        bearer: impl Into<Bearer<'a>>,
+        host: &str,
+    ) -> Result<KeepaliveReply, ApiError> {
+        let path = format!("/v1/hosts/{host}/keepalive");
+        let (key, _, _) = self.session(bearer, ("POST", &path)).await?;
         let client = v4(ip).ok_or(ApiError::NoLease)?;
         let direct = self.refresh_direct(key, client, Some(host));
         if direct == 0 && self.refresh_leases(key, client, Some(host)).await == 0 {
@@ -993,8 +1182,15 @@ impl Broker {
 
     /// Clients inside `routing.direct_client_cidrs` get the host's own address and
     /// port (route `direct`, no lease); everyone else gets a relay lease.
-    pub async fn connect(&self, ip: IpAddr, token: &str, host: &str, endpoint: &str) -> Result<ConnectReply, ApiError> {
-        let (key, user, ccache) = self.session(token).await?;
+    pub async fn connect<'a>(
+        &self,
+        ip: IpAddr,
+        bearer: impl Into<Bearer<'a>>,
+        host: &str,
+        endpoint: &str,
+    ) -> Result<ConnectReply, ApiError> {
+        let path = format!("/v1/hosts/{host}/connect");
+        let (key, user, ccache) = self.session(bearer, ("POST", &path)).await?;
         let Some(client) = v4(ip) else { return Err(ApiError::Unavailable("IPv6 clients are not supported")) };
         let (view, fqdns) = self.assigned(&user, false).await?;
         if !fqdns.iter().any(|f| f == host) {
@@ -1149,12 +1345,24 @@ impl Broker {
     /// Expire conversations, sessions and lapsed leases.
     pub async fn reap(&self) {
         let now = self.now();
+        let unix = self.d.clock.unix();
         let conv_ttl = Duration::from_secs(self.cfg.limits.conversation_ttl_secs);
-        let (expired, lapsed) = {
+        let (expired, lapsed, renew) = {
             let mut st = self.st.lock().unwrap();
             st.conversations.retain(|_, c| now.duration_since(c.created) < conv_ttl);
             let expired: Vec<([u8; 32], &'static str)> =
-                st.sessions.iter().filter_map(|(k, s)| self.session_expired(s, now).map(|r| (*k, r))).collect();
+                st.sessions.iter().filter_map(|(k, s)| self.session_expired(s, unix).map(|r| (*k, r))).collect();
+            let renew: Vec<([u8; 32], String)> = st
+                .sessions
+                .iter()
+                .filter(|(k, s)| {
+                    s.device.is_some()
+                        && s.ticket_end_unix.saturating_sub(unix) < self.cfg.limits.renew_before_secs
+                        && s.ticket_end_unix < s.ends_unix
+                        && !expired.iter().any(|(e, _)| e == *k)
+                })
+                .map(|(k, s)| (*k, s.ccache.clone()))
+                .collect();
             // Direct grants hold nothing open: they simply stop keeping the session alive.
             st.direct.retain(|g| g.expires > now);
             let ports: Vec<u16> = st.leases.iter().filter(|(_, l)| l.expires <= now).map(|(p, _)| *p).collect();
@@ -1166,7 +1374,7 @@ impl Broker {
                     Some((p, l, u))
                 })
                 .collect();
-            (expired, lapsed)
+            (expired, lapsed, renew)
         };
         for (port, l, user) in lapsed {
             // Keepalive stopped: no new flows; established flows keep running via conntrack
@@ -1180,7 +1388,83 @@ impl Broker {
         for (k, reason) in expired {
             self.end_session(k, reason).await;
         }
+        for (k, ccache) in renew {
+            self.renew_session(k, ccache).await;
+        }
         self.limiter.lock().unwrap().gc(now);
+    }
+
+    /// Renew a bound session's TGT (§14.3). A refusal ends the session; an
+    /// unreachable KDC is retried on the next reap until the ticket runs out.
+    async fn renew_session(&self, key: [u8; 32], ccache: String) {
+        let krb = self.d.krb.clone();
+        let res = tokio::task::spawn_blocking(move || krb.renew(&ccache))
+            .await
+            .unwrap_or_else(|_| Err(KrbError::Unavailable("renew task panicked".into())));
+        match res {
+            Ok(t) => {
+                let record = {
+                    let mut st = self.st.lock().unwrap();
+                    let Some(s) = st.sessions.get_mut(&key) else { return };
+                    s.ticket_end_unix = t.end_unix;
+                    if t.renew_till_unix != 0 {
+                        s.renew_till_unix = t.renew_till_unix;
+                        s.ends_unix = s.ends_unix.min(t.renew_till_unix.max(t.end_unix));
+                    }
+                    info!(session = %s.id, user = %s.username, "TGT renewed until {}", t.end_unix);
+                    s.record(&key)
+                };
+                if let Some(rec) = record {
+                    if let Err(e) = self.d.sessions.save(&rec) {
+                        error!("session record: {e:#}");
+                    }
+                }
+            }
+            Err(KrbError::Denied(m)) => {
+                let user = self.st.lock().unwrap().sessions.get(&key).map(|s| s.username.clone());
+                info!(user = ?user, "TGT renewal refused: {m}");
+                self.end_session(key, "renewal_refused").await;
+            }
+            Err(KrbError::Unavailable(m)) => warn!("TGT renewal postponed (KDC unavailable): {m}"),
+        }
+    }
+
+    /// Load device-bound sessions persisted by a previous run (§14.3). Call once
+    /// at start, after the relay reset.
+    pub fn restore_sessions(&self) -> usize {
+        let unix = self.d.clock.unix();
+        let mut restored = 0;
+        let mut live = Vec::new();
+        for rec in self.d.sessions.load_all() {
+            let (Some(key), Some(device)) = (rec.key_bytes(), rec.device()) else { continue };
+            let session = Session {
+                id: rec.id.clone(),
+                username: rec.username.clone(),
+                ccache: rec.ccache.clone(),
+                created_unix: rec.created_unix,
+                last_used_unix: rec.last_used_unix,
+                ends_unix: rec.ends_unix,
+                device: Some(device),
+                ticket_end_unix: rec.ticket_end_unix,
+                renew_till_unix: rec.renew_till_unix,
+                proofs: HashMap::new(),
+                persisted_last_used: rec.last_used_unix,
+                ports_used: Vec::new(),
+            };
+            if self.session_expired(&session, unix).is_some() {
+                self.d.krb.destroy(&session.ccache);
+                self.d.sessions.remove(&rec.key);
+                continue;
+            }
+            live.push(session.ccache.clone());
+            self.st.lock().unwrap().sessions.insert(key, session);
+            restored += 1;
+        }
+        self.d.sessions.sweep_ccaches(&live);
+        if restored > 0 {
+            self.audit("sessions_restored", json!({"count": restored}));
+        }
+        restored
     }
 
     pub fn audit_start(&self) {
@@ -1190,18 +1474,28 @@ impl Broker {
         );
     }
 
-    /// Clear relay state left over from a previous run (sessions are in memory only).
+    /// Clear relay state left over from a previous run (leases never survive a restart).
     pub async fn reset_relay(&self) -> Result<(), String> {
         self.d.relay.call(RelayRequest::Reset).await
     }
 
-    /// End every session (shutdown).
+    /// End every unbound session (shutdown). Device-bound sessions stay on disk
+    /// with their ccache and are restored by the next start (§14.3).
     pub async fn shutdown(&self) {
-        let keys: Vec<[u8; 32]> = self.st.lock().unwrap().sessions.keys().copied().collect();
+        let keys: Vec<[u8; 32]> =
+            self.st.lock().unwrap().sessions.iter().filter(|(_, s)| s.device.is_none()).map(|(k, _)| *k).collect();
         for k in keys {
             self.end_session(k, "shutdown").await;
         }
+        let bound: Vec<SessionRecord> =
+            self.st.lock().unwrap().sessions.iter().filter_map(|(k, s)| s.record(k)).collect();
+        for rec in bound {
+            if let Err(e) = self.d.sessions.save(&rec) {
+                error!("session record: {e:#}");
+            }
+        }
     }
+
 
     #[cfg(test)]
     pub(crate) fn lease_count(&self) -> usize {

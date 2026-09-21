@@ -11,7 +11,8 @@ Group=plank-broker
 ExecStart=/usr/local/libexec/plank-broker/plank-broker --config /etc/plank-broker/broker.toml serve
 Restart=on-failure
 RestartSec=2s
-# Sessions live in memory; a restart means every user signs in again.
+# Unbound sessions live in memory; device-bound ones (plank-broker.md §14) persist
+# under the StateDirectory (sessions/, records + FILE: ccaches) and survive restarts.
 StateDirectory=plank-broker
 StateDirectoryMode=0700
 UMask=0077

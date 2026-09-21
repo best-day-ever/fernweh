@@ -13,6 +13,8 @@ use tracing::{error, info, warn};
 
 use plank_broker::config::{Config, DEFAULT_CONFIG};
 use plank_broker::pins::PinStore;
+#[cfg(feature = "system")]
+use plank_broker::sessions::SessionStore;
 
 #[derive(Parser)]
 #[command(name = "plank-broker", version, about = "PLANK remote broker")]
@@ -172,13 +174,17 @@ async fn serve(cfg: Config) -> Result<()> {
         pins: Arc::new(PinStore::open(&cfg.hosts.pins_file)?),
         audit: Arc::new(Audit::stdout()),
         clock: Arc::new(SystemClock),
+        sessions: Arc::new(SessionStore::open(&cfg.kerberos.session_dir)?),
     };
     let listener = tokio::net::TcpListener::bind(cfg.listen).await.with_context(|| format!("bind {}", cfg.listen))?;
     let probe_every = Duration::from_secs(cfg.hosts.probe_interval_secs.max(1));
     let broker = Broker::new(cfg, deps);
     broker.audit_start();
+    // Device-bound sessions survive restarts (§14.3); their leases do not.
+    let restored = broker.restore_sessions();
+    info!("restored {restored} device-bound session(s)");
 
-    // Leases from a previous run are meaningless now (sessions are in memory).
+    // Leases from a previous run are meaningless now.
     {
         let b = broker.clone();
         tokio::spawn(async move {
@@ -244,7 +250,7 @@ async fn selftest(cfg: Config, cmd: SelftestCmd) -> Result<()> {
     use base64::Engine;
     use plank_broker::directory::Directory;
     use plank_broker::hbac::assigned_hosts;
-    use plank_broker::kerberos::Kerberos;
+    use plank_broker::kerberos::{Kerberos, LoginOptions};
     use plank_broker::probe::{Prober, TlsProber};
     use zeroize::Zeroizing;
 
@@ -310,7 +316,7 @@ async fn selftest(cfg: Config, cmd: SelftestCmd) -> Result<()> {
             println!("armour ticket ok");
             let k = krb.clone();
             let u = user.clone();
-            let t = tokio::task::spawn_blocking(move || k.login(&u, &secret)).await?;
+            let t = tokio::task::spawn_blocking(move || k.login(&u, &secret, LoginOptions::default())).await?;
             let t = match t {
                 Ok(t) => t,
                 Err(e) => {
