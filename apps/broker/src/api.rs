@@ -21,7 +21,7 @@ use tower::ServiceExt;
 use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
 
-use crate::broker::{ApiError, Broker};
+use crate::broker::{ApiError, Broker, RouteRequest};
 use crate::util::valid_hostname;
 
 impl IntoResponse for ApiError {
@@ -100,6 +100,27 @@ struct RespondReq {
     responses: Vec<String>,
 }
 
+/// `connect` body: `{}` (or empty), or `{"route":"relay"}` when the client could
+/// not reach a directly-routed host. `"auto"` is the default; `"direct"` cannot be requested.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConnectReq {
+    #[serde(default)]
+    route: Option<String>,
+}
+
+fn route_request(body: &[u8]) -> Result<RouteRequest, ApiError> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(RouteRequest::Auto);
+    }
+    let req = serde_json::from_slice::<ConnectReq>(body).map_err(|_| ApiError::BadRequest)?;
+    match req.route.as_deref() {
+        None | Some("auto") => Ok(RouteRequest::Auto),
+        Some("relay") => Ok(RouteRequest::Relay),
+        Some(_) => Err(ApiError::BadRequest),
+    }
+}
+
 async fn auth_start(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo<SocketAddr>, body: Bytes) -> Response {
     let Ok(req) = serde_json::from_slice::<StartReq>(&body) else { return auth_error(ApiError::BadRequest) };
     match b.auth_start(client_ip(&ci), &req.username) {
@@ -135,6 +156,7 @@ async fn connect(
     ConnectInfo(ci): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     h: HeaderMap,
+    body: Bytes,
 ) -> Response {
     let ep = endpoint(&h, &b.cfg.public_endpoint);
     let r = async {
@@ -142,7 +164,8 @@ async fn connect(
         if !valid_hostname(&id) {
             return Err(ApiError::Denied);
         }
-        b.connect(client_ip(&ci), t, &id, &ep).await
+        let route = route_request(&body)?;
+        b.connect_via(client_ip(&ci), t, &id, &ep, route).await
     }
     .await;
     match r {

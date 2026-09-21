@@ -26,6 +26,8 @@ pub struct Config {
     #[serde(default)]
     pub relay: RelayConfig,
     #[serde(default)]
+    pub routing: RoutingConfig,
+    #[serde(default)]
     pub limits: Limits,
 }
 
@@ -123,6 +125,23 @@ pub struct RelayConfig {
     pub conntrack: PathBuf,
     #[serde(default = "d_table")]
     pub table: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutingConfig {
+    /// Clients connecting from these networks already reach the hosts directly
+    /// (office LAN): `connect` returns the host itself instead of a relay lease.
+    /// Empty (default): every client is relayed.
+    #[serde(default)]
+    pub direct_client_cidrs: Vec<String>,
+}
+
+impl RoutingConfig {
+    /// Parsed `direct_client_cidrs`; `validate` has already rejected bad entries.
+    pub fn direct_nets(&self) -> Vec<ipnet::Ipv4Net> {
+        self.direct_client_cidrs.iter().filter_map(|c| c.parse().ok()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -322,6 +341,15 @@ impl Config {
         for c in &r.allowed_target_cidrs {
             c.parse::<ipnet::Ipv4Net>().with_context(|| format!("relay.allowed_target_cidrs: {c}"))?;
         }
+        for c in &self.routing.direct_client_cidrs {
+            let n: ipnet::Ipv4Net = c.parse().with_context(|| format!("routing.direct_client_cidrs: {c}"))?;
+            if n.prefix_len() < 8 {
+                bail!("routing.direct_client_cidrs: {c} is too broad");
+            }
+            if !n.network().is_private() {
+                bail!("routing.direct_client_cidrs: {c} is not a private network");
+            }
+        }
         if r.table.is_empty() || !r.table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             bail!("relay.table: letters, digits and '_' only");
         }
@@ -377,6 +405,18 @@ mod tests {
         let c = Config::parse(include_str!("../packaging/broker.toml.example")).unwrap();
         assert_eq!(c.relay.port_max, 29100);
         assert_eq!(c.limits.min_respond_ms, 1500);
+    }
+
+    #[test]
+    fn routing_cidrs_are_validated() {
+        assert!(test_config().routing.direct_nets().is_empty());
+        let base = include_str!("../packaging/broker.toml.example");
+        let with = |v: &str| Config::parse(&format!("{base}\n[routing]\ndirect_client_cidrs = [{v}]\n"));
+        let c = with(r#""192.168.10.0/24""#).unwrap();
+        assert_eq!(c.routing.direct_nets(), vec!["192.168.10.0/24".parse::<ipnet::Ipv4Net>().unwrap()]);
+        assert!(with(r#""0.0.0.0/0""#).is_err());
+        assert!(with(r#""203.0.113.0/24""#).is_err());
+        assert!(with(r#""not-a-cidr""#).is_err());
     }
 
     #[test]
