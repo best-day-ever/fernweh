@@ -1,6 +1,6 @@
 # macOS Client build inputs and procedure
 
-Experimental Apple Silicon/macOS27 only. Read the canonical release runbook
+Experimental Apple Silicon; the Client runs on macOS 13+ and is built on macOS/SDK 27. Read the canonical release runbook
 first. Linux builder/test roles remain unchanged. Use clean Git worktrees and
 verified Git bundles imported dependency-first, with recursive fetch disabled.
 
@@ -31,6 +31,13 @@ export PLANK_RUSTUP_ROOT="$PLANK_DEP_ROOT/rustup-1.89.0"
 export PLANK_CARGO_ROOT="$PLANK_DEP_ROOT/cargo"
 export PLANK_BUILD_BRANCH=macos-client
 ```
+
+The Client targets `PLANK_MACOS_DEPLOYMENT_TARGET` (default `13.0`, the oldest macOS
+Qt 6.10.2 supports; building still needs SDK 27). Every Client input must use the same
+value: bootstrap its dependencies into their own `PLANK_MAC_CLIENT_DEPS` root per target
+(for example `$PLANK_DEP_ROOT/macos-client-deps-13`), and export the same value for the
+Client build and DMG. The DMG gate refuses any Mach-O whose `minos` is newer than the
+app's `LSMinimumSystemVersion`. Host-side tools and probes remain macOS 27.
 
 Bootstrap Qt once with a private Python venv and aqtinstall3.3.0:
 

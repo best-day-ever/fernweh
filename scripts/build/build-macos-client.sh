@@ -10,7 +10,8 @@ build=$2
 : "${PLANK_CARGO_ROOT:?}"
 : "${PLANK_BUILD_BRANCH:?Detached builds require an explicit branch}"
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || exit 2
-export MACOSX_DEPLOYMENT_TARGET=27.0
+# Oldest macOS the Client runs on (Qt 6.10 floor: 13); must match the deps' target.
+export MACOSX_DEPLOYMENT_TARGET=${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}
 export SDKROOT
 SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
 [[ $(xcrun --sdk macosx --show-sdk-version) == 27* ]] || exit 2
@@ -43,8 +44,8 @@ cd "$build"
 qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
     CONFIG+=plank-transport CONFIG+=disable-libplacebo CONFIG+=disable-wayland \
     CONFIG+=disable-x11 CONFIG+=disable-libva CONFIG+=disable-libdrm \
-    QMAKE_MACOSX_DEPLOYMENT_TARGET=27.0 QMAKE_APPLE_DEVICE_ARCHS=arm64 \
-    PLANK_VERSION="$version" \
+    QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
+    PLANK_VERSION="$version" PLANK_MACOS_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
     "QMAKE_CFLAGS+=$PLANK_C_FILE_FLAGS" "QMAKE_CXXFLAGS+=$PLANK_C_FILE_FLAGS"
 make -j"${PLANK_BUILD_JOBS:-8}" release
 # Run shared topology and toolbar geometry on every Mac Client candidate.
@@ -53,7 +54,7 @@ mkdir -p "$build/tests/$suite"
 (
     cd "$build/tests/$suite"
     qmake "$client/tests/$suite/$suite.pro" CONFIG+=release CONFIG-=app_bundle \
-        QMAKE_MACOSX_DEPLOYMENT_TARGET=27.0 QMAKE_APPLE_DEVICE_ARCHS=arm64 \
+        QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
         "QMAKE_CXXFLAGS+=-include arm_acle.h"
     make -j"${PLANK_BUILD_JOBS:-8}"
     PLANK_REPO_ROOT="$source_root" QT_QPA_PLATFORM=offscreen "./$suite"

@@ -32,8 +32,19 @@ for plugin in "$app/Contents/PlugIns/sqldrivers/"*.dylib; do
     [[ -f "$plugin" ]] || continue
     [[ ${plugin##*/} == libqsqlite.dylib ]] || rm "$plugin"
 done
+# Every Mach-O must load on the oldest supported macOS: a dependency built for a
+# newer target would make the whole app refuse to launch there.
+macos_min=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")
+[[ $macos_min == "${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}" ]] || { echo "LSMinimumSystemVersion $macos_min" >&2; exit 1; }
+while IFS= read -r -d '' file; do
+    file -b "$file" | grep -q Mach-O || continue
+    minos=$(otool -l "$file" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
+    [[ -n $minos ]] && [[ $(printf '%s\n%s\n' "$minos" "$macos_min" | sort -V | tail -1) == "$macos_min" ]] ||
+        { echo "deployment target gate: $file minos=${minos:-none} > $macos_min" >&2; exit 1; }
+done < <(find "$app" -type f -print0)
+echo "macos_deployment_target_gate=pass min=$macos_min"
 mkdir "$output/plank.iconset"
-clang -fobjc-arc -mmacosx-version-min=27.0 "$source_root/scripts/package/macos-app-icon.m" \
+clang -fobjc-arc -mmacosx-version-min="${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}" "$source_root/scripts/package/macos-app-icon.m" \
     -framework Foundation -framework CoreGraphics -framework ImageIO -o "$output/macos-app-icon"
 "$output/macos-app-icon" "$source_root/branding/assets/plank-logo.png" "$output/plank.iconset"
 iconutil -c icns "$output/plank.iconset" -o "$app/Contents/Resources/plank.icns"
@@ -95,4 +106,4 @@ xcrun stapler validate "$dmg"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
 shasum -a 256 "$dmg"
 echo 'macos_client_dmg_gate=pass install=not-performed'
-plank_collect_package "$source_root" client macos arm64 macos-27 "$dmg"
+plank_collect_package "$source_root" client macos arm64 "macos-$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist" | cut -d. -f1)" "$dmg"
