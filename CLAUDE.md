@@ -1,6 +1,6 @@
 # CLAUDE.md — bde-plank
 
-This is bestdayever.de's fork of [`instinctual/plank`](https://github.com/instinctual/plank)
+This is bde.run's fork of [`instinctual/plank`](https://github.com/instinctual/plank)
 (AGPL-3.0, Sunshine/Moonlight lineage), tracked as WP4 in the sibling
 `bde-linux` repo's `docs/plan.md`. Read that plan section first for why this
 fork exists. Read `AGENTS.md` and `HANDOFF.md` in *this* repo before doing

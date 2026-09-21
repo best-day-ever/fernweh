@@ -1,6 +1,6 @@
 # bde-plank gap analysis
 
-This is bestdayever.de's tracking doc for our `bde/main` fork, per
+This is bde.run's tracking doc for our `bde/main` fork, per
 `docs/plan.md` WP4 in `bde-linux`. It is additive to the upstream docs, not a
 replacement: `AGENTS.md`, `HANDOFF.md`, `docs/development/acceptance-criteria.md`
 and `protocol/` remain authoritative for upstream product policy. This doc
@@ -800,7 +800,7 @@ virtual-display EDIDs, and no `/web/` assets (matches the
 ## Upstream candidates
 
 Findings in this doc that are generically true of PLANK (not
-bestdayever.de-specific) and worth upstreaming rather than keeping fork-local:
+bde.run-specific) and worth upstreaming rather than keeping fork-local:
 
 - **The macOS client Wacom/pen forwarding work itself** (§(b.1) above,
   `apps/client` commit `6319bc54` on `best-day-ever/plank-client`
