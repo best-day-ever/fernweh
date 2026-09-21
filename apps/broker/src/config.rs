@@ -29,6 +29,8 @@ pub struct Config {
     pub routing: RoutingConfig,
     #[serde(default)]
     pub limits: Limits,
+    #[serde(default)]
+    pub passkey: PasskeyConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -144,6 +146,30 @@ impl RoutingConfig {
     }
 }
 
+/// Passkey sign-in (`auth/start` with `method: "passkey"`, contract §13.3).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasskeyConfig {
+    /// Relying party id sent to clients (the IPA domain the KDC verifies against).
+    /// Default: the realm in lower case (`IPA.BDE.RUN` → `ipa.bde.run`).
+    #[serde(default)]
+    pub rp_id: Option<String>,
+    /// Passkey conversations waiting for the client's assertion (each holds a KDC
+    /// exchange on a worker thread). Beyond this, `auth/start` answers 429.
+    #[serde(default = "d_32")]
+    pub max_pending: usize,
+    /// How long `auth/start` waits for the KDC's challenge before it answers with a
+    /// synthetic one.
+    #[serde(default = "d_10u64")]
+    pub challenge_timeout_secs: u64,
+}
+
+impl PasskeyConfig {
+    pub fn rp_id(&self, realm: &str) -> String {
+        self.rp_id.clone().unwrap_or_else(|| realm.to_ascii_lowercase())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
@@ -249,6 +275,12 @@ fn d_10() -> u32 {
 fn d_20() -> u32 {
     20
 }
+fn d_32() -> usize {
+    32
+}
+fn d_10u64() -> u64 {
+    10
+}
 fn d_120() -> u64 {
     120
 }
@@ -280,6 +312,11 @@ impl Default for HostsConfig {
     }
 }
 impl Default for RelayConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for PasskeyConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -353,6 +390,16 @@ impl Config {
         if r.table.is_empty() || !r.table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             bail!("relay.table: letters, digits and '_' only");
         }
+        let rp = self.passkey.rp_id(&self.kerberos.realm);
+        if !crate::util::valid_hostname(&rp) || rp != rp.to_ascii_lowercase() {
+            bail!("passkey.rp_id must be a lower-case domain name");
+        }
+        if self.passkey.max_pending == 0 {
+            bail!("passkey.max_pending must be at least 1");
+        }
+        if !(1..=60).contains(&self.passkey.challenge_timeout_secs) {
+            bail!("passkey.challenge_timeout_secs must be 1-60");
+        }
         if self.public_endpoint.is_empty() || !crate::util::valid_hostname(&self.public_endpoint) {
             bail!("public_endpoint must be a host name");
         }
@@ -398,6 +445,22 @@ mod tests {
         assert_eq!(c.limits.starts_per_minute_per_ip, 5);
         assert_eq!(c.ldap.base_dn("EXAMPLE.ORG"), "dc=example,dc=org");
         assert_eq!(c.hosts.port, 28989);
+        assert_eq!(c.passkey.rp_id(&c.kerberos.realm), "example.org");
+        assert_eq!(c.passkey.max_pending, 32);
+        assert_eq!(c.passkey.challenge_timeout_secs, 10);
+    }
+
+    #[test]
+    fn passkey_settings_are_validated() {
+        let base = include_str!("../packaging/broker.toml.example");
+        let with = |v: &str| Config::parse(&format!("{base}\n[passkey]\n{v}\n"));
+        let c = with(r#"rp_id = "ipa.example.org""#).unwrap();
+        assert_eq!(c.passkey.rp_id(&c.kerberos.realm), "ipa.example.org");
+        assert!(with(r#"rp_id = "IPA.example.org""#).is_err());
+        assert!(with(r#"rp_id = "not a domain""#).is_err());
+        assert!(with("max_pending = 0").is_err());
+        assert!(with("challenge_timeout_secs = 0").is_err());
+        assert!(with("bogus = 1").is_err());
     }
 
     #[test]

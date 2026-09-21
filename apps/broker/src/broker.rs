@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -18,7 +20,8 @@ use crate::audit::Audit;
 use crate::config::Config;
 use crate::directory::{DirError, Directory};
 use crate::hbac::{assigned_hosts, DirectoryView, UserView};
-use crate::kerberos::{Kerberos, KrbError};
+use crate::kerberos::{Kerberos, KrbError, UserTicket};
+use crate::passkey::{Assertion, Challenge, PromptData};
 use crate::pins::{PinCheck, PinStore};
 use crate::probe::Prober;
 use crate::ratelimit::RateLimiter;
@@ -27,11 +30,39 @@ use crate::util::{random_token, sha256, valid_username, Clock};
 
 // ---------------------------------------------------------------- replies
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct Prompt {
     pub id: &'static str,
     pub style: &'static str,
     pub text: &'static str,
+    /// Only on the `passkey` prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passkey: Option<PromptData>,
+}
+
+/// `auth/start` `method`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    PasswordOtp,
+    Passkey,
+}
+
+impl Method {
+    /// Absent or `password_otp` → password + OTP; `passkey`; anything else is refused.
+    pub fn parse(m: Option<&str>) -> Option<Method> {
+        match m {
+            None | Some("password_otp") => Some(Method::PasswordOtp),
+            Some("passkey") => Some(Method::Passkey),
+            Some(_) => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Method::PasswordOtp => "password_otp",
+            Method::Passkey => "passkey",
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -106,7 +137,49 @@ struct Conversation {
     username: String,
     ip: IpAddr,
     created: Instant,
+    auth: ConvAuth,
 }
+
+enum ConvAuth {
+    PasswordOtp,
+    /// `None`: synthetic challenge (no KDC exchange behind it); `respond` is denied.
+    Passkey(Option<PasskeyWorker>),
+}
+
+impl Conversation {
+    fn method(&self) -> Method {
+        match self.auth {
+            ConvAuth::PasswordOtp => Method::PasswordOtp,
+            ConvAuth::Passkey(_) => Method::Passkey,
+        }
+    }
+}
+
+/// A KDC exchange parked in the responder on a worker thread, waiting for the
+/// client's assertion. Dropping it (respond, expiry, reaper) disconnects `answer`,
+/// which aborts the exchange.
+struct PasskeyWorker {
+    challenge: Challenge,
+    answer: SyncSender<Assertion>,
+    result: tokio::sync::oneshot::Receiver<Result<UserTicket, KrbError>>,
+}
+
+/// Keeps `Broker::passkey_workers` accurate for the life of a worker thread.
+struct WorkerCount(Arc<AtomicUsize>);
+impl WorkerCount {
+    fn new(c: &Arc<AtomicUsize>) -> WorkerCount {
+        c.fetch_add(1, Ordering::SeqCst);
+        WorkerCount(c.clone())
+    }
+}
+impl Drop for WorkerCount {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How long `respond` waits for the KDC to judge a passkey answer.
+const PASSKEY_VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Session {
     /// Short correlation id for logs (prefix of the token hash).
@@ -148,6 +221,8 @@ struct State {
     leases: HashMap<u16, Lease>,
     direct: Vec<DirectGrant>,
     next_port: u16,
+    /// Passkey `auth/start` calls waiting for the KDC's challenge (reserved slots).
+    passkey_starting: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -177,11 +252,14 @@ pub struct Broker {
     status: RwLock<HashMap<String, HostStatus>>,
     view: tokio::sync::Mutex<Option<(Instant, Arc<DirectoryView>)>>,
     users: Mutex<HashMap<String, (Instant, Option<UserView>)>>,
+    /// Live passkey worker threads (including ones still winding down).
+    passkey_workers: Arc<AtomicUsize>,
+    passkey_rp_id: String,
 }
 
 const PROMPTS: [Prompt; 2] = [
-    Prompt { id: "password", style: "secret", text: "Password" },
-    Prompt { id: "otp", style: "otp", text: "Authenticator code" },
+    Prompt { id: "password", style: "secret", text: "Password", passkey: None },
+    Prompt { id: "otp", style: "otp", text: "Authenticator code", passkey: None },
 ];
 
 fn v4(ip: IpAddr) -> Option<Ipv4Addr> {
@@ -196,6 +274,7 @@ impl Broker {
         let limiter = RateLimiter::new(&cfg.limits);
         let st = State { next_port: cfg.relay.port_min, ..Default::default() };
         let direct_nets = cfg.routing.direct_nets();
+        let passkey_rp_id = cfg.passkey.rp_id(&cfg.kerberos.realm);
         Arc::new(Broker {
             cfg,
             d,
@@ -205,6 +284,8 @@ impl Broker {
             status: RwLock::new(HashMap::new()),
             view: tokio::sync::Mutex::new(None),
             users: Mutex::new(HashMap::new()),
+            passkey_workers: Arc::new(AtomicUsize::new(0)),
+            passkey_rp_id,
         })
     }
 
@@ -218,21 +299,25 @@ impl Broker {
 
     // ------------------------------------------------------------ auth
 
-    pub fn auth_start(&self, ip: IpAddr, username: &str) -> Result<ChallengeReply, ApiError> {
+    /// Normalise the user name and apply the start rate limits.
+    fn start_checks(&self, ip: IpAddr, username: &str) -> Result<String, ApiError> {
         let now = self.now();
         let username = username.trim().to_ascii_lowercase();
         if username.is_empty() || username.len() > 256 {
             return Err(ApiError::BadRequest);
         }
-        {
-            let mut l = self.limiter.lock().unwrap();
-            if let Some(r) = l.blocked(Some(&username), ip, now) {
-                return Err(ApiError::RateLimited(r));
-            }
-            l.start(ip, now).map_err(ApiError::RateLimited)?;
+        let mut l = self.limiter.lock().unwrap();
+        if let Some(r) = l.blocked(Some(&username), ip, now) {
+            return Err(ApiError::RateLimited(r));
         }
+        l.start(ip, now).map_err(ApiError::RateLimited)?;
+        Ok(username)
+    }
+
+    /// Store a conversation under a fresh id (global table cap).
+    fn insert_conversation(&self, st: &mut State, conv: Conversation) -> Result<String, ApiError> {
         let ttl = Duration::from_secs(self.cfg.limits.conversation_ttl_secs);
-        let mut st = self.st.lock().unwrap();
+        let now = self.now();
         if st.conversations.len() >= self.cfg.limits.max_conversations {
             st.conversations.retain(|_, c| now.duration_since(c.created) < ttl);
             if st.conversations.len() >= self.cfg.limits.max_conversations {
@@ -241,8 +326,129 @@ impl Broker {
             }
         }
         let id = random_token();
-        st.conversations.insert(id.clone(), Conversation { username, ip, created: now });
+        st.conversations.insert(id.clone(), conv);
+        Ok(id)
+    }
+
+    pub fn auth_start(&self, ip: IpAddr, username: &str) -> Result<ChallengeReply, ApiError> {
+        let username = self.start_checks(ip, username)?;
+        let conv = Conversation { username, ip, created: self.now(), auth: ConvAuth::PasswordOtp };
+        let id = self.insert_conversation(&mut self.st.lock().unwrap(), conv)?;
         Ok(ChallengeReply { state: "challenge", conversation_id: id, prompts: PROMPTS.to_vec() })
+    }
+
+    pub async fn auth_start_method(
+        &self,
+        ip: IpAddr,
+        username: &str,
+        method: Method,
+    ) -> Result<ChallengeReply, ApiError> {
+        match method {
+            Method::PasswordOtp => self.auth_start(ip, username),
+            Method::Passkey => self.auth_start_passkey(ip, username).await,
+        }
+    }
+
+    /// Passkey start: run the AS exchange on a worker thread until the KDC's
+    /// challenge arrives and hand that to the client. A user the KDC offers no
+    /// passkey challenge (unknown, OTP user, invalid name, KDC down or slow) gets a
+    /// synthetic challenge of the same shape, so the reply never reveals which.
+    pub async fn auth_start_passkey(&self, ip: IpAddr, username: &str) -> Result<ChallengeReply, ApiError> {
+        let username = self.start_checks(ip, username)?;
+        let slot = self.reserve_passkey_slot()?;
+        let worker = if valid_username(&username) { self.spawn_passkey(&username).await } else { None };
+        let passkey = match &worker {
+            Some(w) => {
+                if w.challenge.domain != self.passkey_rp_id {
+                    error!(
+                        "KDC passkey domain {} differs from passkey.rp_id {}; assertions will fail",
+                        w.challenge.domain, self.passkey_rp_id
+                    );
+                }
+                PromptData::from_challenge(&w.challenge, &self.passkey_rp_id)
+            }
+            None => PromptData::synthetic(&self.passkey_rp_id),
+        };
+        let conv = Conversation { username, ip, created: self.now(), auth: ConvAuth::Passkey(worker) };
+        let id = {
+            let mut st = self.st.lock().unwrap();
+            st.passkey_starting -= 1;
+            std::mem::forget(slot);
+            self.insert_conversation(&mut st, conv)?
+        };
+        let prompt = Prompt { id: "passkey", style: "passkey", text: "Passkey", passkey: Some(passkey) };
+        Ok(ChallengeReply { state: "challenge", conversation_id: id, prompts: vec![prompt] })
+    }
+
+    /// Count this start against `passkey.max_pending` (waiting conversations, starts
+    /// in flight and live worker threads). Independent of the user name.
+    fn reserve_passkey_slot(&self) -> Result<StartSlot<'_>, ApiError> {
+        let now = self.now();
+        let ttl = Duration::from_secs(self.cfg.limits.conversation_ttl_secs);
+        let max = self.cfg.passkey.max_pending;
+        let mut st = self.st.lock().unwrap();
+        let pending = |st: &State| {
+            st.passkey_starting
+                + st.conversations
+                    .values()
+                    .filter(|c| c.method() == Method::Passkey && now.duration_since(c.created) < ttl)
+                    .count()
+        };
+        if pending(&st) >= max || self.passkey_workers.load(Ordering::SeqCst) >= max {
+            st.conversations.retain(|_, c| now.duration_since(c.created) < ttl);
+            if pending(&st) >= max || self.passkey_workers.load(Ordering::SeqCst) >= max {
+                warn!("passkey conversations at the limit ({max})");
+                return Err(ApiError::RateLimited(10));
+            }
+        }
+        st.passkey_starting += 1;
+        Ok(StartSlot(&self.st))
+    }
+
+    /// Start the KDC exchange for `username` on a worker thread and wait for its
+    /// challenge. `None` when the KDC offers none within the timeout.
+    async fn spawn_passkey(&self, username: &str) -> Option<PasskeyWorker> {
+        let (ch_tx, ch_rx) = tokio::sync::oneshot::channel::<Challenge>();
+        let (ans_tx, ans_rx) = std::sync::mpsc::sync_channel::<Assertion>(1);
+        let (res_tx, mut res_rx) = tokio::sync::oneshot::channel();
+        let krb = self.d.krb.clone();
+        let user = username.to_string();
+        let wait = Duration::from_secs(self.cfg.limits.conversation_ttl_secs);
+        let live = WorkerCount::new(&self.passkey_workers);
+        let spawned = std::thread::Builder::new().name("plank-passkey".into()).spawn(move || {
+            let _live = live;
+            let mut ch_tx = Some(ch_tx);
+            let mut ask = |c: &Challenge| -> Option<Assertion> {
+                ch_tx.take()?.send(c.clone()).ok()?;
+                // Blocks until respond delivers, the conversation is dropped, or the
+                // conversation lifetime passes in real time (backstop).
+                ans_rx.recv_timeout(wait).ok()
+            };
+            let r = krb.login_passkey(&user, &mut ask);
+            if let Err(Ok(t)) = res_tx.send(r) {
+                krb.destroy(&t.ccache);
+            }
+        });
+        if let Err(e) = spawned {
+            error!("passkey worker thread: {e}");
+            return None;
+        }
+        match tokio::time::timeout(Duration::from_secs(self.cfg.passkey.challenge_timeout_secs), ch_rx).await {
+            Ok(Ok(challenge)) => Some(PasskeyWorker { challenge, answer: ans_tx, result: res_rx }),
+            Ok(Err(_)) => {
+                // The exchange ended without a challenge; its result is already sent.
+                match res_rx.try_recv() {
+                    Ok(Err(KrbError::Unavailable(m))) => error!("KDC unavailable (passkey start): {m}"),
+                    Ok(Err(KrbError::Denied(m))) => debug!(user = %username, "no passkey challenge: {m}"),
+                    _ => {}
+                }
+                None
+            }
+            Err(_) => {
+                warn!(user = %username, "no passkey challenge from the KDC in time");
+                None
+            }
+        }
     }
 
     /// Always takes at least `min_respond_ms` (constant-ish timing).
@@ -258,9 +464,12 @@ impl Broker {
         r
     }
 
-    fn fail(&self, user: &str, ip: IpAddr, reason: &str) {
+    fn fail(&self, user: &str, ip: IpAddr, method: Method, reason: &str) {
         let burst = self.limiter.lock().unwrap().failure(user, ip, self.now());
-        self.audit("login_fail", json!({"user": user, "ip": ip.to_string(), "reason": reason}));
+        self.audit(
+            "login_fail",
+            json!({"user": user, "ip": ip.to_string(), "method": method.as_str(), "reason": reason}),
+        );
         if burst {
             self.audit(
                 "failure_burst",
@@ -269,35 +478,38 @@ impl Broker {
         }
     }
 
-    async fn respond_inner(
+    /// Take the conversation and check it belongs to this address, is fresh, the
+    /// (user, IP) is not blocked, and it was started for `method`.
+    fn take_conversation(
         &self,
         ip: IpAddr,
         conversation_id: &str,
-        responses: Vec<Zeroizing<String>>,
-    ) -> Result<AuthenticatedReply, ApiError> {
+        method: Method,
+    ) -> Result<(String, ConvAuth), ApiError> {
         let now = self.now();
         let conv = self.st.lock().unwrap().conversations.remove(conversation_id);
         let Some(conv) = conv else { return Err(ApiError::Denied) };
-        let user = conv.username;
-        if now.duration_since(conv.created) >= Duration::from_secs(self.cfg.limits.conversation_ttl_secs)
-            || conv.ip != ip
-        {
-            self.audit("login_fail", json!({"user": user, "ip": ip.to_string(), "reason": "conversation"}));
+        let conv_method = conv.method();
+        let Conversation { username: user, ip: conv_ip, created, auth } = conv;
+        if now.duration_since(created) >= Duration::from_secs(self.cfg.limits.conversation_ttl_secs) || conv_ip != ip {
+            self.audit(
+                "login_fail",
+                json!({"user": user, "ip": ip.to_string(), "method": conv_method.as_str(), "reason": "conversation"}),
+            );
             return Err(ApiError::Denied);
         }
         if let Some(r) = self.limiter.lock().unwrap().blocked(Some(&user), ip, now) {
             return Err(ApiError::RateLimited(r));
         }
-        let well_formed = responses.len() == 2
-            && !responses[0].is_empty()
-            && responses[0].len() <= 1024
-            && !responses[0].contains('\0')
-            && (6..=10).contains(&responses[1].len())
-            && responses[1].bytes().all(|b| b.is_ascii_digit());
-        if !valid_username(&user) || !well_formed {
-            self.fail(&user, ip, if well_formed { "username" } else { "malformed" });
+        if conv_method != method {
+            self.fail(&user, ip, conv_method, "malformed");
             return Err(ApiError::Denied);
         }
+        Ok((user, auth))
+    }
+
+    /// Make room for one more session, or refuse.
+    async fn ensure_session_room(&self) -> Result<(), ApiError> {
         if self.st.lock().unwrap().sessions.len() >= self.cfg.limits.max_sessions {
             self.reap().await;
             if self.st.lock().unwrap().sessions.len() >= self.cfg.limits.max_sessions {
@@ -305,6 +517,28 @@ impl Broker {
                 return Err(ApiError::Denied);
             }
         }
+        Ok(())
+    }
+
+    async fn respond_inner(
+        &self,
+        ip: IpAddr,
+        conversation_id: &str,
+        responses: Vec<Zeroizing<String>>,
+    ) -> Result<AuthenticatedReply, ApiError> {
+        let m = Method::PasswordOtp;
+        let (user, _) = self.take_conversation(ip, conversation_id, m)?;
+        let well_formed = responses.len() == 2
+            && !responses[0].is_empty()
+            && responses[0].len() <= 1024
+            && !responses[0].contains('\0')
+            && (6..=10).contains(&responses[1].len())
+            && responses[1].bytes().all(|b| b.is_ascii_digit());
+        if !valid_username(&user) || !well_formed {
+            self.fail(&user, ip, m, if well_formed { "username" } else { "malformed" });
+            return Err(ApiError::Denied);
+        }
+        self.ensure_session_room().await?;
         let mut secret = Zeroizing::new(String::with_capacity(responses[0].len() + responses[1].len()));
         secret.push_str(&responses[0]);
         secret.push_str(&responses[1]);
@@ -314,16 +548,85 @@ impl Broker {
         let res = tokio::task::spawn_blocking(move || krb.login(&u, &secret))
             .await
             .unwrap_or_else(|_| Err(KrbError::Unavailable("login task panicked".into())));
+        self.finish_login(user, ip, m, res)
+    }
+
+    /// Passkey respond; `assertion` is `None` when the client's fields failed
+    /// validation. Always takes at least `min_respond_ms`.
+    pub async fn auth_respond_passkey(
+        &self,
+        ip: IpAddr,
+        conversation_id: &str,
+        assertion: Option<Assertion>,
+    ) -> Result<AuthenticatedReply, ApiError> {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(self.cfg.limits.min_respond_ms);
+        let r = self.respond_passkey_inner(ip, conversation_id, assertion).await;
+        tokio::time::sleep_until(deadline).await;
+        r
+    }
+
+    async fn respond_passkey_inner(
+        &self,
+        ip: IpAddr,
+        conversation_id: &str,
+        assertion: Option<Assertion>,
+    ) -> Result<AuthenticatedReply, ApiError> {
+        let m = Method::Passkey;
+        let (user, auth) = self.take_conversation(ip, conversation_id, m)?;
+        let ConvAuth::Passkey(worker) = auth else { return Err(ApiError::Denied) };
+        let Some(a) = assertion else {
+            self.fail(&user, ip, m, "malformed");
+            return Err(ApiError::Denied);
+        };
+        let Some(w) = worker else {
+            // Synthetic challenge: nothing can answer it.
+            self.fail(&user, ip, m, if valid_username(&user) { "no_challenge" } else { "username" });
+            return Err(ApiError::Denied);
+        };
+        if w.challenge.credential_id_for(&a.credential_id).is_none() {
+            self.fail(&user, ip, m, "credential");
+            return Err(ApiError::Denied);
+        }
+        self.ensure_session_room().await?;
+        let PasskeyWorker { answer, result, .. } = w;
+        if answer.try_send(a).is_err() {
+            // The worker already gave up (real-time backstop or KDC error).
+            self.audit(
+                "login_fail",
+                json!({"user": user, "ip": ip.to_string(), "method": m.as_str(), "reason": "conversation"}),
+            );
+            return Err(ApiError::Denied);
+        }
+        drop(answer);
+        let res = match tokio::time::timeout(PASSKEY_VERIFY_TIMEOUT, result).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => Err(KrbError::Unavailable("passkey worker ended without a result".into())),
+            Err(_) => Err(KrbError::Unavailable("no KDC verdict on the passkey answer in time".into())),
+        };
+        self.finish_login(user, ip, m, res)
+    }
+
+    /// Turn a KDC result into a session (or a generic denial).
+    fn finish_login(
+        &self,
+        user: String,
+        ip: IpAddr,
+        m: Method,
+        res: Result<UserTicket, KrbError>,
+    ) -> Result<AuthenticatedReply, ApiError> {
         let ticket = match res {
             Ok(t) => t,
-            Err(KrbError::Denied(m)) => {
-                debug!(user = %user, "login denied: {m}");
-                self.fail(&user, ip, "credentials");
+            Err(KrbError::Denied(msg)) => {
+                debug!(user = %user, method = m.as_str(), "login denied: {msg}");
+                self.fail(&user, ip, m, "credentials");
                 return Err(ApiError::Denied);
             }
-            Err(KrbError::Unavailable(m)) => {
-                error!("KDC unavailable: {m}");
-                self.audit("login_fail", json!({"user": user, "ip": ip.to_string(), "reason": "kdc_unavailable"}));
+            Err(KrbError::Unavailable(msg)) => {
+                error!("KDC unavailable: {msg}");
+                self.audit(
+                    "login_fail",
+                    json!({"user": user, "ip": ip.to_string(), "method": m.as_str(), "reason": "kdc_unavailable"}),
+                );
                 return Err(ApiError::Denied);
             }
         };
@@ -332,7 +635,7 @@ impl Broker {
         let tgt_left = ticket.end_unix.saturating_sub(unix);
         if tgt_left < 60 {
             self.d.krb.destroy(&ticket.ccache);
-            self.fail(&user, ip, "ticket_lifetime");
+            self.fail(&user, ip, m, "ticket_lifetime");
             return Err(ApiError::Denied);
         }
         let life = tgt_left.min(self.cfg.limits.session_absolute_secs);
@@ -352,7 +655,10 @@ impl Broker {
                 ports_used: Vec::new(),
             },
         );
-        self.audit("login_ok", json!({"user": user, "ip": ip.to_string(), "session": id, "expires_in": life}));
+        self.audit(
+            "login_ok",
+            json!({"user": user, "ip": ip.to_string(), "method": m.as_str(), "session": id, "expires_in": life}),
+        );
         Ok(AuthenticatedReply { state: "authenticated", session_token: token, expires_in: life, username: user })
     }
 
@@ -903,13 +1209,21 @@ impl Broker {
     }
 
     #[cfg(test)]
+    pub(crate) fn passkey_worker_count(&self) -> usize {
+        self.passkey_workers.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
     pub(crate) fn direct_count(&self) -> usize {
         self.st.lock().unwrap().direct.len()
     }
 }
 
-impl Clone for Prompt {
-    fn clone(&self) -> Self {
-        Prompt { id: self.id, style: self.style, text: self.text }
+/// A reserved passkey start; releases the reservation if the start is abandoned
+/// (e.g. the client disconnects while the KDC is asked).
+struct StartSlot<'a>(&'a Mutex<State>);
+impl Drop for StartSlot<'_> {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().passkey_starting -= 1;
     }
 }

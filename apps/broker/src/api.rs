@@ -21,7 +21,8 @@ use tower::ServiceExt;
 use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
 
-use crate::broker::{ApiError, Broker};
+use crate::broker::{ApiError, Broker, Method};
+use crate::passkey::Assertion;
 use crate::util::valid_hostname;
 
 impl IntoResponse for ApiError {
@@ -91,18 +92,35 @@ fn client_ip(ci: &SocketAddr) -> IpAddr {
 #[serde(deny_unknown_fields)]
 struct StartReq {
     username: String,
+    /// Absent or `"password_otp"`: password + OTP; `"passkey"`: passkey (contract §13.3).
+    #[serde(default)]
+    method: Option<String>,
 }
 
+/// Exactly one of `responses` (password + OTP) and `passkey`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RespondReq {
     conversation_id: String,
-    responses: Vec<String>,
+    #[serde(default)]
+    responses: Option<Vec<String>>,
+    #[serde(default)]
+    passkey: Option<PasskeyResp>,
+}
+
+/// Base64 fields; decoded and size-checked by [`Assertion::from_b64`]. Never logged.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PasskeyResp {
+    credential_id: String,
+    authenticator_data: String,
+    signature: String,
 }
 
 async fn auth_start(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo<SocketAddr>, body: Bytes) -> Response {
     let Ok(req) = serde_json::from_slice::<StartReq>(&body) else { return auth_error(ApiError::BadRequest) };
-    match b.auth_start(client_ip(&ci), &req.username) {
+    let Some(method) = Method::parse(req.method.as_deref()) else { return auth_error(ApiError::BadRequest) };
+    match b.auth_start_method(client_ip(&ci), &req.username, method).await {
         Ok(r) => Json(r).into_response(),
         Err(e) => auth_error(e),
     }
@@ -115,8 +133,19 @@ async fn auth_respond(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo
     let parsed = serde_json::from_slice::<RespondReq>(&raw);
     zeroize::Zeroize::zeroize(&mut *raw);
     let Ok(req) = parsed else { return auth_error(ApiError::BadRequest) };
-    let responses: Vec<Zeroizing<String>> = req.responses.into_iter().map(Zeroizing::new).collect();
-    match b.auth_respond(client_ip(&ci), &req.conversation_id, responses).await {
+    let ip = client_ip(&ci);
+    let r = match (req.responses, req.passkey) {
+        (Some(responses), None) => {
+            let responses: Vec<Zeroizing<String>> = responses.into_iter().map(Zeroizing::new).collect();
+            b.auth_respond(ip, &req.conversation_id, responses).await
+        }
+        (None, Some(p)) => {
+            let a = Assertion::from_b64(&p.credential_id, &p.authenticator_data, &p.signature);
+            b.auth_respond_passkey(ip, &req.conversation_id, a).await
+        }
+        _ => Err(ApiError::BadRequest),
+    };
+    match r {
         Ok(r) => Json(r).into_response(),
         Err(e) => auth_error(e),
     }

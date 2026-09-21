@@ -1,20 +1,21 @@
 # plank-broker
 
 Remote-access broker for PLANK hosts: one hardened public endpoint where a user
-signs in once with password + authenticator code, sees the hosts assigned to
+signs in once with password + authenticator code (or a passkey), sees the hosts assigned to
 them, and gets a short-lived, source-address-pinned port that the kernel
 forwards to the chosen host. TLS and QUIC run end to end between client and
 host; the broker never decrypts the stream.
 
 Design and binding contracts (API, brokered connect, host GSSAPI admission,
 internals) live in the bestdayever `bde-linux` repository,
-`docs/plank-broker.md` §10. This README covers the build and the deploy layout.
+`docs/plank-broker.md` §10 (passkeys: §13). This README covers the API as built,
+the build and the deploy layout.
 
 ## Components
 
 | Binary | Runs as | Privileges | Job |
 |---|---|---|---|
-| `plank-broker` | `plank-broker` | none | TLS 1.3 API on TCP 29000, Kerberos login (FAST + OTP), LDAP HBAC host list, host probes/pins, GSSAPI AP-REQ, lease bookkeeping, audit |
+| `plank-broker` | `plank-broker` | none | TLS 1.3 API on TCP 29000, Kerberos login (FAST + OTP or passkey), LDAP HBAC host list, host probes/pins, GSSAPI AP-REQ, lease bookkeeping, audit |
 | `plank-broker-relay` | `plank-broker-relay` (group `plank-broker`) | `CAP_NET_ADMIN` only | owns nft table `inet plank_broker`, adds/refreshes/removes leases, deletes conntrack entries |
 
 The API talks to the relay over `/run/plank-broker/relay.sock` (mode 0660,
@@ -29,12 +30,46 @@ inside the session range, sane client address, target inside
 
 | Call | Success | Failure |
 |---|---|---|
-| `POST /v1/auth/start {"username"}` | `challenge` + `conversation_id` + two prompts | 429 `{"state":"denied","retry_after":s}` |
+| `POST /v1/auth/start {"username"[,"method"]}` | `challenge` + `conversation_id` + prompts (below) | 429 `{"state":"denied","retry_after":s}`; unknown `method` → 200 `denied` |
 | `POST /v1/auth/respond {"conversation_id","responses":[pw, otp]}` | `authenticated`, `session_token`, `expires_in`, `username` | 200 `{"state":"denied"}` (always generic, ≥ `min_respond_ms`), 429 |
+| `POST /v1/auth/respond {"conversation_id","passkey":{credential_id,authenticator_data,signature}}` | same as above | same as above |
 | `GET /v1/hosts` (Bearer) | `{"hosts":[{id,name,online,in_use_by,connectable,reason}]}`; also refreshes this session's leases from this address | 401 `{"state":"denied"}`, 503 directory unavailable |
 | `POST /v1/hosts/{fqdn}/connect` (Bearer) | `{route,endpoint,port,host_cert_sha256,username,gssapi_token,expires_in:30}`; `route` is `"relay"` (endpoint = broker name, port = lease) or `"direct"` (endpoint = host IPv4, port = `hosts.port`) | 401; 403 `denied` (not assigned, or the KDC refused the host ticket); 409 `{"state":"unavailable","reason":"offline"\|"certificate changed"\|"no address"}`; 503 no free port / relay / KDC |
 | `POST /v1/hosts/{fqdn}/keepalive` (Bearer) | `{"state":"ok","expires_in":90}` (lease or direct grant) | 404 `{"state":"no_lease"}` → call `connect` again |
 | `POST /v1/logout` (Bearer) | `{"state":"logged_out"}` | 401 |
+
+### Sign-in methods (§10.1, §13.3)
+
+`method` absent or `"password_otp"`: two prompts,
+`[{"id":"password","style":"secret","text":"Password"},{"id":"otp","style":"otp","text":"Authenticator code"}]`,
+answered with `"responses":["<password>","<6-10 digits>"]`.
+
+`method: "passkey"`: one prompt,
+
+```json
+{"id":"passkey","style":"passkey","text":"Passkey",
+ "passkey":{"rp_id":"ipa.example.org","credential_ids":["<b64>"],"user_verification":true,"challenge":"<b64 32 bytes>"}}
+```
+
+answered with `"passkey":{"credential_id":"<b64>","authenticator_data":"<b64 raw authData>","signature":"<b64 DER ECDSA>"}`.
+The client signs `authData ‖ raw challenge` (the KDC uses the raw challenge as
+clientDataHash; there is no clientDataJSON) with `authData = SHA-256(rp_id) ‖ flags ‖ counter`.
+Base64 is the standard alphabet, padding optional. Limits: credential id 1-1024
+bytes and one of the offered `credential_ids`, authenticator data 37-1024 bytes,
+signature 8-256 bytes. `responses` and `passkey` are mutually exclusive, and a
+conversation only accepts the kind it was started for. Anything else is `denied`
+and counts as a failed attempt.
+
+`rp_id` comes from `passkey.rp_id` (default: the realm in lower case, e.g.
+`ipa.bde.run`), not from the KDC. When the KDC offers no passkey challenge
+(unknown user, OTP user, invalid name, KDC down or slower than
+`passkey.challenge_timeout_secs`) the broker answers with a **synthetic
+challenge of the same shape** (one random 32-byte credential id, random 32-byte
+challenge, `user_verification:true`) and denies the respond. At most
+`passkey.max_pending` passkey conversations (default 32) wait at a time,
+regardless of user; beyond that `auth/start` answers 429 `retry_after:10`.
+
+### Host list
 
 `reason` values are `null`, `"offline"`, `"certificate changed"`, `"no address"`.
 `in_use_by` is always `null`: the host's unauthenticated `/serverinfo` does not
@@ -47,6 +82,21 @@ reveal a session owner.
   New-password prompts and anything but password/pre-auth prompts abort the
   exchange. The TGT lives in a per-session `MEMORY:` ccache and is destroyed on
   logout/expiry. Passwords are held in zeroizing buffers and never logged.
+- Passkey login (`PA-REDHAT-PASSKEY`, type 153): a worker thread runs the same FAST
+  AS exchange with a krb5 responder for the SSSD passkey plugin's `passkey`
+  question and a prompter that refuses everything. The responder hands the KDC's
+  phase-1 challenge to the conversation and blocks until `auth/respond` delivers
+  the assertion (or the conversation expires or is reaped, which aborts the
+  exchange). The broker then answers phase 2 with the KDC's `state` and challenge,
+  the credential id as the KDC spelled it, `authenticator_data` wrapped as a CBOR
+  byte string (`0x58 len` for 24-255 bytes, `0x59 len16` above) and the
+  signature. The resulting TGT carries the `passkey` auth indicator. Assertion
+  material is never logged.
+- Preauth lists: the password path sets `[141]` (OTP) and no responder, the
+  passkey path `[153]`. MIT uses this list only for the optimistic first request;
+  it is not a filter. What keeps the paths apart is the KDC (IPA offers a user OTP
+  or passkey, never both) and the prompters (the password prompter refuses the
+  passkey plugin's prompts; the passkey prompter refuses all).
 - Sessions: 256-bit bearer, stored as SHA-256; 10 h absolute, 1 h idle, never past
   the TGT end. In memory only: restarting the service signs everyone out and the
   API resets the relay on start.
@@ -75,7 +125,9 @@ reveal a session owner.
   per IP → 15 min block, enforced before the KDC is asked; bursts ≥ 20
   failures/min are audited (`failure_burst`).
 - Audit: JSON lines on stdout (journald), events `service_start`, `login_ok`,
-  `login_fail`, `failure_burst`, `connect`, `connect_denied`, `lease_end`,
+  `login_fail` (both with `method`: `password_otp` or `passkey`; failure `reason`
+  `credentials`, `malformed`, `username`, `conversation`, `ticket_lifetime`,
+  `kdc_unavailable`, and for passkeys `no_challenge`, `credential`), `failure_burst`, `connect`, `connect_denied`, `lease_end`,
   `session_end`, `pin_new`, `pin_mismatch`, with the real client address.
 
 ## Build (Rocky 9 x86_64)
@@ -93,7 +145,10 @@ Anywhere else (e.g. macOS) the pure logic tests run without the system libraries
 `cargo test --no-default-features`.
 
 Runtime packages on the broker: `krb5-libs`, `nftables`, `conntrack-tools`
-(no cyrus-sasl, no openldap: the LDAP SASL/GSSAPI bind is native).
+(no cyrus-sasl, no openldap: the LDAP SASL/GSSAPI bind is native), and for
+passkey sign-in `sssd-passkey` (the SSSD krb5 client plugin; it installs
+`/etc/krb5.conf.d/sssd_enable_passkey`). Without it every passkey start gets a
+synthetic challenge and every passkey respond is denied; password + OTP is unaffected.
 
 ## Deploy layout
 
