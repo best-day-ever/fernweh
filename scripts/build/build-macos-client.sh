@@ -48,6 +48,11 @@ qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
     PLANK_VERSION="$version" PLANK_MACOS_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
     "QMAKE_CFLAGS+=$PLANK_C_FILE_FLAGS" "QMAKE_CXXFLAGS+=$PLANK_C_FILE_FLAGS"
 make -j"${PLANK_BUILD_JOBS:-8}" release
+# Touch ID sign-in helper (bde-linux docs/plank-broker.md 13.4): bundled by
+# app.pro; prove its signature format with a software key (no Touch ID).
+passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
+test -x "$passkey_helper"
+bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
 for suite in outputtopology planktoolbarlogic desktopstage macquitshortcut macapplication macpen plankbroker; do
 mkdir -p "$build/tests/$suite"
@@ -57,7 +62,7 @@ mkdir -p "$build/tests/$suite"
         QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
         "QMAKE_CXXFLAGS+=-include arm_acle.h"
     make -j"${PLANK_BUILD_JOBS:-8}"
-    PLANK_REPO_ROOT="$source_root" QT_QPA_PLATFORM=offscreen "./$suite"
+    PLANK_REPO_ROOT="$source_root" PLANK_PASSKEY_HELPER="$passkey_helper" QT_QPA_PLATFORM=offscreen "./$suite"
 )
 done
 plist="$build/app/plank-client.app/Contents/Info.plist"

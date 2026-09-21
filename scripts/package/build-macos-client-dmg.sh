@@ -81,6 +81,9 @@ while IFS= read -r -d '' framework; do
 done < <(find "$app" -depth -type d -name '*.framework' -print0)
 codesign --force --options runtime --timestamp --sign "$PLANK_MACOS_SIGNING_IDENTITY" "$app"
 codesign --verify --deep --strict "$app"
+# The Touch ID helper is signed by the loop above like every Mach-O: hardened
+# runtime, no entitlements (CryptoKit Secure Enclave keys need none).
+codesign --display --verbose=2 "$app/Contents/MacOS/plank-passkey" 2>&1 | grep -q 'flags=.*runtime'
 if ! app_version=$(QT_QPA_PLATFORM=offscreen "$app/Contents/MacOS/plank-client" --version); then
     echo 'Packaged Client failed offscreen launch; inspect ~/Library/Logs/PLANK/Client' >&2
     exit 1
