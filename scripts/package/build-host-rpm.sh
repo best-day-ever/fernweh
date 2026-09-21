@@ -46,6 +46,8 @@ install -D -m 0755 "$build_dir/plank-pam-broker" \
   "$payload_dir/usr/libexec/plank/plank-pam-broker"
 install -D -m 0755 "$build_dir/plank-host-supervisor" \
   "$payload_dir/usr/libexec/plank/plank-host-supervisor"
+install -D -m 0755 "$build_dir/pam_plank_handoff.so" \
+  "$payload_dir/usr/lib64/security/pam_plank_handoff.so"
 install -D -m 0755 "$repo_dir/packaging/host/linux/bin/plank-host" \
   "$payload_dir/usr/bin/plank-host"
 install -D -m 0755 "$repo_dir/packaging/host/linux/bin/plank-host-certificate" \
@@ -180,6 +182,7 @@ fi
 echo "host_rpm_config_identity_gate=pass"
 rpm -qpl "$rpm_file" | rg -q '/etc/pam\.d/plank-host$'
 rpm -qpl "$rpm_file" | rg -q '/etc/pam\.d/plank-remote$'
+rpm -qpl "$rpm_file" | rg -q '/usr/lib64/security/pam_plank_handoff\.so$'
 rpm -qpl "$rpm_file" | rg -q \
   '/usr/lib/udev/rules\.d/70-plank-host-wacom\.rules$'
 if rpm -qpl "$rpm_file" | rg -q \
