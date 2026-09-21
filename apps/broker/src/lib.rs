@@ -15,6 +15,7 @@ pub mod kerberos;
 pub mod ldap;
 #[cfg(feature = "system")]
 pub mod mit;
+pub mod passkey;
 pub mod pins;
 pub mod probe;
 pub mod ratelimit;

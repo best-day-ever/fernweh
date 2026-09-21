@@ -613,3 +613,365 @@ fn spki_hash_of_pem() {
     assert_eq!(h.len(), 64);
     assert_eq!(h, include_str!("../testdata/broker-test.spki").trim());
 }
+
+// ------------------------------------------------------------------ passkeys
+
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
+
+use crate::broker::Method;
+use crate::kerberos::fake_passkey_signature;
+use crate::passkey::Assertion;
+
+const CRED: [u8; 32] = [0xc5; 32];
+const RP: &str = "ipa.example.org";
+
+/// anna has a passkey (no OTP), bob has password + OTP.
+fn harness_passkey(tweak: impl FnOnce(&mut Config)) -> H {
+    let k = FakeKerberos::new(&[("bob", "hunter2654321")]).with_passkey("anna", &CRED);
+    harness_cfg(k, |c| {
+        c.passkey.rp_id = Some(RP.into());
+        tweak(c)
+    })
+}
+
+/// What the Mac helper does: authData = SHA-256(rp) ‖ UP|UV ‖ counter, signature over
+/// authData ‖ raw challenge (fake signature scheme of `FakeKerberos`).
+fn sign(prompt: &serde_json::Value) -> Assertion {
+    let p = &prompt["passkey"];
+    let mut ad = crate::util::sha256(p["rp_id"].as_str().unwrap().as_bytes()).to_vec();
+    ad.extend([0x05, 0, 0, 0, 1]);
+    let ch = B64.decode(p["challenge"].as_str().unwrap()).unwrap();
+    Assertion {
+        credential_id: B64.decode(p["credential_ids"][0].as_str().unwrap()).unwrap(),
+        signature: fake_passkey_signature(&ad, &ch),
+        authenticator_data: ad,
+    }
+}
+
+impl H {
+    async fn passkey_start(&self, ip: IpAddr, user: &str) -> (String, serde_json::Value) {
+        let c = self.b.auth_start_passkey(ip, user).await.unwrap();
+        let j = serde_json::to_value(&c).unwrap();
+        assert_eq!(j["state"], "challenge");
+        (c.conversation_id, j["prompts"][0].clone())
+    }
+
+    async fn passkey_login(&self, ip: IpAddr, user: &str) -> Result<String, ApiError> {
+        let (id, prompt) = self.passkey_start(ip, user).await;
+        self.b.auth_respond_passkey(ip, &id, Some(sign(&prompt))).await.map(|r| r.session_token)
+    }
+
+    /// Worker threads exit asynchronously; wait until `n` are left.
+    async fn workers_settle(&self, n: usize) {
+        for _ in 0..400 {
+            if self.b.passkey_worker_count() == n {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("{} passkey workers left, expected {n}", self.b.passkey_worker_count());
+    }
+
+    fn fails(&self) -> Vec<serde_json::Value> {
+        self.audit.events().into_iter().filter(|e| e["event"] == "login_fail").collect()
+    }
+}
+
+#[tokio::test]
+async fn passkey_happy_path() {
+    let h = harness_passkey(|_| {});
+    let (id, prompt) = h.passkey_start(IP, "Anna").await;
+    assert_eq!(prompt["id"], "passkey");
+    assert_eq!(prompt["style"], "passkey");
+    assert_eq!(prompt["text"], "Passkey");
+    let p = &prompt["passkey"];
+    assert_eq!(p["rp_id"], RP);
+    assert_eq!(p["credential_ids"], serde_json::json!([B64.encode(CRED)]));
+    assert_eq!(p["user_verification"], true);
+    assert_eq!(B64.decode(p["challenge"].as_str().unwrap()).unwrap().len(), 32);
+    assert_eq!(h.b.passkey_worker_count(), 1, "exchange parked in the responder");
+
+    let a = sign(&prompt);
+    let r = h.b.auth_respond_passkey(IP, &id, Some(a.clone())).await.unwrap();
+    assert_eq!(r.username, "anna");
+    assert_eq!(r.expires_in, 36000);
+    assert_eq!(h.krb.passkey_logins(), 1);
+    assert_eq!(h.krb.logins(), 0, "no password exchange");
+    let ok = h.audit.events().into_iter().find(|e| e["event"] == "login_ok").unwrap();
+    assert_eq!(ok["method"], "passkey");
+    h.workers_settle(0).await;
+
+    // The session is a normal one.
+    assert_eq!(h.b.list_hosts(IP, &r.session_token).await.unwrap().hosts.len(), 2);
+    assert!(h.b.connect(IP, &r.session_token, WS1, "e").await.is_ok());
+
+    // A conversation is single-use.
+    assert_eq!(h.b.auth_respond_passkey(IP, &id, Some(a.clone())).await.unwrap_err(), ApiError::Denied);
+
+    // Assertion material never reaches the audit trail.
+    let events = serde_json::to_string(&h.audit.events()).unwrap();
+    for secret in [B64.encode(&a.signature), B64.encode(&a.authenticator_data), p["challenge"].to_string()] {
+        assert!(!events.contains(secret.trim_matches('"')), "assertion material logged");
+    }
+}
+
+#[tokio::test]
+async fn passkey_wrong_and_missing_fields() {
+    let h = harness_passkey(|_| {});
+    let ip = |n: u8| IpAddr::V4(Ipv4Addr::new(198, 51, 100, n));
+
+    // Bad signature: the KDC refuses.
+    let (id, prompt) = h.passkey_start(ip(1), "anna").await;
+    let mut a = sign(&prompt);
+    a.signature[0] ^= 1;
+    assert_eq!(h.b.auth_respond_passkey(ip(1), &id, Some(a)).await.unwrap_err(), ApiError::Denied);
+    assert_eq!(h.fails().last().unwrap()["reason"], "credentials");
+    assert_eq!(h.fails().last().unwrap()["method"], "passkey");
+
+    // Assertion for another challenge (stale signature).
+    let (_, old) = h.passkey_start(ip(2), "anna").await;
+    let (id, _) = h.passkey_start(ip(2), "anna").await;
+    assert_eq!(h.b.auth_respond_passkey(ip(2), &id, Some(sign(&old))).await.unwrap_err(), ApiError::Denied);
+
+    // Credential the KDC did not offer: refused before the KDC is answered.
+    let (id, prompt) = h.passkey_start(ip(3), "anna").await;
+    let a = Assertion { credential_id: vec![1u8; 32], ..sign(&prompt) };
+    assert_eq!(h.b.auth_respond_passkey(ip(3), &id, Some(a)).await.unwrap_err(), ApiError::Denied);
+    assert_eq!(h.fails().last().unwrap()["reason"], "credential");
+
+    // Fields that failed validation.
+    let (id, _) = h.passkey_start(ip(4), "anna").await;
+    assert_eq!(h.b.auth_respond_passkey(ip(4), &id, None).await.unwrap_err(), ApiError::Denied);
+    assert_eq!(h.fails().last().unwrap()["reason"], "malformed");
+
+    // Wrong source address.
+    let (id, prompt) = h.passkey_start(ip(5), "anna").await;
+    assert_eq!(h.b.auth_respond_passkey(ip(6), &id, Some(sign(&prompt))).await.unwrap_err(), ApiError::Denied);
+
+    // Method mismatch in both directions consumes the conversation.
+    let (id, prompt) = h.passkey_start(ip(7), "anna").await;
+    assert_eq!(h.b.auth_respond(ip(7), &id, z(&["secret", "123456"])).await.unwrap_err(), ApiError::Denied);
+    assert_eq!(h.b.auth_respond_passkey(ip(7), &id, Some(sign(&prompt))).await.unwrap_err(), ApiError::Denied);
+    let c = h.b.auth_start(ip(8), "anna").unwrap();
+    assert_eq!(
+        h.b.auth_respond_passkey(ip(8), &c.conversation_id, Some(sign(&prompt))).await.unwrap_err(),
+        ApiError::Denied
+    );
+    assert_eq!(h.b.auth_respond_passkey(ip(8), "nope", Some(sign(&prompt))).await.unwrap_err(), ApiError::Denied);
+
+    h.workers_settle(1).await; // `old` is still waiting for its answer
+    assert_eq!(h.krb.passkey_logins(), 7);
+    assert_eq!(h.audit.count("login_ok"), 0);
+}
+
+#[tokio::test]
+async fn passkey_http_contract_and_validation() {
+    let h = harness_passkey(|c| c.limits.starts_per_minute_per_ip = 100);
+    let app = crate::api::router(h.b.clone());
+    let start = |m: &str| format!(r#"{{"username":"anna","method":"{m}"}}"#);
+    let (s, hd, j) = call(&app, "POST", "/v1/auth/start", None, &start("passkey")).await;
+    assert_eq!((s, &hd["cache-control"]), (StatusCode::OK, &"no-store".parse::<axum::http::HeaderValue>().unwrap()));
+    let keys: Vec<&str> = j["prompts"][0]["passkey"].as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["challenge", "credential_ids", "rp_id", "user_verification"]);
+    let conv = j["conversation_id"].as_str().unwrap().to_string();
+    let a = sign(&j["prompts"][0]);
+    let body = |conv: &str, cred: &str, ad: &str, sig: &str| {
+        format!(
+            r#"{{"conversation_id":"{conv}","passkey":{{"credential_id":"{cred}","authenticator_data":"{ad}","signature":"{sig}"}}}}"#
+        )
+    };
+    let (cred, ad, sig) = (B64.encode(&a.credential_id), B64.encode(&a.authenticator_data), B64.encode(&a.signature));
+    let denied = serde_json::json!({"state":"denied"});
+
+    // Shapes that never reach a conversation.
+    for bad in [
+        format!(r#"{{"conversation_id":"{conv}"}}"#),
+        format!(
+            r#"{{"conversation_id":"{conv}","responses":["x","123456"],"passkey":{{"credential_id":"{cred}","authenticator_data":"{ad}","signature":"{sig}"}}}}"#
+        ),
+        format!(r#"{{"conversation_id":"{conv}","passkey":{{"credential_id":"{cred}","authenticator_data":"{ad}"}}}}"#),
+        format!(
+            r#"{{"conversation_id":"{conv}","passkey":{{"credential_id":"{cred}","authenticator_data":"{ad}","signature":"{sig}","extra":1}}}}"#
+        ),
+    ] {
+        let (s, _, j) = call(&app, "POST", "/v1/auth/respond", None, &bad).await;
+        assert_eq!((s, &j), (StatusCode::OK, &denied));
+    }
+    // Field validation (each consumes a fresh conversation).
+    let long = B64.encode([1u8; 1025]);
+    let short_ad = B64.encode([1u8; 36]);
+    let long_sig = B64.encode([1u8; 257]);
+    for (c, a2, s2) in [
+        ("not base64!", ad.as_str(), sig.as_str()),
+        (long.as_str(), ad.as_str(), sig.as_str()),
+        (cred.as_str(), short_ad.as_str(), sig.as_str()),
+        (cred.as_str(), long.as_str(), sig.as_str()),
+        (cred.as_str(), ad.as_str(), long_sig.as_str()),
+        (cred.as_str(), ad.as_str(), ""),
+    ] {
+        h.clock.advance(Duration::from_secs(1000)); // clear the per-user failure block
+        let (_, _, j) = call(&app, "POST", "/v1/auth/start", None, &start("passkey")).await;
+        let conv = j["conversation_id"].as_str().unwrap();
+        let (s, _, j) = call(&app, "POST", "/v1/auth/respond", None, &body(conv, c, a2, s2)).await;
+        assert_eq!((s, &j), (StatusCode::OK, &denied));
+        assert_eq!(h.fails().last().unwrap()["reason"], "malformed");
+    }
+    // Unknown method.
+    let (s, _, j) = call(&app, "POST", "/v1/auth/start", None, &start("webauthn")).await;
+    assert_eq!((s, &j), (StatusCode::OK, &denied));
+
+    // The real thing over HTTP.
+    h.clock.advance(Duration::from_secs(1000));
+    let (_, _, j) = call(&app, "POST", "/v1/auth/start", None, &start("passkey")).await;
+    let conv = j["conversation_id"].as_str().unwrap().to_string();
+    let a = sign(&j["prompts"][0]);
+    let unpadded = |b: &[u8]| B64.encode(b).trim_end_matches('=').to_string();
+    let (s, _, j) = call(
+        &app,
+        "POST",
+        "/v1/auth/respond",
+        None,
+        &body(&conv, &unpadded(&a.credential_id), &unpadded(&a.authenticator_data), &unpadded(&a.signature)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(j["state"], "authenticated");
+    assert_eq!(j["username"], "anna");
+    h.workers_settle(1).await; // the first conversation was never answered
+}
+
+#[tokio::test]
+async fn passkey_conversation_expiry_releases_the_worker() {
+    let h = harness_passkey(|_| {});
+    let (id, prompt) = h.passkey_start(IP, "anna").await;
+    assert_eq!(h.b.passkey_worker_count(), 1);
+    h.clock.advance(Duration::from_secs(121));
+    assert_eq!(h.b.auth_respond_passkey(IP, &id, Some(sign(&prompt))).await.unwrap_err(), ApiError::Denied);
+    h.workers_settle(0).await;
+    assert_eq!(h.fails().last().unwrap()["reason"], "conversation");
+    assert_eq!(h.audit.count("login_ok"), 0);
+
+    // The reaper drops expired conversations without a request.
+    let (_id, _) = h.passkey_start(IP2, "anna").await;
+    assert_eq!(h.b.passkey_worker_count(), 1);
+    h.clock.advance(Duration::from_secs(121));
+    h.b.reap().await;
+    h.workers_settle(0).await;
+}
+
+#[tokio::test]
+async fn passkey_pending_cap_is_user_independent() {
+    let h = harness_passkey(|c| c.passkey.max_pending = 2);
+    let (id, prompt) = h.passkey_start(IP, "anna").await;
+    let _ = h.passkey_start(IP2, "nobody").await;
+    // Full: a real passkey user and an unknown user get the same 429.
+    for user in ["anna", "nobody", "bob"] {
+        assert_eq!(h.b.auth_start_passkey(IP3, user).await.unwrap_err(), ApiError::RateLimited(10));
+    }
+    // Password logins are not affected by the passkey cap.
+    assert!(h.login_from(IP3, "bob", "hunter2", "654321").await.is_ok());
+    // HTTP shape.
+    let app = crate::api::router(h.b.clone());
+    let (s, hd, j) = call(&app, "POST", "/v1/auth/start", None, r#"{"username":"anna","method":"passkey"}"#).await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(j, serde_json::json!({"state":"denied","retry_after":10}));
+    assert!(hd.contains_key("retry-after"));
+    // Finishing one frees a slot.
+    h.b.auth_respond_passkey(IP, &id, Some(sign(&prompt))).await.unwrap();
+    assert!(h.b.auth_start_passkey(LAN, "anna").await.is_ok());
+    // Expiry frees them all.
+    h.clock.advance(Duration::from_secs(121));
+    assert!(h.b.auth_start_passkey(IP2, "anna").await.is_ok());
+}
+
+#[tokio::test]
+async fn synthetic_challenge_has_the_real_shape() {
+    let mut k = FakeKerberos::new(&[("bob", "hunter2654321")]).with_passkey("anna", &CRED);
+    k.passkey_domain = RP.into();
+    let h = harness_cfg(k, |c| {
+        c.passkey.rp_id = Some(RP.into());
+        c.limits.starts_per_minute_per_ip = 100;
+    });
+    let (_, real) = h.passkey_start(IP, "anna").await;
+    // Shape: key set, types, lengths.
+    fn shape(p: &serde_json::Value) -> serde_json::Value {
+        let pk = &p["passkey"];
+        let lens: Vec<usize> = pk["credential_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| B64.decode(c.as_str().unwrap()).unwrap().len())
+            .collect();
+        serde_json::json!({
+            "keys": p.as_object().unwrap().keys().collect::<Vec<_>>(),
+            "pk_keys": pk.as_object().unwrap().keys().collect::<Vec<_>>(),
+            "id": p["id"], "style": p["style"], "text": p["text"],
+            "rp_id": pk["rp_id"], "uv": pk["user_verification"],
+            "cred_lens": lens,
+            "cred_b64_len": pk["credential_ids"][0].as_str().unwrap().len(),
+            "challenge_len": B64.decode(pk["challenge"].as_str().unwrap()).unwrap().len(),
+            "challenge_b64_len": pk["challenge"].as_str().unwrap().len(),
+        })
+    }
+    let want = shape(&real);
+    // Unknown user, password+OTP user, name the KDC never sees.
+    for (i, user) in ["nobody", "bob", "host/evil@EXAMPLE.ORG"].iter().enumerate() {
+        let ip = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 40 + i as u8));
+        let (id, p) = h.passkey_start(ip, user).await;
+        assert_eq!(shape(&p), want, "{user}");
+        assert_ne!(p["passkey"]["challenge"], real["passkey"]["challenge"]);
+        // Answering it (even "correctly") is denied like a wrong signature.
+        assert_eq!(h.b.auth_respond_passkey(ip, &id, Some(sign(&p))).await.unwrap_err(), ApiError::Denied);
+    }
+    assert_eq!(h.krb.passkey_logins(), 3, "invalid names never reach the KDC");
+    let reasons: Vec<_> = h.fails().iter().map(|e| e["reason"].clone()).collect();
+    assert_eq!(reasons, ["no_challenge", "no_challenge", "username"]);
+    // A KDC outage is not visible either.
+    let mut k = FakeKerberos::new(&[]).with_passkey("anna", &CRED);
+    k.unavailable = true;
+    let h2 = harness_cfg(k, |c| c.passkey.rp_id = Some(RP.into()));
+    let (_, p) = h2.passkey_start(IP, "anna").await;
+    assert_eq!(shape(&p), want);
+    h.workers_settle(1).await; // only the real conversation holds a worker
+}
+
+#[tokio::test]
+async fn otp_method_unaffected_by_passkeys() {
+    let h = harness_passkey(|_| {});
+    // Absent method and explicit password_otp are the same flow and prompts.
+    let app = crate::api::router(h.b.clone());
+    for body in [r#"{"username":"bob"}"#, r#"{"username":"bob","method":"password_otp"}"#] {
+        let (s, _, j) = call(&app, "POST", "/v1/auth/start", None, body).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(
+            j["prompts"],
+            serde_json::json!([
+                {"id":"password","style":"secret","text":"Password"},
+                {"id":"otp","style":"otp","text":"Authenticator code"}
+            ])
+        );
+        let conv = j["conversation_id"].as_str().unwrap();
+        let (_, _, j) = call(
+            &app,
+            "POST",
+            "/v1/auth/respond",
+            None,
+            &format!(r#"{{"conversation_id":"{conv}","responses":["hunter2","654321"]}}"#),
+        )
+        .await;
+        assert_eq!(j["state"], "authenticated");
+    }
+    assert_eq!(h.krb.logins(), 2);
+    assert_eq!(h.krb.passkey_logins(), 0, "the password path never runs a passkey exchange");
+    let ok: Vec<_> = h.audit.events().into_iter().filter(|e| e["event"] == "login_ok").collect();
+    assert!(ok.iter().all(|e| e["method"] == "password_otp"));
+    // A passkey user on the password path is simply denied.
+    assert_eq!(h.login_from(IP2, "anna", "secret", "123456").await, Err(ApiError::Denied));
+    assert_eq!(h.fails().last().unwrap()["method"], "password_otp");
+    // ...and gets in with the passkey.
+    assert!(h.passkey_login(IP3, "anna").await.is_ok());
+    assert_eq!(Method::parse(None), Some(Method::PasswordOtp));
+    assert_eq!(Method::parse(Some("passkey")), Some(Method::Passkey));
+    assert_eq!(Method::parse(Some("PASSKEY")), None);
+}

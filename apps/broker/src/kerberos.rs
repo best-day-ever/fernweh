@@ -7,6 +7,13 @@ use std::sync::Mutex;
 
 use zeroize::Zeroizing;
 
+use crate::passkey::{Assertion, Challenge};
+
+/// Passkey callback for [`Kerberos::login_passkey`]: called at most once with the
+/// KDC's challenge; blocks until the client's assertion arrives. `None` gives up
+/// (conversation expired or abandoned) and aborts the exchange.
+pub type PasskeyAsk<'a> = dyn FnMut(&Challenge) -> Option<Assertion> + 'a;
+
 /// A user TGT living in a per-session `MEMORY:` credential cache.
 #[derive(Debug, Clone)]
 pub struct UserTicket {
@@ -39,6 +46,12 @@ pub trait Kerberos: Send + Sync {
     /// answers the KDC's single OTP prompt.
     fn login(&self, username: &str, secret: &Zeroizing<String>) -> Result<UserTicket, KrbError>;
 
+    /// FAST-armoured AS exchange answered with a passkey (`PA-REDHAT-PASSKEY`). The
+    /// KDC challenge goes to `ask`; its assertion becomes the phase-2 answer. Nothing
+    /// else is ever answered (no password prompts). A user the KDC offers no passkey
+    /// challenge for fails without calling `ask`.
+    fn login_passkey(&self, username: &str, ask: &mut PasskeyAsk<'_>) -> Result<UserTicket, KrbError>;
+
     /// One-shot GSSAPI AP-REQ (no mutual auth) for `<host_service>@<fqdn>` from the
     /// session ccache, with `tls-server-end-point` channel bindings over `cert_sha256`.
     fn ap_req(&self, ccache: &str, fqdn: &str, cert_sha256: &[u8; 32]) -> Result<Vec<u8>, KrbError>;
@@ -54,10 +67,24 @@ pub fn channel_binding_data(cert_sha256: &[u8; 32]) -> Vec<u8> {
     v
 }
 
+/// Stand-in for the ECDSA signature in [`FakeKerberos`]: SHA-256 over
+/// `b"fake-passkey" ‖ authData ‖ challenge`.
+pub fn fake_passkey_signature(auth_data: &[u8], challenge: &[u8]) -> Vec<u8> {
+    let mut m = b"fake-passkey".to_vec();
+    m.extend_from_slice(auth_data);
+    m.extend_from_slice(challenge);
+    crate::util::sha256(&m).to_vec()
+}
+
 /// Test double: fixed users with password+otp, hosts refusing tickets, and a log
 /// of every call.
 pub struct FakeKerberos {
     pub users: HashMap<String, String>,
+    /// Passkey users (credential id). The KDC offers them a passkey challenge and
+    /// nothing else; everyone else gets no challenge.
+    pub passkey_users: HashMap<String, Vec<u8>>,
+    /// Domain the fake KDC puts in its challenge.
+    pub passkey_domain: String,
     /// Hosts for which the KDC refuses a service ticket (e.g. password-only TGT).
     pub policy_denied_hosts: Vec<String>,
     pub end_unix: u64,
@@ -71,6 +98,8 @@ impl FakeKerberos {
     pub fn new(users: &[(&str, &str)]) -> FakeKerberos {
         FakeKerberos {
             users: users.iter().map(|(u, s)| (u.to_string(), s.to_string())).collect(),
+            passkey_users: HashMap::new(),
+            passkey_domain: "ipa.example.org".into(),
             policy_denied_hosts: Vec::new(),
             end_unix: u64::MAX,
             unavailable: false,
@@ -80,9 +109,51 @@ impl FakeKerberos {
         }
     }
 
+    pub fn with_passkey(mut self, user: &str, credential_id: &[u8]) -> FakeKerberos {
+        self.passkey_users.insert(user.to_string(), credential_id.to_vec());
+        self
+    }
+
     pub fn logins(&self) -> usize {
         self.log.lock().unwrap().iter().filter(|l| l.starts_with("login ")).count()
     }
+
+    pub fn passkey_logins(&self) -> usize {
+        self.log.lock().unwrap().iter().filter(|l| l.starts_with("login_passkey ")).count()
+    }
+
+    fn ticket(&self) -> UserTicket {
+        let mut c = self.counter.lock().unwrap();
+        *c += 1;
+        UserTicket { ccache: format!("MEMORY:fake{}", *c), end_unix: self.end_unix }
+    }
+}
+
+/// What the fake KDC checks in a phase-2 answer (the real one runs `passkey_child`).
+fn fake_verify(answer: &str, ch: &Challenge, credential_id: &[u8]) -> bool {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let Some(json) = answer.strip_prefix(crate::passkey::PREFIX) else { return false };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return false };
+    let d = &v["data"];
+    let field = |k: &str| d[k].as_str().and_then(|s| STANDARD.decode(s).ok());
+    let (Some(id), Some(cbor), Some(sig), Some(raw_ch)) = (
+        field("credential_id"),
+        field("authenticator_data"),
+        field("assertion_signature"),
+        STANDARD.decode(&ch.challenge).ok(),
+    ) else {
+        return false;
+    };
+    let Some(ad) = crate::passkey::cbor_unwrap_byte_string(&cbor) else { return false };
+    v["phase"] == 2
+        && v["state"].as_str() == ch.state.as_deref()
+        && d["cryptographic_challenge"].as_str() == Some(ch.challenge.as_str())
+        && d["user_id"] == ""
+        && id == credential_id
+        && ad.len() >= 37
+        && ad[..32] == crate::util::sha256(ch.domain.as_bytes())
+        && sig == fake_passkey_signature(ad, &raw_ch)
 }
 
 impl Kerberos for FakeKerberos {
@@ -92,12 +163,39 @@ impl Kerberos for FakeKerberos {
             return Err(KrbError::Unavailable("fake kdc down".into()));
         }
         match self.users.get(username) {
-            Some(s) if s.as_str() == secret.as_str() => {
-                let mut c = self.counter.lock().unwrap();
-                *c += 1;
-                Ok(UserTicket { ccache: format!("MEMORY:fake{}", *c), end_unix: self.end_unix })
-            }
+            Some(s) if s.as_str() == secret.as_str() => Ok(self.ticket()),
             _ => Err(KrbError::Denied("Preauthentication failed".into())),
+        }
+    }
+
+    fn login_passkey(&self, username: &str, ask: &mut PasskeyAsk<'_>) -> Result<UserTicket, KrbError> {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        self.log.lock().unwrap().push(format!("login_passkey {username}"));
+        if self.unavailable {
+            return Err(KrbError::Unavailable("fake kdc down".into()));
+        }
+        let Some(cred) = self.passkey_users.get(username) else {
+            return Err(KrbError::Denied("no passkey challenge offered".into()));
+        };
+        let mut raw = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut raw);
+        // Go through the same text the SSSD plugin hands to the responder.
+        let question = format!(
+            "passkey {}",
+            serde_json::json!({"phase": 1, "state": "ipa_otpd state", "data": {
+                "domain": self.passkey_domain, "credential_id_list": [STANDARD.encode(cred)],
+                "user_verification": 1, "cryptographic_challenge": STANDARD.encode(raw),
+            }})
+        );
+        let ch =
+            Challenge::parse_question(&question).ok_or_else(|| KrbError::Unavailable("bad fake challenge".into()))?;
+        let Some(a) = ask(&ch) else { return Err(KrbError::Denied("responder gave up".into())) };
+        let Some(answer) = ch.answer(&a) else { return Err(KrbError::Denied("no answer".into())) };
+        if fake_verify(&answer, &ch, cred) {
+            Ok(self.ticket())
+        } else {
+            Err(KrbError::Denied("Preauthentication failed".into()))
         }
     }
 

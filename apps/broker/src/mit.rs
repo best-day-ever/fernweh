@@ -5,6 +5,16 @@
 //! * Login: `krb5_get_init_creds_password` with FAST (`set_fast_ccache_name`) and a
 //!   prompter that answers the KDC's OTP prompt with password‖otp; the resulting
 //!   TGT is written to a fresh per-session `MEMORY:` ccache (`set_out_ccache`).
+//! * Passkey login: the same exchange with a responder for the SSSD passkey
+//!   plugin's `passkey` question (challenge out, phase-2 answer in) and a prompter
+//!   that refuses everything. The plugin insists on a prompter being set.
+//!
+//! Preauth lists: MIT uses `set_preauth_list` only for the *optimistic* first
+//! request (empty padata of those types); it does not filter what the KDC offers
+//! later. The password path lists OTP (141) and never 153, and sets no responder;
+//! its prompter refuses the passkey plugin's prompts. The passkey path lists 153.
+//! Which mechanism a user gets is decided by the KDC: IPA offers OTP or passkey,
+//! never both, to one principal.
 //! * Connect: `gss_acquire_cred_from(ccache=…)` + `gss_init_sec_context` for
 //!   `<service>@<fqdn>` (host-based) with `tls-server-end-point` channel bindings,
 //!   no mutual auth, so a single AP-REQ token is produced.
@@ -15,7 +25,8 @@ use std::sync::RwLock;
 
 use zeroize::Zeroizing;
 
-use crate::kerberos::{channel_binding_data, Kerberos, KrbError, UserTicket};
+use crate::kerberos::{channel_binding_data, Kerberos, KrbError, PasskeyAsk, UserTicket};
+use crate::passkey::{Challenge, PA_TYPE as PA_REDHAT_PASSKEY};
 use crate::util::{random_hex, unix_now};
 
 type KrbCtx = *mut c_void;
@@ -70,6 +81,8 @@ struct KrbPrompt {
 }
 
 type Prompter = unsafe extern "C" fn(KrbCtx, *mut c_void, *const c_char, *const c_char, c_int, *mut KrbPrompt) -> i32;
+type KrbResponderCtx = *mut c_void;
+type Responder = unsafe extern "C" fn(KrbCtx, *mut c_void, KrbResponderCtx) -> i32;
 
 #[link(name = "krb5")]
 extern "C" {
@@ -89,6 +102,15 @@ extern "C" {
     fn krb5_get_init_creds_opt_set_proxiable(opt: KrbOpt, v: c_int);
     fn krb5_get_init_creds_opt_set_fast_ccache_name(ctx: KrbCtx, opt: KrbOpt, name: *const c_char) -> i32;
     fn krb5_get_init_creds_opt_set_out_ccache(ctx: KrbCtx, opt: KrbOpt, cc: KrbCcache) -> i32;
+    fn krb5_get_init_creds_opt_set_preauth_list(opt: KrbOpt, list: *mut i32, len: c_int);
+    fn krb5_get_init_creds_opt_set_responder(ctx: KrbCtx, opt: KrbOpt, f: Option<Responder>, data: *mut c_void) -> i32;
+    fn krb5_responder_get_challenge(ctx: KrbCtx, rctx: KrbResponderCtx, question: *const c_char) -> *const c_char;
+    fn krb5_responder_set_answer(
+        ctx: KrbCtx,
+        rctx: KrbResponderCtx,
+        question: *const c_char,
+        answer: *const c_char,
+    ) -> i32;
     fn krb5_get_init_creds_password(
         ctx: KrbCtx,
         creds: *mut KrbCreds,
@@ -212,6 +234,8 @@ const KRB5_PROMPT_TYPE_PASSWORD: i32 = 1;
 const KRB5_PROMPT_TYPE_PREAUTH: i32 = 4;
 /// Returned from the prompter to abort the exchange (maps to "denied").
 const PROMPT_ABORT: i32 = libc::ECANCELED;
+/// `PA-OTP-CHALLENGE`.
+const KRB5_PADATA_OTP_CHALLENGE: i32 = 141;
 
 /// RAII krb5 context.
 struct Ctx(KrbCtx);
@@ -344,6 +368,11 @@ unsafe extern "C" fn prompter(
         } else {
             CStr::from_ptr(p.prompt).to_string_lossy().to_ascii_lowercase()
         };
+        // The SSSD passkey plugin's own prompts ("Insert your passkey device…",
+        // "Enter PIN") are never answered with the password.
+        if text.contains("passkey") || text.trim() == "enter pin" {
+            return PROMPT_ABORT;
+        }
         let ok_type = ty == KRB5_PROMPT_TYPE_PASSWORD
             || ty == KRB5_PROMPT_TYPE_PREAUTH
             || (ty == 0
@@ -361,6 +390,47 @@ unsafe extern "C" fn prompter(
     }
     0
 }
+
+/// Passkey exchanges refuse every prompt; only the responder answers.
+unsafe extern "C" fn refuse_prompter(
+    _ctx: KrbCtx,
+    _data: *mut c_void,
+    _name: *const c_char,
+    _banner: *const c_char,
+    _num: c_int,
+    _prompts: *mut KrbPrompt,
+) -> i32 {
+    PROMPT_ABORT
+}
+
+struct PasskeyState<'a, 'b> {
+    ask: &'a mut PasskeyAsk<'b>,
+    /// Armour read lock: held until the KDC challenge arrives (the armour has been
+    /// turned into the exchange's FAST state by then), released before waiting
+    /// for the client so a slow user never blocks an armour refresh.
+    armor: Option<std::sync::RwLockReadGuard<'a, u64>>,
+    asked: bool,
+}
+
+/// Responder for the SSSD passkey plugin: hand the KDC challenge to `ask`, turn
+/// the assertion into the phase-2 answer. Any other question set aborts.
+unsafe extern "C" fn passkey_responder(ctx: KrbCtx, data: *mut c_void, rctx: KrbResponderCtx) -> i32 {
+    let st = &mut *(data as *mut PasskeyState);
+    let q = krb5_responder_get_challenge(ctx, rctx, PASSKEY_QUESTION.as_ptr());
+    if q.is_null() || st.asked {
+        return PROMPT_ABORT;
+    }
+    st.asked = true;
+    let Ok(text) = CStr::from_ptr(q).to_str() else { return PROMPT_ABORT };
+    let Some(ch) = Challenge::parse_question(text) else { return PROMPT_ABORT };
+    st.armor = None;
+    let Some(a) = (st.ask)(&ch) else { return PROMPT_ABORT };
+    let Some(answer) = ch.answer(&a).and_then(|s| CString::new(s).ok()) else { return PROMPT_ABORT };
+    // libkrb5 copies the answer.
+    krb5_responder_set_answer(ctx, rctx, PASSKEY_QUESTION.as_ptr(), answer.as_ptr())
+}
+
+const PASSKEY_QUESTION: &CStr = c"passkey";
 
 pub struct MitKerberos {
     realm: String,
@@ -476,6 +546,8 @@ impl Kerberos for MitKerberos {
             krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
             krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
             krb5_get_init_creds_opt_set_tkt_life(opt.1, self.ticket_lifetime);
+            let mut preauth = [KRB5_PADATA_OTP_CHALLENGE];
+            krb5_get_init_creds_opt_set_preauth_list(opt.1, preauth.as_mut_ptr(), preauth.len() as c_int);
             let mut rc = krb5_get_init_creds_opt_set_fast_ccache_name(ctx.0, opt.1, armor.as_ptr());
             if rc == 0 {
                 rc = krb5_get_init_creds_opt_set_out_ccache(ctx.0, opt.1, cc.1);
@@ -498,6 +570,59 @@ impl Kerberos for MitKerberos {
         if rc != 0 {
             cc.destroy();
             return Err(ctx.err(rc, "AS exchange"));
+        }
+        let end = creds.times.endtime as u32 as u64;
+        unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+        Ok(UserTicket { ccache: ccname, end_unix: end })
+    }
+
+    fn login_passkey(&self, username: &str, ask: &mut PasskeyAsk<'_>) -> Result<UserTicket, KrbError> {
+        self.refresh_armor(false)?;
+        let ctx = Ctx::new()?;
+        let princ = Princ::parse(&ctx, &format!("{username}@{}", self.realm))?;
+        let ccname = format!("MEMORY:pb-{}", random_hex(16));
+        let cc = Cc::resolve(&ctx, &ccname)?;
+        let opt = Opt::new(&ctx)?;
+        let armor = CString::new(self.armor_ccache.clone()).unwrap();
+        let mut st = PasskeyState { ask, armor: Some(self.armor.read().unwrap()), asked: false };
+        let mut creds = zero_creds();
+        let rc = unsafe {
+            krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
+            krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
+            krb5_get_init_creds_opt_set_tkt_life(opt.1, self.ticket_lifetime);
+            let mut preauth = [PA_REDHAT_PASSKEY];
+            krb5_get_init_creds_opt_set_preauth_list(opt.1, preauth.as_mut_ptr(), preauth.len() as c_int);
+            let mut rc = krb5_get_init_creds_opt_set_fast_ccache_name(ctx.0, opt.1, armor.as_ptr());
+            if rc == 0 {
+                rc = krb5_get_init_creds_opt_set_out_ccache(ctx.0, opt.1, cc.1);
+            }
+            if rc == 0 {
+                rc = krb5_get_init_creds_opt_set_responder(
+                    ctx.0,
+                    opt.1,
+                    Some(passkey_responder),
+                    &mut st as *mut PasskeyState as *mut c_void,
+                );
+            }
+            if rc == 0 {
+                rc = krb5_get_init_creds_password(
+                    ctx.0,
+                    &mut creds,
+                    princ.1,
+                    ptr::null(),
+                    Some(refuse_prompter),
+                    ptr::null_mut(),
+                    0,
+                    ptr::null(),
+                    opt.1,
+                );
+            }
+            rc
+        };
+        drop(st);
+        if rc != 0 {
+            cc.destroy();
+            return Err(ctx.err(rc, "AS exchange (passkey)"));
         }
         let end = creds.times.endtime as u32 as u64;
         unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };

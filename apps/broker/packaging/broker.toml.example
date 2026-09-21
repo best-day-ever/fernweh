@@ -61,3 +61,10 @@ max_sessions = 500
 max_conversations = 1000
 max_connections = 256
 min_respond_ms = 1500
+
+# Passkey sign-in (auth/start with method "passkey"). Needs the SSSD client
+# plugin on this host (package sssd-passkey). Defaults shown.
+# [passkey]
+# rp_id = "example.org"             # default: the realm in lower case (the IPA domain)
+# max_pending = 32                  # waiting passkey conversations; beyond this auth/start answers 429
+# challenge_timeout_secs = 10       # wait for the KDC challenge, then answer with a synthetic one
