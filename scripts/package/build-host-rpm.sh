@@ -105,6 +105,12 @@ fi
 echo "host_rpm_x264_config_section_gate=pass"
 install -d -m 0700 "$payload_dir/etc/plank/tls"
 install -d -m 0750 "$payload_dir/var/lib/plank"
+# %ghost files are never shipped; %post creates them. Empty placeholders let
+# rpmbuild record them from real zero-length files: for a missing ghost the
+# emulated x86_64 builder has recorded a 4 GiB size, which breaks rpm2cpio.
+install -m 0644 /dev/null "$payload_dir/etc/plank/tls/cert.pem"
+install -m 0600 /dev/null "$payload_dir/etc/plank/tls/key.pem"
+install -m 0600 /dev/null "$payload_dir/var/lib/plank/plank-state.json"
 # systemd 252 opens append: output before creating LogsDirectory=. The RPM
 # must provide this parent directory before the first service invocation.
 install -d -m 0700 "$payload_dir/var/log/plank"
@@ -244,4 +250,11 @@ mkdir "$work_dir/final-payload"
   rpm2cpio "$rpm_file" | cpio -idm --quiet
 )
 python3 "$repo_dir/scripts/test/check-package-build-paths.py" "$work_dir/final-payload"
+for ghost in etc/plank/tls/cert.pem etc/plank/tls/key.pem var/lib/plank/plank-state.json; do
+  [[ ! -e $work_dir/final-payload/$ghost ]] || {
+    echo "host RPM ships its %ghost placeholder /${ghost}" >&2
+    exit 1
+  }
+done
+echo "host_rpm_ghost_payload_gate=pass"
 plank_collect_package "$repo_dir" host linux x86_64 rocky-9.7 "$rpm_file"
