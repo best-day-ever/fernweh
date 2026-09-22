@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# graph — code-topology lookups for agents, backed by a local Graphify graph.
+#
+# Canonical copy: bde-linux/scripts/agent/graph. bde-pipeline and plank carry
+# identical copies; change all three together (diff them before committing).
+#
+# Why a wrapper and not the Graphify MCP server or its Claude hook:
+#   - one CLI works the same for Claude Code, Codex, subagents and worktrees;
+#   - no resident process per session (graphify-mcp holds ~170 MB for PLANK);
+#   - the graph is rebuilt only when HEAD moves, never on every query.
+#
+# Usage:
+#   scripts/agent/graph query "<question>" [--budget N]   scoped subgraph (default budget 1500 tokens)
+#   scripts/agent/graph explain "<Symbol>"                a node and its neighbours
+#   scripts/agent/graph path "<A>" "<B>"                  shortest path between two nodes
+#   scripts/agent/graph affected "<Symbol>"               what depends on it (reverse traversal)
+#   scripts/agent/graph all query "<question>"            same, across every BDE repo (merged graph)
+#   scripts/agent/graph build [--force]                   (re)build this checkout's graph now
+#   scripts/agent/graph status                            where the graph is and how fresh it is
+#
+# The graph covers code (AST, no LLM, no API cost). YAML, Markdown and other
+# docs are not in it: grep those. Graph output is routing evidence only;
+# verify in source before relying on it.
+set -euo pipefail
+
+GRAPHIFY_PIN="graphifyy==0.9.11"
+
+die() { printf 'graph: %s\n' "$*" >&2; exit 2; }
+
+command -v graphify >/dev/null 2>&1 ||
+  die "graphify is not installed. Install it with: uv tool install ${GRAPHIFY_PIN}"
+command -v git >/dev/null 2>&1 || die "git is required"
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || die "run inside a git checkout"
+out="$root/graphify-out"
+graph="$out/graph.json"
+stamp="$out/.built-from"
+lock="$out/.build.lock"
+
+head_rev() { git -C "$1" rev-parse HEAD 2>/dev/null || echo none; }
+
+is_fresh() { # <checkout>
+  [[ -f "$1/graphify-out/graph.json" && -f "$1/graphify-out/.built-from" ]] &&
+    [[ "$(cat "$1/graphify-out/.built-from")" == "$(head_rev "$1")" ]]
+}
+
+build() { # <checkout> — code-only build, serialised by a lock directory
+  local dir=$1 o="$1/graphify-out" rev
+  mkdir -p "$o"
+  if ! mkdir "$o/.build.lock" 2>/dev/null; then
+    # Another agent is building this checkout; wait for it (max ~3 min).
+    for _ in $(seq 1 180); do [[ -d "$o/.build.lock" ]] || return 0; sleep 1; done
+    rm -rf "$o/.build.lock"; mkdir "$o/.build.lock"
+  fi
+  rev=$(head_rev "$dir")
+  (
+    trap 'rm -rf "$o/.build.lock"' EXIT
+    cd "$dir"
+    if [[ -f graphify-out/graph.json ]]; then
+      graphify update . >/dev/null
+    else
+      graphify extract . --code-only >/dev/null
+    fi
+    printf '%s\n' "$rev" > graphify-out/.built-from
+  )
+}
+
+ensure() { # <checkout> — build synchronously if missing, in the background if stale
+  local dir=$1
+  if [[ ! -f "$dir/graphify-out/graph.json" ]]; then
+    printf 'graph: building %s (first run, ~15 s)...\n' "$dir" >&2
+    build "$dir"
+  elif ! is_fresh "$dir"; then
+    # Serve the slightly stale graph now; refresh for the next query.
+    ( build "$dir" >/dev/null 2>&1 & ) || true
+  fi
+}
+
+# Sibling BDE checkouts for `all`. Override with BDE_REPOS="path path ...".
+bde_repos() {
+  if [[ -n "${BDE_REPOS:-}" ]]; then printf '%s\n' $BDE_REPOS; return; fi
+  local common primary parent
+  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
+  primary=$(dirname "$common")
+  parent=$(dirname "$primary")
+  for r in bde-linux bde-pipeline bde-plank; do
+    [[ -d "$parent/$r/.git" ]] && printf '%s\n' "$parent/$r"
+  done
+}
+
+merged_graph() {
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}/bde-graph" inputs=() newest=0 r m
+  mkdir -p "$cache"
+  while IFS= read -r r; do
+    ensure "$r"
+    inputs+=("$r/graphify-out/graph.json")
+  done < <(bde_repos)
+  ((${#inputs[@]})) || die "no BDE checkouts found (set BDE_REPOS)"
+  m="$cache/merged-graph.json"
+  for r in "${inputs[@]}"; do [[ "$r" -nt "$m" ]] && newest=1; done
+  if [[ ! -f "$m" || $newest == 1 ]]; then
+    graphify merge-graphs "${inputs[@]}" --out "$m" >/dev/null
+    # Prefix source paths with the repo so query output says where a node lives.
+    python3 - "$m" <<'PY'
+import json, sys
+p = sys.argv[1]
+g = json.load(open(p))
+for n in g.get("nodes", []):
+    repo, src = n.get("repo"), n.get("source_file")
+    if repo and src and not src.startswith(repo + "/"):
+        n["source_file"] = f"{repo}/{src}"
+json.dump(g, open(p, "w"))
+PY
+  fi
+  printf '%s\n' "$m"
+}
+
+run_graphify() { # <graph.json> <subcommand> args...
+  local g=$1 sub=$2; shift 2
+  case "$sub" in
+    query)
+      local q=${1:?query needs a question}; shift
+      local budget=1500
+      if [[ "${1:-}" == "--budget" ]]; then budget=${2:?}; shift 2; fi
+      graphify query "$q" --graph "$g" --budget "$budget" "$@" ;;
+    explain)  graphify explain "${1:?explain needs a symbol}" --graph "$g" ;;
+    path)     graphify path "${1:?path needs A}" "${2:?path needs B}" --graph "$g" ;;
+    affected) graphify affected "${1:?affected needs a symbol}" --graph "$g" "${@:2}" ;;
+    *) die "unknown subcommand '$sub' (query|explain|path|affected|all|build|status)" ;;
+  esac
+}
+
+cmd=${1:-}; [[ -n "$cmd" ]] || { sed -n '2,25p' "$0"; exit 0; }
+shift
+
+case "$cmd" in
+  build)
+    [[ "${1:-}" == "--force" ]] && rm -f "$stamp"
+    build "$root"; printf 'graph: %s (built from %s)\n' "$graph" "$(cat "$stamp")" ;;
+  status)
+    if [[ -f "$graph" ]]; then
+      printf 'graph:   %s\nbuilt:   %s\nHEAD:    %s\nfresh:   %s\n' "$graph" \
+        "$(cat "$stamp" 2>/dev/null || echo unknown)" "$(head_rev "$root")" \
+        "$(is_fresh "$root" && echo yes || echo no)"
+    else
+      echo "graph: none yet for $root (first query builds it)"
+    fi ;;
+  all)
+    sub=${1:?all needs a subcommand}; shift
+    run_graphify "$(merged_graph)" "$sub" "$@" ;;
+  query|explain|path|affected)
+    ensure "$root"
+    run_graphify "$graph" "$cmd" "$@" ;;
+  -h|--help|help) sed -n '2,25p' "$0" ;;
+  *) die "unknown command '$cmd' (see: scripts/agent/graph --help)" ;;
+esac
