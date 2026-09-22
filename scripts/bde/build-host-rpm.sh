@@ -144,6 +144,12 @@ echo "===stage:build==="
 # calls the repo's own scripts/package/build-host-rpm.sh, which compiles the
 # CMake/CUDA host binaries then rpmbuild's the payload from
 # packaging/host/linux/rpm/plank-host.spec.
+# build.sh creates this link with plain `ln -s`. Remove only its own link on a
+# repeated candidate build; a failed collection leaves it in the checkout.
+ffmpeg_link=/workspace/apps/host/linux/cmake-build-ffmpeg-x264rgb-install/ffmpeg
+if [[ -L $ffmpeg_link && $(readlink -- "$ffmpeg_link") == "$PLANK_DEP_ROOT/host-ffmpeg" ]]; then
+  rm -- "$ffmpeg_link"
+fi
 bash /workspace/scripts/ci/build.sh linux-host
 
 echo "===stage:done==="
