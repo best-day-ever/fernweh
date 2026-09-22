@@ -3,11 +3,13 @@
 //! run on the blocking thread pool.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use zeroize::Zeroizing;
 
+use crate::enrol::{PwChangeError, PwReject};
 use crate::passkey::{Assertion, Challenge};
+use crate::util::Clock;
 
 /// Passkey callback for [`Kerberos::login_passkey`]: called at most once with the
 /// KDC's challenge; blocks until the client's assertion arrives. `None` gives up
@@ -81,6 +83,21 @@ pub trait Kerberos: Send + Sync {
 
     /// Destroy the session ccache (logout / expiry). Must be idempotent.
     fn destroy(&self, ccache: &str);
+
+    /// Enrolment proof (G5, §16): a FAST-armoured AS exchange for `kadmin/changepw`
+    /// answered with `password` alone. Works for an expired password; never answers
+    /// an OTP or passkey prompt, so a user with an enabled token cannot pass it
+    /// (FAST makes the KDC insist on the token). No ticket is kept.
+    fn prove_password(&self, username: &str, password: &Zeroizing<String>) -> Result<(), KrbError>;
+
+    /// Change the user's password with the kpasswd protocol, authenticated by a
+    /// FAST-armoured `kadmin/changepw` ticket obtained with `old` (as `prove_password`).
+    fn change_password(
+        &self,
+        username: &str,
+        old: &Zeroizing<String>,
+        new: &Zeroizing<String>,
+    ) -> Result<(), PwChangeError>;
 }
 
 /// `tls-server-end-point:` || SHA-256(leaf DER), as defined in contracts v1 §10.3.
@@ -120,6 +137,16 @@ pub struct FakeKerberos {
     pub log: Mutex<Vec<String>>,
     pub destroyed: Mutex<Vec<String>>,
     counter: Mutex<u32>,
+    /// Enrolment: current plain passwords (shared with `FakeDirectory` for user binds).
+    pub passwords: Arc<Mutex<HashMap<String, String>>>,
+    /// Enabled TOTP keys by user (written by `FakeDirectory` when a token is enabled);
+    /// `login` then accepts password‖code at `otp_clock`.
+    pub otp_keys: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    pub otp_clock: Mutex<Option<Arc<dyn Clock>>>,
+    /// Refuse password‖code logins (the "enrolled, sign in again" path).
+    pub otp_login_fails: Mutex<bool>,
+    /// Force the next password change to be refused with this reason.
+    pub reject_change: Mutex<Option<PwReject>>,
 }
 
 impl FakeKerberos {
@@ -138,7 +165,36 @@ impl FakeKerberos {
             log: Mutex::new(Vec::new()),
             destroyed: Mutex::new(Vec::new()),
             counter: Mutex::new(0),
+            passwords: Arc::new(Mutex::new(HashMap::new())),
+            otp_keys: Arc::new(Mutex::new(HashMap::new())),
+            otp_clock: Mutex::new(None),
+            otp_login_fails: Mutex::new(false),
+            reject_change: Mutex::new(None),
         }
+    }
+
+    pub fn proofs(&self) -> usize {
+        self.log.lock().unwrap().iter().filter(|l| l.starts_with("prove ")).count()
+    }
+
+    pub fn password_changes(&self) -> usize {
+        self.log.lock().unwrap().iter().filter(|l| l.starts_with("change_password ")).count()
+    }
+
+    /// Does `secret` equal the user's password followed by a currently valid code?
+    fn otp_login_ok(&self, username: &str, secret: &str) -> bool {
+        if *self.otp_login_fails.lock().unwrap() {
+            return false;
+        }
+        let (Some(pw), Some(key)) = (
+            self.passwords.lock().unwrap().get(username).cloned(),
+            self.otp_keys.lock().unwrap().get(username).cloned(),
+        ) else {
+            return false;
+        };
+        let Some(code) = secret.strip_prefix(pw.as_str()) else { return false };
+        let unix = self.otp_clock.lock().unwrap().as_ref().map(|c| c.unix()).unwrap_or_else(crate::util::unix_now);
+        crate::totp::verify(&key, code, unix).is_some()
     }
 
     pub fn with_passkey(mut self, user: &str, credential_id: &[u8]) -> FakeKerberos {
@@ -205,8 +261,42 @@ impl Kerberos for FakeKerberos {
         }
         match self.users.get(username) {
             Some(s) if s.as_str() == secret.as_str() => Ok(self.ticket(opts)),
+            _ if self.otp_login_ok(username, secret) => Ok(self.ticket(opts)),
             _ => Err(KrbError::Denied("Preauthentication failed".into())),
         }
+    }
+
+    fn prove_password(&self, username: &str, password: &Zeroizing<String>) -> Result<(), KrbError> {
+        self.log.lock().unwrap().push(format!("prove {username}"));
+        if self.unavailable {
+            return Err(KrbError::Unavailable("fake kdc down".into()));
+        }
+        // FAST: a user with an enabled token must answer the OTP challenge.
+        if self.otp_keys.lock().unwrap().contains_key(username) {
+            return Err(KrbError::Denied("Preauthentication failed (OTP required)".into()));
+        }
+        match self.passwords.lock().unwrap().get(username) {
+            Some(p) if p.as_str() == password.as_str() => Ok(()),
+            _ => Err(KrbError::Denied("Password incorrect".into())),
+        }
+    }
+
+    fn change_password(
+        &self,
+        username: &str,
+        old: &Zeroizing<String>,
+        new: &Zeroizing<String>,
+    ) -> Result<(), PwChangeError> {
+        self.log.lock().unwrap().push(format!("change_password {username}"));
+        self.prove_password(username, old).map_err(PwChangeError::Krb)?;
+        if let Some(r) = self.reject_change.lock().unwrap().take() {
+            return Err(PwChangeError::Rejected(r));
+        }
+        if new.chars().count() < 8 {
+            return Err(PwChangeError::Rejected(PwReject::TooShort));
+        }
+        self.passwords.lock().unwrap().insert(username.to_string(), new.to_string());
+        Ok(())
     }
 
     fn login_passkey(
