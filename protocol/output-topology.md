@@ -369,7 +369,7 @@ A host advertising the bit adds `display_capabilities` to the topology document:
   "physical_outputs": [
     {"id": "x11:HDMI-0", "name": "HDMI-0", "display_name": "MEC-O-3-H",
      "edid_sha256": "<64 hex>", "preferred": "3840x2160",
-     "modes": ["4096x2160", "3840x2160", "1920x1080", "1440x900", "1280x1024",
+     "modes": ["4096x2160", "3840x2160", "1920x1080", "1280x1024",
                "1280x720", "1024x768", "720x480", "640x480"]}
   ],
   "encoding_limits": {
