@@ -36,6 +36,7 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x400000` — single-person workstation: named `409` refusals and confirmed sign-out of an idle desktop owner (Linux Host)
 - `0x800000` — bounded authenticated UTF-8 clipboard synchronization
 - `0x1000000` — negotiated file clipboard control/content lanes
+- `0x2000000` — NvFBC 8-bit source into direct NVENC 4:2:0 (`h264-8-420-nvenc`, `hevc-10-420-nvenc`), BT.709 limited range (Linux Host)
 
 ### Expected desktop handoff status
 
