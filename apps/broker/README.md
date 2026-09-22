@@ -87,7 +87,9 @@ malformed body; clients treat unknown states as `denied` and never show broker t
    `enrol.conversation_ttl_secs`) and answers the same for every user name.
 2. `respond` counts against `enrol.daily_cap` (password proofs per user per 24 h,
    any address), then checks, before anything changes and before the KDC is asked:
-   G1 member of `enrol.group` (`fernweh`), G2 of none of `enrol.excluded_groups`
+   G1 member of `enrol.group` (`fernweh`) with `otp` among the user's own
+   `ipaUserAuthType` values (the plank_remote assignment; a hand-added member
+   without it could plant a token but never sign in with it), G2 of none of `enrol.excluded_groups`
    (`admins`, `sysadmins`), G4 `krbLastPwdChange` within `enrol.window_days` (7),
    account not disabled. Then G5: a FAST-armoured AS exchange for `kadmin/changepw`
    with the password alone (every prompt refused, so an enabled OTP token makes it

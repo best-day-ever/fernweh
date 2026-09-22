@@ -95,6 +95,11 @@ fn harness_cfg(tweak: impl FnOnce(&mut Config)) -> E {
         add("ivy", ivy);
         add("jack", facts(&clock, "jack", &["fernweh"], DAY, true));
         add("kim", EnrolFacts { disabled: true, ..facts(&clock, "kim", &["fernweh"], DAY, true) });
+        // In fernweh by hand, but without the plank_remote assignment's otp auth type.
+        add(
+            "lena",
+            EnrolFacts { auth_types: vec!["password".into()], ..facts(&clock, "lena", &["fernweh"], DAY, true) },
+        );
     }
     // jack already has an ENABLED token: FAST makes the KDC demand the code.
     otp_keys.lock().unwrap().insert("jack".into(), vec![1u8; 20]);
@@ -271,6 +276,7 @@ async fn gates_deny_generically_and_skip_the_kdc() {
     for (u, reason) in [
         ("dave", "privileged"),
         ("erin", "entitlement"),
+        ("lena", "entitlement"),
         ("fred", "window"),
         ("nobody", "credentials"),
         ("kim", "credentials"),

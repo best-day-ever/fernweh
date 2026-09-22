@@ -5,7 +5,10 @@
 //! gates before anything is changed and reveals nothing until the user has proven
 //! the password:
 //!
-//! * G1 entitlement: member of `enrol.group`.
+//! * G1 entitlement: member of `enrol.group` and `otp` among the user's own
+//!   `ipaUserAuthType` values (the plank_remote assignment). Without `otp` the KDC
+//!   never issues the otp-indicator ticket the final login needs, and a token
+//!   written anyway would close G3 and strand the user.
 //! * G2 not privileged: member of none of `enrol.excluded_groups`.
 //! * G4 fresh password: `krbLastPwdChange` within `enrol.window_days`.
 //! * G5 proof: FAST-armoured AS for `kadmin/changepw` with the password alone.
@@ -258,7 +261,9 @@ impl Broker {
             let dn = group_dn(g);
             groups.contains(&dn)
         };
-        if !member(&self.cfg.enrol.group) {
+        // G1 also needs `otp` among the user's own auth types: a hand-added group
+        // member without it could enrol a token but never sign in with it.
+        if !member(&self.cfg.enrol.group) || !f.auth_types.iter().any(|t| t == "otp") {
             return Err("entitlement");
         }
         if self.cfg.enrol.excluded_groups.iter().any(|g| member(g)) {
