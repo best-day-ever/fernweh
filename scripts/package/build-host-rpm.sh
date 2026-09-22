@@ -208,10 +208,11 @@ if rpm -qpl "$rpm_file" | rg -q \
 fi
 rpm -qpl "$rpm_file" | rg -q '/usr/share/plank/desktop\.png$'
 echo "host_rpm_fixed_desktop_gate=pass"
-rpm -qpl "$rpm_file" | rg -q '/usr/share/plank/display/virtual-1\.edid$'
-rpm -qpl "$rpm_file" | rg -q '/usr/share/plank/display/virtual-2\.edid$'
-if [[ $(rpm -qpl "$rpm_file" | rg -c '/usr/share/plank/display/.*\.edid$') -ne 2 ]]; then
-  echo "host RPM does not contain exactly two canonical virtual-display EDIDs" >&2
+for edid_index in 1 2 3 4; do
+  rpm -qpl "$rpm_file" | rg -q "/usr/share/plank/display/virtual-${edid_index}\\.edid\$"
+done
+if [[ $(rpm -qpl "$rpm_file" | rg -c '/usr/share/plank/display/.*\.edid$') -ne 4 ]]; then
+  echo "host RPM does not contain exactly four canonical virtual-display EDIDs" >&2
   exit 1
 fi
 if rpm -qpR "$rpm_file" | rg -qi 'miniupnp|upnp'; then

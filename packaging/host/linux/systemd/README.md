@@ -97,7 +97,18 @@ The administrator setting describes the boot policy. A host with
 bookmark-selected logical layout over connected native scanouts for one remote
 session. The supervisor restores the exact pre-session NVIDIA MetaMode at
 disconnect. A host with `startup_layout = virtual` uses the packaged-EDID
-headless workflow and does not advertise a physical bookmark layout. The RPM explicitly
+headless workflow and does not advertise a physical bookmark layout.
+
+`startup_layout = hybrid` starts like `physical` and also reserves up to three
+hidden virtual heads on free DisplayPort connectors (packaged EDIDs
+`virtual-1..3.edid`). The helper builds that overlay only from the display
+inventory the supervisor records after each X start
+(`/var/lib/plank/display-inventory`, root, 0600) and only when its GPU bus ID
+and driver version match the live GPU. It carries the Autodesk baseline's
+active device options and screen depth into the PLANK layout. Without a
+matching inventory it writes no overlay, exactly like `physical`, and the
+supervisor restarts the greeter once per inventory fingerprint when one
+exists and no session or lease is active. The RPM explicitly
 applies the packaged preset on upgrade so the pre-GDM cleanup cannot remain
 disabled while a stale owned overlay survives a reboot.
 
