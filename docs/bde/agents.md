@@ -2,7 +2,8 @@
 
 Read after the root `AGENTS.md` (upstream's repository policy, which still applies in full).
 This file adds what is specific to the bde.run fork. The root `HANDOFF.md` is upstream's state log,
-not ours: our state lives in bde-linux (`docs/TASKS.md`, `docs/plank-broker.md`) and in `docs/releases/`.
+not ours: never record BDE state there. Ours lives in bde-linux (`docs/TASKS.md`, `docs/plank-broker.md`) and in
+`docs/releases/`.
 
 ## What this fork ships
 
@@ -30,39 +31,62 @@ Each release gets `docs/releases/<version>.md` and a `packaging/VERSION` bump.
 
 ## Repositories and branches
 
-| Path | Fork | Integration branch | Upstream remote |
+| Path | Fork (push here) | Integration branch | Upstream |
 |---|---|---|---|
-| `.` | best-day-ever/plank (remote `bde`) | `bde/main` | `origin` = instinctual/plank |
-| `apps/client` | best-day-ever/plank-client (remote `bde`) | `bde/main` | `origin` = instinctual/plank-client |
-| `apps/host/linux` | best-day-ever/plank-host-linux (remote `bde`) | `bde/main` | `origin` = instinctual/plank-host-linux |
+| `.` | best-day-ever/plank | `bde/main` | instinctual/plank |
+| `apps/client` | best-day-ever/plank-client | `bde/main` | instinctual/plank-client |
+| `apps/host/linux` | best-day-ever/plank-host-linux | `bde/main` | instinctual/plank-host-linux |
+| `third_party/kyber-kymux` | none | pinned upstream commit | instinctual/plank-kymux (do not modify) |
 
-- Work on `bde/<topic>` branches. A submodule change is a PR on the submodule fork into its `bde/main`; once
-  merged, a gitlink bump PR here into `bde/main`. A freshly initialised submodule only has `origin` (upstream):
-  add `bde` before pushing (`git remote add bde https://github.com/best-day-ever/plank-client.git`).
-- Never push our work to `origin` or to anyone's `main`. Commit subjects start with `bde:` (or `release:`,
-  `docs/bde:`) so our history stays separable from upstream's.
+- Remote names differ by checkout, so check `git remote -v` (and `git -C apps/client remote -v`) before pushing.
+  In a fresh GitHub clone, `origin` is the best-day-ever fork (from `.gitmodules`). In the long-lived local checkout and
+  its worktrees, `origin` is instinctual and the fork is `bde`; add it where missing
+  (`git remote add bde https://github.com/best-day-ever/plank-client.git`). Never push to instinctual.
+- Work on `bde/<topic>` branches. A submodule change is a PR on the submodule fork into its `bde/main`, merged with a
+  merge commit; then a PR here on the same branch name bumps the gitlink (it points at the submodule PR's head commit).
+  Commit subjects start with `bde:` (or `release:`, `docs/bde:`).
+- plank and the submodule forks keep merge commits, never squash or rebase: bde-linux pins broker and host SHAs that
+  must stay reachable. Upstream changes arrive by merging instinctual `main` into `bde/main` in a dedicated PR.
+- A new worktree has empty submodules. Initialise only the one you need, following the root `AGENTS.md` seeding rules
+  (no recursive `submodule update --init` from the root): `git submodule update --init apps/client`.
 - The submodule forks are **public repositories**. Everything in them, and every commit message, follows
   `docs/security/private-information.md`: role names, reserved example addresses, no account names, no private
-  hostnames or IPs, no `/Users/<name>` paths. Before pushing, run
-  `python3 scripts/maintenance/check-private-information.py --range <base> HEAD` in each repo you touched.
+  hostnames or IPs, no `/Users/<name>` paths. The checker needs Gitleaks and an owner-only denylist (setup in that
+  document). Run it per repo you touched, from the superproject's copy:
+  `python3 scripts/maintenance/check-private-information.py --range <base> HEAD` at the root, and
+  `(cd apps/client && python3 ../../scripts/maintenance/check-private-information.py --range <base> HEAD)` in a submodule.
 - Stay upstreamable: fix generic problems in a way that could go back to instinctual as a PR; keep
   bde-specific behaviour behind configuration or in `docs/bde/`, `scripts/bde/`.
 
 ## Build and test (locally; GitHub Actions minutes are exhausted)
 
-- **Mac client, CI-equivalent** (~10 min): from a clean, committed checkout,
-  `export PLANK_SOURCE_ROOT="$PWD" PLANK_BUILD_BRANCH=<kebab-case-branch>; source ~/.cache/plank-ci/env.sh`,
-  then `agent-heavy-run bash scripts/ci/build.sh macos-client`. Success prints `hosted_build_gate=pass`.
-  `docs/development/build/macos-client-build-runbook.md` has the focused-test details.
-- **Mac client release DMG**: from a fresh GitHub clone of `bde/main` with `packaging/VERSION` bumped (the
-  catalog refuses to overwrite a version), `scripts/package/build-macos-client-dmg.sh`, signed with the studio
-  Developer ID and notarized; the exact environment is in the private notes. Hand-off DMGs are shared with the
-  studio outside Git.
-- **Broker**: `cd apps/broker && cargo test` on macOS (uses the test TLS backend); release builds run on the Linux
-  build VM and are deployed by bde-linux `roles/plank_broker` with a sha256 pin in `versions.yml`.
-- **Linux Host RPM** (~25 min): `scripts/bde/build-host-rpm.sh` in a Rocky 9.7 container. Build from a real clone,
-  not a git worktree (the container cannot follow a worktree's `.git` link). Pin the RPM in bde-linux.
-- Before merging, also run the root CI tests (`tests/ci`) and the private-information range check above.
+- **Mac client, dev build** (works from a worktree and on uncommitted trees; ~1 min incremental, ~10 min clean):
+  set `B=~/Library/Caches/plank-build`, export `PLANK_MAC_CLIENT_DEPS=$B/macos-client-deps-13`
+  `PLANK_QT_ROOT=$B/qt-6.10.2/6.10.2/macos` `PLANK_RUSTUP_ROOT=$B/rustup-1.89.0` `PLANK_CARGO_ROOT=$B/cargo`
+  `PLANK_BUILD_BRANCH=<kebab-case-branch>`, then
+  `agent-heavy-run bash scripts/build/build-macos-client.sh "$PWD" "$B/work/client-build-<topic>"` (absolute paths).
+  It runs the Mac test suites listed in that script. Always put `$PLANK_QT_ROOT/bin` first on `PATH`: the Homebrew
+  qmake is a different Qt. `~/.cache/plank-ci` (the CI mirror, `scripts/ci/build.sh`) has dependencies built for
+  macOS 27, not the 13.0 target; prefer the builder above.
+- **Single client test suite** (with the variables above and `PATH=$PLANK_QT_ROOT/bin:$PLANK_MAC_CLIENT_DEPS/install/bin:$PATH`,
+  `PKG_CONFIG_PATH=$PLANK_MAC_CLIENT_DEPS/install/lib/pkgconfig`): in an empty build directory,
+  `qmake <src>/apps/client/tests/<suite>/<suite>.pro CONFIG+=release CONFIG-=app_bundle QMAKE_MACOSX_DEPLOYMENT_TARGET=13.0 QMAKE_APPLE_DEVICE_ARCHS=arm64 "QMAKE_CXXFLAGS+=-include arm_acle.h"`,
+  `make -j8`, then `PLANK_REPO_ROOT=<src> QT_QPA_PLATFORM=offscreen ./<suite>`. Suites missing from the build script's
+  list only run when someone runs them by hand, so add new suites to that list.
+- **Mac client release DMG**: a release commit bumps `packaging/VERSION` (the catalog refuses to overwrite a version) and
+  adds `docs/releases/<version>.md`; then, from a fresh clone of `bde/main`,
+  `scripts/package/build-macos-client-dmg.sh` with the builder variables above plus `PLANK_BUILD_BRANCH=main`, the
+  studio Developer ID and the notary profile (exact values: `~/.local/share/plank/private-notes/mac-client-release.md`). Signing and notarisation take ~6 min.
+- **Broker**: on macOS `cd apps/broker && agent-heavy-run cargo test --no-default-features` (pure logic against fakes;
+  the default `system` feature needs MIT krb5/LDAP and builds on Linux only). The full `cargo test --release` and the
+  release build run on the Linux build VM; bde-linux `roles/plank_broker` deploys it, pinned by sha256 in `versions.yml`.
+- **Linux Host RPM** (~25 min warm): `scripts/bde/build-host-rpm.sh --budget-seconds 3600` in a Rocky 9.7 container,
+  from a real clone, not a worktree (the container cannot follow a worktree's `.git` link). The RPM stays in the
+  `plank-bde-host-deps` volume under `/deps/packages/candidates/<version>-<branch>/linux/`; copy it out, stage it on the
+  software share and pin it in bde-linux. Pinning in bde-linux `main` rolls it out to every PLANK workstation within
+  30 minutes (ansible-pull), so pin only a build you have tested.
+- Before merging, also run the root CI tests (`python3 -m unittest discover -s tests/ci`; one test fails on macOS
+  only because of the `/private/var` symlink) and the private-information check above.
 
 <!-- bde-agent-tooling v1: this block is identical in bde-linux/AGENTS.md (canonical), bde-pipeline/AGENTS.md and plank/docs/bde/agents.md, except the "this repo" line. Change all three together. -->
 ## BDE workspace
@@ -84,12 +108,14 @@ for a fraction of the tokens a grep-and-read sweep costs.
 
 - `scripts/agent/graph query "<question>"`: scoped subgraph, each node with file and line
 - `scripts/agent/graph explain "<Symbol>"`, `path "<A>" "<B>"`, `affected "<Symbol>"`
-- `scripts/agent/graph all query "<question>"`: the same across all three BDE repos (paths prefixed with the repo)
+- `scripts/agent/graph all query "<question>"`: the same across the BDE repos: this checkout plus the other repos'
+  primary checkouts (paths prefixed with the checkout name)
 
 Orient with it, then open only the files it points at. Grep directly for exact strings, for YAML/Markdown/Jinja
 (code only is in the graph, so Ansible roles are grep territory), and to confirm. Graph output is routing evidence,
 never proof. The first query in a new worktree builds the graph (~15 s); later queries refresh it in the background
-after HEAD moves. `graphify-out/` is ignored; never commit it. There is deliberately no Graphify MCP server
+after the checkout moves (HEAD or a submodule). Run it from the repo, not from inside a submodule: the graph always lives
+at the superproject root. `graphify-out/` is ignored; never commit it. There is deliberately no Graphify MCP server
 (it keeps ~170 MB resident per session) and no Graphify PreToolUse hook (it injects a nudge into every file read).
 
 ## Memory: central MemPalace
@@ -105,10 +131,11 @@ scripts and other agents with `scripts/agent/memory <tool> '<json-args>'`. Never
   - a decision or lesson: `mempalace_add_drawer` into this repo's wing, room `decisions`, `lessons`, `infra-state` or `handoff`
   - a fact that will change later (what runs where, which version is pinned): `mempalace_kg_add` (subject, predicate,
     object, `valid_from`), and `mempalace_kg_invalidate` the old triple when it changes
-  - end of a meaningful session: one `mempalace_diary_write` entry
+  - end of a meaningful session: one `mempalace_diary_write` entry with `agent_name` and `wing` set to this repo's wing
 - Wings: `bde-linux`, `bde-pipeline`, `bde-plank`; identity/IPA architecture that spans repos goes to `bde_it`.
-- Memory is additive. Anything another machine or a human needs also goes into the repo (task board, decisions,
-  HANDOFF, runbooks). If the server is down, carry on and backfill a note later.
+  PLANK history before 2026-09-22 lives in `bde-linux`, so search PLANK topics without a wing filter.
+- Memory is additive. Anything another machine or a human needs also goes into the repo's own docs (bde-linux task
+  board and decisions, plank release notes, runbooks). If the server is down, carry on and backfill a note later.
 
 ## Multi-agent work
 
@@ -121,6 +148,7 @@ scripts and other agents with `scripts/agent/memory <tool> '<json-args>'`. Never
   (`~/.cargo/shared-target`); never set a per-project `target-dir` or per-worktree `CARGO_TARGET_DIR`.
   Check `df -h /System/Volumes/Data` before heavy builds.
 - GitHub Actions minutes are exhausted: build and test locally (Linux artifacts on the Linux build VM, the Mac client on this Mac).
-- PRs are squash-merged, so `git branch --merged` reports merged branches as unmerged forever. Check the PR state on
-  GitHub before removing a branch, and remove the task's worktree as part of finishing it.
+- bde-linux and bde-pipeline PRs are squash-merged, so `git branch --merged` reports their merged branches as unmerged
+  forever: check the PR state on GitHub before removing a branch. plank and its submodule forks use merge commits so
+  the SHAs bde-linux pins stay reachable: never squash or rebase those. Remove a task's worktree as part of finishing it.
 <!-- /bde-agent-tooling -->

@@ -1,9 +1,48 @@
-#!/bin/bash
-# Minimal MemPalace MCP client (JSON-RPC over the local tunnel on 127.0.0.1:8765).
-# usage: scripts/agent/memory <tool> '<json-args>'      e.g. scripts/agent/memory mempalace_search '{"query":"flame dku"}'
+#!/usr/bin/env bash
+# memory — call one tool on the central MemPalace MCP server (JSON-RPC over the
+# host-local forward). For agents and scripts without an MCP client.
+#
+# Canonical copy: bde-linux/scripts/agent/memory (identical in bde-pipeline and plank).
+#
+# Usage: scripts/agent/memory <tool> ['<json-args>']
+#   scripts/agent/memory mempalace_status
+#   scripts/agent/memory mempalace_search '{"query":"flame dku","wing":"bde-linux"}'
+# Exits non-zero when the server is unreachable or the tool reports an error.
 set -euo pipefail
-TOOL="${1:?tool}"; ARGS="${2:-{\}}"
-curl -s --max-time 30 -X POST "${MEMPALACE_URL:-http://127.0.0.1:8765/mcp}" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL\",\"arguments\":$ARGS}}" \
-  | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d.get("result") or d.get("error");print("".join(c.get("text","") for c in r.get("content",[])) if isinstance(r,dict) and "content" in r else json.dumps(r,indent=1))'
+
+url=${MEMPALACE_URL:-http://127.0.0.1:8765/mcp}
+tool=${1:-}
+if [[ -z "$tool" || "$tool" == -h || "$tool" == --help ]]; then sed -n '2,10p' "$0"; exit 0; fi
+args=${2:-}
+[[ -n "$args" ]] || args='{}'
+
+request=$(python3 -c 'import json,sys
+try:
+    a = json.loads(sys.argv[2])
+except ValueError as e:
+    sys.exit(f"memory: arguments are not valid JSON: {e}")
+print(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                  "params": {"name": sys.argv[1], "arguments": a}}))' "$tool" "$args")
+
+if ! response=$(curl -sS --max-time 30 -X POST "$url" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    --data-binary "$request" 2>&1); then
+  printf 'memory: MemPalace is unreachable at %s (%s)\n' "$url" "$response" >&2
+  exit 3
+fi
+
+printf '%s' "$response" | python3 -c 'import json,sys
+raw = sys.stdin.read()
+# Streamable HTTP may answer as SSE ("data: {...}"); take the JSON payload.
+lines = [l[5:].strip() if l.startswith("data:") else l for l in raw.splitlines()]
+body = next((l for l in lines if l.startswith("{")), "")
+try:
+    d = json.loads(body)
+except ValueError:
+    sys.exit("memory: unexpected reply from MemPalace: " + raw[:200].replace("\n", " "))
+if "error" in d:
+    sys.exit("memory: " + json.dumps(d["error"]))
+r = d.get("result", {})
+text = "".join(c.get("text", "") for c in r.get("content", []))
+print(text if text else json.dumps(r, indent=1))
+sys.exit(1 if r.get("isError") else 0)'

@@ -7,62 +7,103 @@
 # Why a wrapper and not the Graphify MCP server or its Claude hook:
 #   - one CLI works the same for Claude Code, Codex, subagents and worktrees;
 #   - no resident process per session (graphify-mcp holds ~170 MB for PLANK);
-#   - the graph is rebuilt only when HEAD moves, never on every query.
+#   - the graph is rebuilt only when the checkout moves, never on every query.
 #
 # Usage:
 #   scripts/agent/graph query "<question>" [--budget N]   scoped subgraph (default budget 1500 tokens)
 #   scripts/agent/graph explain "<Symbol>"                a node and its neighbours
 #   scripts/agent/graph path "<A>" "<B>"                  shortest path between two nodes
 #   scripts/agent/graph affected "<Symbol>"               what depends on it (reverse traversal)
-#   scripts/agent/graph all query "<question>"            same, across every BDE repo (merged graph)
+#   scripts/agent/graph all <query|explain|path|affected> ...
+#                                                         the same across every BDE repo: this checkout
+#                                                         plus the sibling primary checkouts
 #   scripts/agent/graph build [--force]                   (re)build this checkout's graph now
 #   scripts/agent/graph status                            where the graph is and how fresh it is
 #
-# The graph covers code (AST, no LLM, no API cost). YAML, Markdown and other
-# docs are not in it: grep those. Graph output is routing evidence only;
-# verify in source before relying on it.
+# The graph always lives at the top of the superproject (inside a submodule it
+# is built for the superproject, never inside the submodule). It covers code
+# only (AST, no LLM, no API cost): YAML, Markdown and other docs are not in it,
+# grep those. Graph output is routing evidence; verify in source.
 set -euo pipefail
 
 GRAPHIFY_PIN="graphifyy==0.9.11"
+LOCK_WAIT_SECONDS=180
 
 die() { printf 'graph: %s\n' "$*" >&2; exit 2; }
+usage() { sed -n '2,27p' "$0"; }
 
+case "${1:-}" in
+  ""|-h|--help|help) usage; exit 0 ;;
+esac
+
+command -v git >/dev/null 2>&1 || die "git is required"
 command -v graphify >/dev/null 2>&1 ||
   die "graphify is not installed. Install it with: uv tool install ${GRAPHIFY_PIN}"
-command -v git >/dev/null 2>&1 || die "git is required"
 
-root=$(git rev-parse --show-toplevel 2>/dev/null) || die "run inside a git checkout"
-out="$root/graphify-out"
-graph="$out/graph.json"
-stamp="$out/.built-from"
-lock="$out/.build.lock"
+# Top of the superproject when inside a submodule, else the checkout top.
+top_of() { # <dir>
+  local super
+  super=$(git -C "$1" rev-parse --show-superproject-working-tree 2>/dev/null || true)
+  if [[ -n "$super" ]]; then printf '%s\n' "$super"; else git -C "$1" rev-parse --show-toplevel; fi
+}
 
-head_rev() { git -C "$1" rev-parse HEAD 2>/dev/null || echo none; }
+root=$(top_of "$PWD" 2>/dev/null) || die "run inside a git checkout"
+
+# What the graph was built from: HEAD plus the submodule gitlinks and their
+# checked-out commits, so a commit inside apps/client also refreshes the graph.
+source_rev() { # <checkout>
+  local head subs
+  head=$(git -C "$1" rev-parse --verify -q HEAD || echo none)
+  subs=$(git -C "$1" submodule status 2>/dev/null | cksum | cut -d' ' -f1 || true)
+  printf '%s+%s\n' "$head" "${subs:-0}"
+}
 
 is_fresh() { # <checkout>
   [[ -f "$1/graphify-out/graph.json" && -f "$1/graphify-out/.built-from" ]] &&
-    [[ "$(cat "$1/graphify-out/.built-from")" == "$(head_rev "$1")" ]]
+    [[ "$(cat "$1/graphify-out/.built-from")" == "$(source_rev "$1")" ]]
 }
 
-build() { # <checkout> — code-only build, serialised by a lock directory
-  local dir=$1 o="$1/graphify-out" rev
-  mkdir -p "$o"
-  if ! mkdir "$o/.build.lock" 2>/dev/null; then
-    # Another agent is building this checkout; wait for it (max ~3 min).
-    for _ in $(seq 1 180); do [[ -d "$o/.build.lock" ]] || return 0; sleep 1; done
-    rm -rf "$o/.build.lock"; mkdir "$o/.build.lock"
-  fi
-  rev=$(head_rev "$dir")
-  (
-    trap 'rm -rf "$o/.build.lock"' EXIT
-    cd "$dir"
-    if [[ -f graphify-out/graph.json ]]; then
-      graphify update . >/dev/null
-    else
-      graphify extract . --code-only >/dev/null
+lock_holder_alive() { # <lockdir>
+  local pid
+  pid=$(cat "$1/pid" 2>/dev/null || true)
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+acquire_lock() { # <lockdir> — returns 0 when we hold it, 1 when another build finished meanwhile
+  local lock=$1 waited=0 said=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    if ! lock_holder_alive "$lock"; then
+      # Stale lock (holder died). Move it aside atomically, then retry mkdir.
+      mv "$lock" "$lock.stale.$$" 2>/dev/null && rm -rf "$lock.stale.$$"
+      continue
     fi
-    printf '%s\n' "$rev" > graphify-out/.built-from
-  )
+    if ((said == 0)); then
+      printf 'graph: waiting for the build lock held by PID %s\n' "$(cat "$lock/pid" 2>/dev/null)" >&2
+      said=1
+    fi
+    ((waited++ < LOCK_WAIT_SECONDS)) || die "timed out waiting for $lock"
+    sleep 1
+    [[ -d "$lock" ]] || return 1
+  done
+  printf '%s\n' "$$" > "$lock/pid"
+  return 0
+}
+
+build() { # <checkout> [--force]
+  local dir=$1 force=${2:-} o="$1/graphify-out" rev rc=0
+  mkdir -p "$o"
+  if ! acquire_lock "$o/.build.lock"; then
+    [[ -f "$o/graph.json" ]] && return 0
+    acquire_lock "$o/.build.lock" || true
+  fi
+  rev=$(source_rev "$dir")
+  [[ "$force" == "--force" ]] && rm -rf "$o/cache" "$o/graph.json" "$o/.built-from"
+  # One build command for first builds and refreshes, so the graph's contents
+  # never depend on its history. The AST cache makes refreshes incremental.
+  (cd "$dir" && graphify extract . --code-only >/dev/null) || rc=$?
+  if ((rc == 0)); then printf '%s\n' "$rev" > "$o/.built-from"; fi
+  rm -rf "$o/.build.lock"
+  ((rc == 0)) || die "graphify extract failed in $dir (exit $rc)"
 }
 
 ensure() { # <checkout> — build synchronously if missing, in the background if stale
@@ -76,41 +117,65 @@ ensure() { # <checkout> — build synchronously if missing, in the background if
   fi
 }
 
-# Sibling BDE checkouts for `all`. Override with BDE_REPOS="path path ...".
+# This checkout plus the sibling primary checkouts of the other BDE repos.
+# Override with BDE_REPOS="path:path:..." (colon-separated).
 bde_repos() {
-  if [[ -n "${BDE_REPOS:-}" ]]; then printf '%s\n' $BDE_REPOS; return; fi
-  local common primary parent
+  local entry common primary parent r name
+  if [[ -n "${BDE_REPOS:-}" ]]; then
+    local IFS=:
+    for entry in $BDE_REPOS; do
+      if [[ -n "$entry" ]] && git -C "$entry" rev-parse --git-dir >/dev/null 2>&1; then
+        top_of "$entry"
+      else
+        printf 'graph: skipping %s (not a git checkout)\n' "$entry" >&2
+      fi
+    done
+    return
+  fi
+  printf '%s\n' "$root"
   common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
   primary=$(dirname "$common")
   parent=$(dirname "$primary")
+  name=$(basename "$primary")
   for r in bde-linux bde-pipeline bde-plank; do
+    [[ "$r" == "$name" ]] && continue
     [[ -d "$parent/$r/.git" ]] && printf '%s\n' "$parent/$r"
   done
 }
 
-merged_graph() {
-  local cache="${XDG_CACHE_HOME:-$HOME/.cache}/bde-graph" inputs=() newest=0 r m
-  mkdir -p "$cache"
+merged_graph() { # prints the path of a merged graph for the current repo set
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}/bde-graph" inputs=() tags=() r key m tmp stale=0
   while IFS= read -r r; do
     ensure "$r"
     inputs+=("$r/graphify-out/graph.json")
   done < <(bde_repos)
   ((${#inputs[@]})) || die "no BDE checkouts found (set BDE_REPOS)"
-  m="$cache/merged-graph.json"
-  for r in "${inputs[@]}"; do [[ "$r" -nt "$m" ]] && newest=1; done
-  if [[ ! -f "$m" || $newest == 1 ]]; then
-    graphify merge-graphs "${inputs[@]}" --out "$m" >/dev/null
+  mkdir -p "$cache"
+  key=$(printf '%s\n' "${inputs[@]}" | sort | cksum | cut -d' ' -f1)
+  m="$cache/merged-$key.json"
+  for r in "${inputs[@]}"; do [[ "$r" -nt "$m" ]] && stale=1; done
+  if [[ ! -f "$m" || $stale == 1 ]]; then
+    tmp=$(mktemp "$cache/.merge.XXXXXX")
+    if ((${#inputs[@]} == 1)); then
+      cp "${inputs[0]}" "$tmp"
+      tags=(--tag "$(basename "$(dirname "$(dirname "${inputs[0]}")")")")
+    else
+      graphify merge-graphs "${inputs[@]}" --out "$tmp" >/dev/null ||
+        { rm -f "$tmp"; die "graphify merge-graphs failed"; }
+    fi
     # Prefix source paths with the repo so query output says where a node lives.
-    python3 - "$m" <<'PY'
+    python3 - "$tmp" ${tags[@]+"${tags[@]}"} <<'PY' || { rm -f "$tmp"; die "could not post-process the merged graph"; }
 import json, sys
 p = sys.argv[1]
+single = sys.argv[3] if len(sys.argv) > 3 else None
 g = json.load(open(p))
 for n in g.get("nodes", []):
-    repo, src = n.get("repo"), n.get("source_file")
+    repo, src = n.get("repo") or single, n.get("source_file")
     if repo and src and not src.startswith(repo + "/"):
         n["source_file"] = f"{repo}/{src}"
 json.dump(g, open(p, "w"))
 PY
+    mv -f "$tmp" "$m"
   fi
   printf '%s\n' "$m"
 }
@@ -126,31 +191,30 @@ run_graphify() { # <graph.json> <subcommand> args...
     explain)  graphify explain "${1:?explain needs a symbol}" --graph "$g" ;;
     path)     graphify path "${1:?path needs A}" "${2:?path needs B}" --graph "$g" ;;
     affected) graphify affected "${1:?affected needs a symbol}" --graph "$g" "${@:2}" ;;
-    *) die "unknown subcommand '$sub' (query|explain|path|affected|all|build|status)" ;;
   esac
 }
 
-cmd=${1:-}; [[ -n "$cmd" ]] || { sed -n '2,25p' "$0"; exit 0; }
-shift
+cmd=$1; shift
 
 case "$cmd" in
   build)
-    [[ "${1:-}" == "--force" ]] && rm -f "$stamp"
-    build "$root"; printf 'graph: %s (built from %s)\n' "$graph" "$(cat "$stamp")" ;;
+    build "$root" "${1:-}"
+    printf 'graph: %s (built from %s)\n' "$root/graphify-out/graph.json" "$(cat "$root/graphify-out/.built-from")" ;;
   status)
-    if [[ -f "$graph" ]]; then
-      printf 'graph:   %s\nbuilt:   %s\nHEAD:    %s\nfresh:   %s\n' "$graph" \
-        "$(cat "$stamp" 2>/dev/null || echo unknown)" "$(head_rev "$root")" \
+    if [[ -f "$root/graphify-out/graph.json" ]]; then
+      printf 'graph:   %s\nbuilt:   %s\nnow:     %s\nfresh:   %s\n' "$root/graphify-out/graph.json" \
+        "$(cat "$root/graphify-out/.built-from" 2>/dev/null || echo unknown)" "$(source_rev "$root")" \
         "$(is_fresh "$root" && echo yes || echo no)"
     else
-      echo "graph: none yet for $root (first query builds it)"
+      echo "graph: none yet for $root (the first query builds it)"
     fi ;;
   all)
-    sub=${1:?all needs a subcommand}; shift
-    run_graphify "$(merged_graph)" "$sub" "$@" ;;
+    sub=${1:-}; shift || true
+    case "$sub" in query|explain|path|affected) ;; *) die "all needs query|explain|path|affected" ;; esac
+    m=$(merged_graph) || exit $?
+    run_graphify "$m" "$sub" "$@" ;;
   query|explain|path|affected)
     ensure "$root"
-    run_graphify "$graph" "$cmd" "$@" ;;
-  -h|--help|help) sed -n '2,25p' "$0" ;;
+    run_graphify "$root/graphify-out/graph.json" "$cmd" "$@" ;;
   *) die "unknown command '$cmd' (see: scripts/agent/graph --help)" ;;
 esac

@@ -1,9 +1,18 @@
 {
-  "enabledMcpjsonServers": ["mempalace"],
+  "enabledMcpjsonServers": [
+    "mempalace"
+  ],
   "permissions": {
     "allow": [
-      "Bash(scripts/agent/graph:*)",
-      "Bash(./scripts/agent/graph:*)",
+      "Bash(scripts/agent/graph query:*)",
+      "Bash(scripts/agent/graph explain:*)",
+      "Bash(scripts/agent/graph path:*)",
+      "Bash(scripts/agent/graph affected:*)",
+      "Bash(scripts/agent/graph status)",
+      "Bash(scripts/agent/graph all query:*)",
+      "Bash(scripts/agent/graph all explain:*)",
+      "Bash(scripts/agent/graph all path:*)",
+      "Bash(scripts/agent/graph all affected:*)",
       "mcp__mempalace__mempalace_status",
       "mcp__mempalace__mempalace_search",
       "mcp__mempalace__mempalace_check_duplicate",
@@ -20,10 +29,16 @@
       "mcp__mempalace__mempalace_find_tunnels",
       "mcp__mempalace__mempalace_diary_read",
       "mcp__mempalace__mempalace_get_aaak_spec",
+      "mcp__mempalace__mempalace_diary_write"
+    ],
+    "ask": [
+      "Edit(scripts/agent/**)",
+      "Write(scripts/agent/**)",
+      "Edit(.claude/**)",
+      "Write(.claude/**)",
       "mcp__mempalace__mempalace_add_drawer",
       "mcp__mempalace__mempalace_kg_add",
-      "mcp__mempalace__mempalace_kg_invalidate",
-      "mcp__mempalace__mempalace_diary_write"
+      "mcp__mempalace__mempalace_kg_invalidate"
     ]
   }
 }
