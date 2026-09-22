@@ -38,6 +38,7 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x1000000` — negotiated file clipboard control/content lanes
 - `0x2000000` — NvFBC 8-bit source into direct NVENC 4:2:0 (`h264-8-420-nvenc`, `hevc-10-420-nvenc`), BT.709 limited range (Linux Host)
 - `0x4000000` — notch-safe Apple laptop virtual modes (`3024x1890`); see the allowlist below (Linux Host)
+- `0x8000000` — display arrangements: up to four desktop outputs of any size in client positions, with host-resolved physical/virtual backing; see "Display arrangement extension" (Linux Host)
 
 ### Expected desktop handoff status
 
@@ -396,6 +397,18 @@ A host advertising the bit adds `display_capabilities` to the topology document:
     composite. Each output's `source_rect` then differs from its desktop rectangle.
 - `encoding_limits` holds each encoding mode's NVENC (or software) maximum size,
   plus the size the host has qualified in real time.
+  - The Linux Host lists the NVENC modes that passed its startup probe, with
+    the probe's `WIDTH_MAX`/`HEIGHT_MAX`. A mode missing from the object has no
+    published limit. A launch whose stream size exceeds its mode's limit fails
+    with 400 before any authentication state is used (with
+    `PlankDisplayArrangementError` `canvas_too_large` when the bit is negotiated).
+- `output_limits` also reflect how far the host can scale through
+  `ViewPortIn`. The Linux Host qualifies a 2:1 downscale per axis over its
+  largest carrier or viewport mode, so a host whose largest carrier is
+  5120x2160 publishes `max_height` 4320. The shared vectors use their own
+  capability fixtures and are not host output.
+- `max_canvas` is at most the boot-time X screen size and the largest encoder
+  size (`packed_capture: false`).
 
 A client may cache capabilities under their `fingerprint` to preview a layout
 before it connects. The host is always the authority.
@@ -528,6 +541,13 @@ the same engine as the equivalent arrangement with preference `auto`.
   arrangement, either now or ever. The same answer is used when a legacy
   `dual-horizontal` request reaches a physical host that has one output. The
   client stops waiting and reports the reason.
+  - The code is a table code when the host can tell before trying (for example
+    `output_too_large` when a `ViewPortIn` would exceed the host's qualified
+    downscale), or the failed transition's reason: `verify_failed`,
+    `visibility_failed`, `snapshot_failed`, `apply_failed`, `state_failed`,
+    `busy`, `unavailable` or `no_inventory`.
+  - A failed transition is reported for 30 seconds, also as
+    `layout.arrangement.transition`; a later launch tries again.
 
 A client presenting outputs in separate windows sends absolute pointer and touch
 positions in desktop coordinates, with the desktop bounding box as the reference
@@ -535,6 +555,14 @@ size. Positions therefore stay correct when the capture is packed differently
 from the desktop.
 
 ## Test Vector
+
+`tests/protocol/display-arrangement-v1.json` pins the arrangement grammar,
+check order, error codes and backing rule, including the Linux Host's
+`head` and `carrier` fields. Its `grammar` cases are evaluated against the
+`fleet-hybrid` capabilities. A number too large for a signed 32-bit value is
+never canonical. `tests/protocol/output-topology-v13-arrangement.json` is the
+topology during an arrangement lease. The Linux Host keeps byte-identical
+copies of both under `tests/fixtures/protocol/`, checked by `tests/ci`.
 
 `tests/protocol/output-topology-v13.json` represents a physical-startup host
 temporarily presenting the Flame-style 3840x2160 primary plus 1280x2160
