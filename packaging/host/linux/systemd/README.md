@@ -127,7 +127,8 @@ sudo /usr/libexec/plank/plank-host-supervisor --print-inventory [--json]
 # restore it, and report every step.
 sudo /usr/libexec/plank/plank-host-supervisor \
   --qualify-arrangement '1:3024x1890+0+270:auto,1920x1080+3024+0:auto' \
-  [--hold SECONDS] [--json]
+  [--hold SECONDS] [--json] \
+  [--capture ENCODING_MODE [--capture-frames N] [--capture-output DIRECTORY]]
 ```
 
 `--qualify-arrangement` refuses to run (exit 3) unless it is root, the policy
@@ -145,6 +146,26 @@ xrandr rectangles, holds for `--hold` seconds (default 10, at most 3600; Ctrl-C
 ends the hold early), restores the exact snapshot and non-desktop values and
 verifies them. It exits 0 only when the apply and the restore both verified,
 and 1 otherwise; the display is restored either way.
+
+`--capture ENCODING_MODE` (an NVENC mode such as `hevc-10-444-nvenc`) also
+exercises the media path while the arrangement holds: it runs the media
+worker's capture probe as root against the leased X server. The probe packs the
+arrangement for that mode's encoder limit with the launch binding's rule,
+captures `--capture-frames` frames (default 120) of the X screen through the
+same NvFBC packed-capture copy a stream uses, encodes them with that mode and
+writes into `--capture-output` (default `/var/tmp/plank-capture-probe`):
+`capture.hevc` or `capture.h264` (an Annex B elementary stream), `capture.ppm`
+(the last packed frame, RGB; about 100 MB at 7680x4320), `probe.json` (plan,
+screen, frames, fps) and `host.log`. Its result is part of the report and of
+the exit status. The probe can also run on its own, as root with the X
+environment of the active session:
+
+```sh
+sudo env DISPLAY=:0 XAUTHORITY=/run/user/<uid>/gdm/Xauthority \
+  /usr/libexec/plank/plank-host /etc/plank/host.conf \
+  log_path=/var/tmp/plank-capture-probe/host.log \
+  --capture-probe REQUEST ENCODING_MODE [FRAMES] [DIRECTORY]
+```
 
 A qualification run never writes `display-state` or `display-transition`, so
 the media worker and clients never see it. It keeps its own lease record in
