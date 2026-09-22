@@ -97,9 +97,91 @@ The administrator setting describes the boot policy. A host with
 bookmark-selected logical layout over connected native scanouts for one remote
 session. The supervisor restores the exact pre-session NVIDIA MetaMode at
 disconnect. A host with `startup_layout = virtual` uses the packaged-EDID
-headless workflow and does not advertise a physical bookmark layout. The RPM explicitly
+headless workflow and does not advertise a physical bookmark layout.
+
+`startup_layout = hybrid` always starts Xorg with the physical DKU layout at
+boot, then reserves up to three hidden virtual heads on free DisplayPort
+connectors (packaged EDIDs `virtual-1..3.edid`) after the supervisor has read
+the live outputs. Only the supervisor calls the helper with
+`--apply-inventory`; the pre-GDM boot service removes any owned overlay, even
+if yesterday's cached inventory still matches the GPU and driver. The helper
+then builds the overlay from the freshly recorded inventory
+(`/var/lib/plank/display-inventory`, root, 0600). It carries the Autodesk
+baseline's active device options and screen depth into the PLANK layout. A
+missing or invalid inventory or packaged EDID leaves the physical layout in
+place. The supervisor restarts the greeter once per inventory fingerprint
+when no user session or lease is active. The RPM explicitly
 applies the packaged preset on upgrade so the pre-GDM cleanup cannot remain
 disabled while a stale owned overlay survives a reboot.
+
+### Qualify a workstation's display arrangements
+
+The supervisor binary has two root-only modes for hardware qualification.
+They need no client and no signed-in account: they act on the active seat0
+X server, the GDM greeter or a user desktop, as that session's user.
+
+```sh
+# The display inventory and the display_capabilities a client would see
+# (encoding_limits come from the media worker and are empty here).
+sudo /usr/libexec/plank/plank-host-supervisor --print-inventory [--json]
+
+# Apply one canonical arrangement with the client lease transaction, hold it,
+# restore it, and report every step.
+sudo /usr/libexec/plank/plank-host-supervisor \
+  --qualify-arrangement '1:3024x1890+0+270:auto,1920x1080+3024+0:auto' \
+  [--hold SECONDS] [--json] \
+  [--capture ENCODING_MODE [--capture-frames N] [--capture-output DIRECTORY]]
+```
+
+`--qualify-arrangement` refuses to run (exit 3) unless it is root, the policy
+is `physical` or `hybrid`, no PLANK display lease exists
+(`/run/plank/host/display-state` is absent), no display transition is
+pending and no other qualification runs. A stream bound without a lease (a
+`physical` bookmark on a physical host) is not visible to it, so check that
+nobody is connected first. It captures the inventory, evaluates and plans the
+request with the same functions the lease path uses (exit 4 with the reason,
+nothing changed, if the host cannot present it), then runs the same apply
+transaction: snapshot, visibility, settle, one CurrentMetaMode, primary,
+verify with one retry. It prints the MetaMode, the xrandr visibility
+arguments, each output's backing and carrier, the verify result and the
+xrandr rectangles, holds for `--hold` seconds (default 10, at most 3600; Ctrl-C
+ends the hold early), restores the exact snapshot and non-desktop values and
+verifies them. It exits 0 only when the apply and the restore both verified,
+and 1 otherwise; the display is restored either way.
+
+`--capture ENCODING_MODE` (an NVENC mode such as `hevc-10-444-nvenc`) also
+exercises the media path while the arrangement holds: it runs the media
+worker's capture probe as root against the leased X server. The probe packs the
+arrangement for that mode's encoder limit with the launch binding's rule and
+runs the stream's own video pipeline (capture thread, image pool, NVENC encode
+loop) for `--capture-frames` encoded frames (default 120), and writes into
+`--capture-output` (default `/var/tmp/plank-capture-probe`): `capture.hevc` or
+`capture.h264` (the Annex B elementary stream a client would receive),
+`capture.ppm` (one packed frame read back from the capture, RGB, about 100 MB
+at 7680x4320, with each output's slot framed in red, green, blue or magenta
+by entry and entry+1 white squares in its corner; the stream itself is
+unmarked), `probe.json` (plan, frames, fps, why the loop ended) and
+`host.log` (including "Video capture loop ended with status ...").
+On a static screen NvFBC delivers few new frames and the encoder repeats the
+last one at the minimum rate, so fps reflects the screen, not the encoder. Its result is part of the report and of
+the exit status. The probe can also run on its own, as root with the X
+environment of the active session:
+
+```sh
+sudo env DISPLAY=:0 XAUTHORITY=/run/user/<uid>/gdm/Xauthority \
+  /usr/libexec/plank/plank-host /etc/plank/host.conf \
+  log_path=/var/tmp/plank-capture-probe/host.log \
+  --capture-probe REQUEST ENCODING_MODE [FRAMES] [DIRECTORY]
+```
+
+A qualification run never writes `display-state` or `display-transition`, so
+the media worker and clients never see it. It keeps its own lease record in
+`/run/plank/host/display-qualify` under an exclusive lock. While the lock is
+held the supervisor refuses client display transitions (`busy`) and skips
+the hybrid greeter restart. If the run dies without restoring (for example
+SIGKILL), the lock disappears with it and the running supervisor restores
+the recorded snapshot within about a second; without a running supervisor,
+the next qualification run does it first.
 
 The client is interactive and ships no systemd user service or desktop
 autostart entry. Launch it explicitly from the desktop application icon or the

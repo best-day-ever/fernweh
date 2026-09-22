@@ -38,6 +38,7 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x1000000` — negotiated file clipboard control/content lanes
 - `0x2000000` — NvFBC 8-bit source into direct NVENC 4:2:0 (`h264-8-420-nvenc`, `hevc-10-420-nvenc`), BT.709 limited range (Linux Host)
 - `0x4000000` — notch-safe Apple laptop virtual modes (`3024x1890`); see the allowlist below (Linux Host)
+- `0x8000000` — display arrangements: up to four desktop outputs of any size in client positions, with host-resolved physical/virtual backing; see "Display arrangement extension" (Linux Host)
 
 ### Expected desktop handoff status
 
@@ -341,7 +342,276 @@ Those remain owned by the authenticated native launch/session lifecycle.
 It describes one capture canvas, not multiple independently streamed displays.
 The Linux schema-13 fixture and checks remain unchanged.
 
+## Display arrangement extension (Linux Host, `0x8000000`)
+
+`DisplayArrangementFeature = 0x8000000` lets a client ask for up to four desktop
+outputs of any size, in its own positions, instead of choosing the `single` or
+`dual-horizontal` layout with named modes. It stays inside schema and protocol
+version 13. Both sides compare that version exactly, so a numeric bump would
+disconnect every installed client. Everything below is additive. None of it is
+published, accepted, or inferred unless the host advertises the bit and the
+launch negotiates it.
+
+### Capabilities
+
+A host advertising the bit adds `display_capabilities` to the topology document:
+
+```json
+"display_capabilities": {
+  "version": 1,
+  "fingerprint": "<opaque, changes with the inventory below>",
+  "max_outputs": 4,
+  "virtual_heads": 3,
+  "max_canvas": {"width": 8192, "height": 8192},
+  "packed_capture": false,
+  "output_limits": {"min_width": 640, "min_height": 480,
+                    "max_width": 8192, "max_height": 8192, "max_pixels": 33177600},
+  "refresh_millihz": [60000],
+  "physical_outputs": [
+    {"id": "x11:HDMI-0", "name": "HDMI-0", "display_name": "MEC-O-3-H",
+     "edid_sha256": "<64 hex>", "preferred": "3840x2160",
+     "modes": ["4096x2160", "3840x2160", "1920x1080", "1280x1024",
+               "1280x720", "1024x768", "720x480", "640x480"]}
+  ],
+  "encoding_limits": {
+    "hevc-10-444-nvenc": {"width": 8192, "height": 8192,
+                          "qualified_width": 7680, "qualified_height": 4320}
+  }
+}
+```
+
+- `physical_outputs` lists the connected non-PLANK outputs and their progressive
+  modes whose refresh rate is between 59.9 and 60.1 Hz and that meet
+  `output_limits`. Modes are sorted by area, then width, both descending.
+  A PLANK virtual connector, identified by EDID manufacturer `PLK`, is never
+  physical.
+- `virtual_heads` is the number of PLANK virtual connectors the boot-time X
+  screen reserved. It is `0` under the `physical` startup policy, and up to 3
+  under `hybrid`.
+- `max_outputs` is at most 4. That is the GPU head budget, and never more than the
+  physical outputs plus `virtual_heads`.
+- `max_canvas` bounds the bounding box of the requested desktop.
+  - With `packed_capture: false` it is also the largest encoding size, so the
+    capture equals the desktop.
+  - With `packed_capture: true` it is the boot-time X screen size. A desktop
+    larger than the launch's encoding limit is captured in rows (see "Packed
+    capture" below), and each output's `source_rect` then differs from its
+    desktop rectangle.
+- `encoding_limits` holds each encoding mode's NVENC (or software) maximum size,
+  plus the size the host has qualified in real time.
+  - The Linux Host lists the NVENC modes that passed its startup probe, with
+    the probe's `WIDTH_MAX`/`HEIGHT_MAX`. A mode missing from the object has no
+    published limit. A launch whose stream size exceeds its mode's limit fails
+    with 400 before any authentication state is used (with
+    `PlankDisplayArrangementError` `canvas_too_large` when the bit is negotiated).
+- `output_limits` also reflect how far the host can scale through
+  `ViewPortIn`. The Linux Host qualifies a 2:1 downscale per axis over its
+  largest carrier or viewport mode, so a host whose largest carrier is
+  5120x2160 publishes `max_height` 4320. The shared vectors use their own
+  capability fixtures and are not host output.
+- `max_canvas` is at most the boot-time X screen size, and also at most the
+  largest encoder size when `packed_capture` is false.
+
+A client may cache capabilities under their `fingerprint` to preview a layout
+before it connects. The host is always the authority.
+
+### Launch request
+
+The launch sends `plankDisplayArrangement`. It cannot be combined with
+`plankHostLayout`, `plankVirtualMode1`, or `plankVirtualMode2`:
+
+```
+arrangement := "1:" entry ("," entry){0,3}
+entry       := W "x" H "+" X "+" Y ":" preference
+preference  := "auto" | "physical" | "virtual"
+```
+
+- Numbers are decimal, with no sign and no leading zero.
+- W, H, X and Y are even.
+- The smallest X is 0, and the smallest Y is 0.
+- Outputs never overlap. Gaps are allowed and stay black.
+- Entry 0 is the primary output.
+- The whole string is at most 160 bytes.
+
+The host parses the request, serialises it again, and rejects it unless the two
+strings are byte-identical. That canonical string is the only form carried
+anywhere: in the supervisor record, in the runtime state, in
+`layout.arrangement.request`, and in the test vectors. Requesting the canonical
+arrangement that is already live is a no-op binding, the same as a matching
+`plankHostLayout` today.
+
+Error codes, returned in `PlankDisplayArrangementError` with status 400:
+
+| Code | Meaning |
+|---|---|
+| `malformed` | not in the grammar |
+| `not_canonical` | not in canonical form |
+| `odd_value` | a value is odd |
+| `origin_not_zero` | the smallest X or smallest Y is not 0 |
+| `overlap` | two outputs overlap |
+| `output_too_small` | an output is below `output_limits` |
+| `output_too_large` | an output exceeds `output_limits` |
+| `canvas_too_large` | the desktop bounding box exceeds `max_canvas`, or its packed capture does not fit the launch's encoding limit |
+| `too_many_displays` | more than `max_outputs`, more than 4 entries, or no output left for an `auto` entry |
+| `no_physical_output` | an entry prefers `physical`, and no physical output is free for it |
+| `no_virtual_output` | an entry prefers `virtual`, and no virtual head is free for it |
+| `not_negotiated` | the launch did not negotiate `0x8000000` |
+
+Checks run in this order, and the first failure wins:
+
+1. Length (`malformed`).
+2. Grammar (`malformed`).
+3. More than 4 entries (`too_many_displays`).
+4. Canonical form (`not_canonical`).
+5. Odd values (`odd_value`).
+6. Origin (`origin_not_zero`).
+7. Per-entry limits, in entry order (`output_too_small`, `output_too_large`).
+8. Overlap (`overlap`).
+9. Canvas (`canvas_too_large`): the bounding box against `max_canvas`. At launch the host also checks the packed capture against the encoding mode's limit.
+10. More entries than `max_outputs` (`too_many_displays`).
+11. The backing rule below.
+
+### Backing rule
+
+The host assigns a backing to each entry. A pure, deterministic function applies
+these steps in order, and each step walks the entries in request order:
+
+1. An entry whose preference is not `virtual` takes the lowest-index free
+   physical output that has an exact W×H mode in `physical_outputs[].modes`.
+   Backing: `physical`, driven at that mode with no scaling.
+2. An entry still unassigned whose preference is not `physical` takes the next
+   free virtual head. Backing: `virtual`. `ViewPortIn` is W×H in every case.
+   The carrier timing comes from the virtual EDID pool:
+   - the exact pool mode, if one exists;
+   - otherwise the smallest-area pool mode that covers W×H;
+   - otherwise the pool mode with the smallest `max(W/cw, H/ch)`. Ties go to the
+     larger carrier area, then to pool order.
+3. An entry still unassigned whose preference is not `virtual` takes the
+   lowest-index free physical output, presented through `ViewPortIn` over that
+   output's preferred mode. Backing: `physical-viewport`.
+4. An entry still unassigned fails the request:
+   - `no_physical_output` if its preference is `physical`;
+   - `no_virtual_output` if its preference is `virtual`;
+   - `too_many_displays` if it is `auto`.
+
+Physical outputs left unassigned are switched off (`NULL`) for the lease, and
+unused virtual heads stay hidden. On the fleet (`hybrid`, one HDMI dummy plug)
+this gives:
+
+- A 3840x2160 client monitor uses the plug's own timing.
+- A monitor the plug cannot drive, such as a 3024x1890 MacBook viewport, a
+  3440x1440 ultrawide, or a 5120x2880 5K display, turns the plug off and uses an
+  exact virtual display.
+- Mixed desks use both.
+
+A physical-only host (`virtual_heads: 0`) keeps today's behaviour through
+step 3. `tests/protocol/display-arrangement-v1.json` pins the grammar, the error
+codes and this rule. Host and client both run it, and a byte-identical copy
+lives in the host repository.
+
+### Packed capture
+
+A host with `packed_capture: true` captures the whole X screen and copies each
+output's rectangle into one capture for the encoder. If the desktop bounding box
+fits the launch's encoding limit (`encoding_limits[<mode>]`), the capture is the
+desktop itself, unchanged. Otherwise the outputs are laid out in rows, in
+request order:
+
+- An output starts a new row when it does not fit the rest of the current row's
+  width.
+- Each row is as tall as its tallest output.
+- Every output is placed top-left in its slot. Unused capture pixels are black.
+
+An output wider than the limit, or rows taller than the limit, fail the launch
+with `canvas_too_large`.
+
+The topology publishes the result as `capture_size` and each output's
+`capture_rect`. A packed capture depends on the encoding mode, so the Linux Host
+publishes it for the mode of the latest launch that asked for this
+arrangement, and folds it into the topology `generation`. A client that fetched
+the topology before that launch therefore gets `409` ("topology changed") and
+refreshes once, as for any other topology change. A packed launch streams at
+exactly `capture_size` from the NvFBC capture source; anything else is refused
+with `400`.
+
+The X desktop keeps the requested positions, so windows, the pointer and
+tablets behave as on the desk. Only the video is rearranged. The client
+presents each output's `capture_rect` (capture coordinates) in its own window,
+and sends pointer and touch positions in desktop coordinates, as described
+below.
+
+The `packing` cases in `tests/protocol/display-arrangement-v1.json` pin this
+rule. A client uses the same rule to check a layout against its decoder before
+it asks for it.
+
+### Topology during an arrangement lease
+
+- `layout.startup_policy` reports `physical`, `virtual` or `hybrid`.
+- `layout.startup_kind` stays `physical` for `hybrid`, so older clients keep
+  parsing the document.
+- `layout.arrangement` holds:
+  - `request`: the live canonical string, or `""`;
+  - `transition.state`: `idle`, `pending`, `applied` or `failed`;
+  - `transition.reason`: a short code, or `""`.
+- Each output adds:
+  - `backing`: `physical`, `physical-viewport` or `virtual`;
+  - `arrangement_index`: its entry number, or `-1` outside an arrangement.
+- `capture_size` (top level): `{width, height}` of the encoded capture. It
+  equals the desktop size unless the capture is packed, and is omitted when no
+  arrangement lease is live. The name avoids the macOS fixed-capture `capture`
+  object, which older clients use to detect that document type.
+- Each output adds `capture_rect` `{x, y, width, height}`: its rectangle in the
+  encoded capture, published with `capture_size`. It equals `source_rect`
+  unless the capture is packed.
+  - `source_rect` always keeps its schema-13 meaning, the output rectangle
+    relative to the desktop origin. Older parsers require it to lie inside the
+    desktop, which a packed position does not.
+- A packed capture exists only during an arrangement lease, which only a
+  client that negotiated `0x8000000` can request.
+
+The legacy fields are kept valid for schema-13 parsers that do not know the bit:
+
+- `layout.kind` is `physical`.
+- `layout.virtual` is false, and `layout.virtual_modes` is empty.
+- Every output reports `virtual: false` and an empty `configured_mode`.
+
+`tests/protocol/output-topology-v13-arrangement.json` is a hybrid host
+presenting a 14-inch MacBook viewport beside a 3840x2160 monitor. The 1.0.129
+parser must accept it.
+
+On a `hybrid` host, a legacy `single` or `dual-horizontal` request is served by
+the same engine as the equivalent arrangement with preference `auto`.
+
+### Status codes and input
+
+- `425` means a transition is running. The client waits on the topology, as it
+  does today.
+- `409` with `PlankDisplayArrangementError` means the host cannot apply the
+  arrangement, either now or ever. The same answer is used when a legacy
+  `dual-horizontal` request reaches a physical host that has one output. The
+  client stops waiting and reports the reason.
+  - The code is a table code when the host can tell before trying (for example
+    `output_too_large` when a `ViewPortIn` would exceed the host's qualified
+    downscale), or the failed transition's reason: `verify_failed`,
+    `visibility_failed`, `snapshot_failed`, `apply_failed`, `state_failed`,
+    `busy`, `unavailable` or `no_inventory`.
+  - A failed transition is reported for 30 seconds, also as
+    `layout.arrangement.transition`; a later launch tries again.
+
+A client presenting outputs in separate windows sends absolute pointer and touch
+positions in desktop coordinates, with the desktop bounding box as the reference
+size. Positions therefore stay correct when the capture is packed differently
+from the desktop.
+
 ## Test Vector
+
+`tests/protocol/display-arrangement-v1.json` pins the arrangement grammar,
+check order, error codes and backing rule, including the Linux Host's
+`head` and `carrier` fields. Its `grammar` cases are evaluated against the
+`fleet-hybrid` capabilities. A number too large for a signed 32-bit value is
+never canonical. `tests/protocol/output-topology-v13-arrangement.json` is the
+topology during an arrangement lease. The Linux Host keeps byte-identical
+copies of both under `tests/fixtures/protocol/`, checked by `tests/ci`.
 
 `tests/protocol/output-topology-v13.json` represents a physical-startup host
 temporarily presenting the Flame-style 3840x2160 primary plus 1280x2160

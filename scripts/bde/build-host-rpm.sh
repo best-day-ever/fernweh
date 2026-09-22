@@ -144,6 +144,12 @@ echo "===stage:build==="
 # calls the repo's own scripts/package/build-host-rpm.sh, which compiles the
 # CMake/CUDA host binaries then rpmbuild's the payload from
 # packaging/host/linux/rpm/plank-host.spec.
+# build.sh creates this link with plain `ln -s`. Remove only its own link on a
+# repeated candidate build; a failed collection leaves it in the checkout.
+ffmpeg_link=/workspace/apps/host/linux/cmake-build-ffmpeg-x264rgb-install/ffmpeg
+if [[ -L $ffmpeg_link && $(readlink -- "$ffmpeg_link") == "$PLANK_DEP_ROOT/host-ffmpeg" ]]; then
+  rm -- "$ffmpeg_link"
+fi
 bash /workspace/scripts/ci/build.sh linux-host
 
 echo "===stage:done==="
@@ -158,6 +164,7 @@ docker rm -f "$container_name" >/dev/null 2>&1 || true
 # minutes, and macOS zsh has no GNU `timeout` by default.
 docker run --rm --platform "$platform" --name "$container_name" \
   -e PLANK_BUILD_BRANCH="$build_branch" \
+  -e PLANK_CUDA_REPO_BASEURL="${PLANK_CUDA_REPO_BASEURL:-}" \
   -v "$repo_dir:/workspace" \
   -v "${deps_volume}:/deps" \
   "$image" \

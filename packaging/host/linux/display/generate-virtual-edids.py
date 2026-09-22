@@ -265,6 +265,12 @@ def build_edid(index: int, mode: str) -> bytes:
     return bytes(edid)
 
 
+# One EDID per virtual connector. The virtual policy uses 1 and 2; hybrid
+# reserves up to three heads beside the physical outputs (four GPU heads in
+# total), so each connector keeps a distinct identity ("Display N").
+VIRTUAL_OUTPUT_COUNT = 4
+
+
 def main() -> int:
     """Write one complete, canonical EDID per virtual output."""
     parser = argparse.ArgumentParser()
@@ -272,7 +278,7 @@ def main() -> int:
     args = parser.parse_args()
     args.output_directory.mkdir(parents=True, exist_ok=True)
 
-    for index in (1, 2):
+    for index in range(1, VIRTUAL_OUTPUT_COUNT + 1):
         data = build_edid(index, "1920x1080")
         output = args.output_directory / f"virtual-{index}.edid"
         output.write_bytes(data)

@@ -5,19 +5,28 @@ set -euo pipefail
 config_file=/etc/plank/host.conf
 output_file=/etc/X11/xorg.conf.d/99-plank-headless.conf
 edid_dir=/usr/share/plank/display
+inventory_file=/var/lib/plank/display-inventory
+xorg_conf=/etc/X11/xorg.conf
+pci_driver_dir=/sys/bus/pci/drivers/nvidia
+nvidia_version_file=/sys/module/nvidia/version
 cleanup_only=false
+apply_inventory=false
 requested_layout=
 requested_mode_1=
 requested_mode_2=
 
 usage() {
-  echo "usage: $0 [--cleanup] [--config FILE] [--output FILE] [--edid-dir DIRECTORY] [--layout LAYOUT --mode-1 MODE [--mode-2 MODE]]" >&2
+  echo "usage: $0 [--cleanup] [--apply-inventory] [--config FILE] [--output FILE] [--edid-dir DIRECTORY] [--inventory FILE] [--xorg-conf FILE] [--pci-driver-dir DIRECTORY] [--nvidia-version-file FILE] [--layout LAYOUT --mode-1 MODE [--mode-2 MODE]]" >&2
 }
 
 while (($#)); do
   case $1 in
     --cleanup)
       cleanup_only=true
+      shift
+      ;;
+    --apply-inventory)
+      apply_inventory=true
       shift
       ;;
     --config)
@@ -33,6 +42,26 @@ while (($#)); do
     --edid-dir)
       (($# >= 2)) || { usage; exit 2; }
       edid_dir=$2
+      shift 2
+      ;;
+    --inventory)
+      (($# >= 2)) || { usage; exit 2; }
+      inventory_file=$2
+      shift 2
+      ;;
+    --xorg-conf)
+      (($# >= 2)) || { usage; exit 2; }
+      xorg_conf=$2
+      shift 2
+      ;;
+    --pci-driver-dir)
+      (($# >= 2)) || { usage; exit 2; }
+      pci_driver_dir=$2
+      shift 2
+      ;;
+    --nvidia-version-file)
+      (($# >= 2)) || { usage; exit 2; }
+      nvidia_version_file=$2
       shift 2
       ;;
     --layout)
@@ -57,7 +86,7 @@ while (($#)); do
   esac
 done
 
-[[ $output_file = /* && $edid_dir = /* ]] || {
+[[ $output_file = /* && $edid_dir = /* && $inventory_file = /* ]] || {
   echo "PLANK display paths must be absolute" >&2
   exit 1
 }
@@ -84,7 +113,9 @@ startup_policy=$(awk '
     }
     key = trim(substr($0, 1, separator - 1))
     value = trim(substr($0, separator + 1))
-    if (key != "startup_layout") {
+    # adapter_name belongs to the host runtime (multi-GPU selection); display
+    # preparation only accepts it as a known key.
+    if (key != "startup_layout" && key != "adapter_name") {
       print "unknown [display] option: " key > "/dev/stderr"
       exit 1
     }
@@ -101,7 +132,7 @@ startup_policy=$(awk '
 ' "$config_file") || exit 1
 
 case $startup_policy in
-  physical|virtual) ;;
+  physical|virtual|hybrid) ;;
   *)
     echo "invalid display.startup_layout: ${startup_policy}" >&2
     exit 1
@@ -116,7 +147,7 @@ if [[ -n $requested_layout || -n $requested_mode_1 || -n $requested_mode_2 ]]; t
     echo "a requested display transition requires --layout and --mode-1" >&2
     exit 2
   }
-  if [[ $startup_policy == physical ]]; then
+  if [[ $startup_policy != virtual ]]; then
     echo "persistent virtual display transitions are disabled by display.startup_layout" >&2
     exit 1
   fi
@@ -184,6 +215,297 @@ if [[ $cleanup_only == true ]]; then
   exit 0
 fi
 
+# --- hybrid: the physical startup plus up to three hidden virtual heads ------
+#
+# The host supervisor records the display inventory after every X start. The
+# overlay is written only when the supervisor requests it after a fresh live
+# inventory. The boot service always starts like `physical`, so a moved plug
+# cannot be hidden by yesterday's overlay.
+
+hybrid_virtual_width=16384
+# The X screen can never grow beyond its boot-time Virtual size. Hardware
+# probe P6 showed the NVIDIA driver does not preallocate the framebuffer at
+# that size (greeter VRAM is unchanged), so reserve the full 16384x8192.
+hybrid_virtual_height=8192
+
+declare -A inventory=()
+
+hybrid_fallback() {
+  echo "hybrid display policy: $1; starting with the physical display layout" >&2
+  remove_overlay
+  exit 0
+}
+
+read_inventory() {
+  [[ -f $inventory_file && ! -L $inventory_file ]] || return 1
+  # Written by the root supervisor: owned by this (root) process, 0600.
+  [[ $(stat -c %u -- "$inventory_file") == "$(id -u)" ]] || return 1
+  (( (8#$(stat -c %a -- "$inventory_file") & 8#077) == 0 )) || return 1
+  (( $(stat -c %s -- "$inventory_file") <= 65536 )) || return 1
+  local line key value first=true
+  while IFS= read -r line || [[ -n $line ]]; do
+    if [[ $first == true ]]; then
+      [[ $line == "$generated_marker" ]] || return 1
+      first=false
+      continue
+    fi
+    [[ -z $line ]] && continue
+    [[ $line =~ ^([a-z0-9_]+)=([A-Za-z0-9\ ._:()+/,@-]*)$ ]] || return 1
+    key=${BASH_REMATCH[1]}
+    value=${BASH_REMATCH[2]}
+    [[ -z ${inventory[$key]+set} ]] || return 1
+    inventory[$key]=$value
+  done <"$inventory_file"
+  [[ $first == false ]]
+}
+
+live_gpu_bus_id() {
+  local entries=() entry address domain bus device function
+  for entry in "$pci_driver_dir"/*; do
+    address=${entry##*/}
+    [[ $address =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] || continue
+    entries+=("$address")
+  done
+  ((${#entries[@]} == 1)) || return 1
+  [[ ${entries[0]} =~ ^([0-9a-f]{4}):([0-9a-f]{2}):([0-9a-f]{2})\.([0-7])$ ]] || return 1
+  domain=$((16#${BASH_REMATCH[1]}))
+  bus=$((16#${BASH_REMATCH[2]}))
+  device=$((16#${BASH_REMATCH[3]}))
+  function=$((16#${BASH_REMATCH[4]}))
+  if ((domain == 0)); then
+    echo "PCI:${bus}:${device}:${function}"
+  else
+    echo "PCI:${bus}@${domain}:${device}:${function}"
+  fi
+}
+
+# Print the active screen's depth and its device's options from the Autodesk
+# DKU configuration as "depth<TAB>N" and "option<TAB>Name<TAB>Value" lines.
+read_dku_configuration() {
+  [[ -r $xorg_conf ]] || return 0
+  awk '
+    function unquote(value) {
+      sub(/^[[:space:]]*"/, "", value)
+      sub(/".*$/, "", value)
+      return value
+    }
+    function field(line, keyword,    value) {
+      value = line
+      sub("^[[:space:]]*" keyword "[[:space:]]+", "", value)
+      return value
+    }
+    {
+      line = $0
+      sub(/#.*/, "", line)
+      if (line !~ /^[[:space:]]*$/) lines[++count] = line
+    }
+    END {
+      # The active screen is the first Screen of the first ServerLayout.
+      section = ""
+      for (i = 1; i <= count; i++) {
+        if (lines[i] ~ /^[[:space:]]*Section[[:space:]]+"ServerLayout"/) section = "layout"
+        else if (lines[i] ~ /^[[:space:]]*EndSection/) section = ""
+        else if (section == "layout" && screen == "" && lines[i] ~ /^[[:space:]]*Screen[[:space:]]/) {
+          value = field(lines[i], "Screen")
+          sub(/^[0-9]+[[:space:]]+/, "", value)
+          screen = unquote(value)
+        }
+      }
+      section = ""
+      for (i = 1; i <= count; i++) {
+        if (lines[i] ~ /^[[:space:]]*Section[[:space:]]+"Screen"/) {
+          section = "screen"; identifier = ""; screen_device = ""; screen_depth = ""
+        } else if (lines[i] ~ /^[[:space:]]*EndSection/) {
+          if (section == "screen" && found == "" && (screen == "" || identifier == screen)) {
+            found = identifier; device = screen_device; depth = screen_depth
+          }
+          section = ""
+        } else if (section == "screen" && lines[i] ~ /^[[:space:]]*Identifier[[:space:]]/) {
+          identifier = unquote(field(lines[i], "Identifier"))
+        } else if (section == "screen" && lines[i] ~ /^[[:space:]]*Device[[:space:]]/) {
+          screen_device = unquote(field(lines[i], "Device"))
+        } else if (section == "screen" && lines[i] ~ /^[[:space:]]*DefaultDepth[[:space:]]/) {
+          screen_depth = field(lines[i], "DefaultDepth")
+          sub(/[[:space:]]+$/, "", screen_depth)
+        }
+      }
+      if (depth != "") print "depth\t" depth
+      if (device == "") exit
+      section = ""
+      for (i = 1; i <= count; i++) {
+        if (lines[i] ~ /^[[:space:]]*Section[[:space:]]+"Device"/) {
+          section = "device"; identifier = ""; start = i
+        } else if (lines[i] ~ /^[[:space:]]*EndSection/) {
+          if (section == "device" && identifier == device) {
+            for (j = start; j < i; j++) {
+              if (lines[j] !~ /^[[:space:]]*Option[[:space:]]+"/) continue
+              value = field(lines[j], "Option")
+              sub(/^"/, "", value)
+              name = value
+              sub(/".*$/, "", name)
+              sub(/^[^"]*"[[:space:]]*/, "", value)
+              option_value = ""
+              if (value ~ /^"/) {
+                option_value = substr(value, 2)
+                sub(/".*$/, "", option_value)
+              }
+              print "option\t" name "\t" option_value
+            }
+          }
+          section = ""
+        } else if (section == "device" && lines[i] ~ /^[[:space:]]*Identifier[[:space:]]/) {
+          identifier = unquote(field(lines[i], "Identifier"))
+        }
+      }
+    }
+  ' "$xorg_conf"
+}
+
+prepare_hybrid_overlay() {
+  read_inventory ||
+    hybrid_fallback "no valid display inventory at ${inventory_file} yet"
+  [[ ${inventory[version]:-} == 1 &&
+     ${inventory[fingerprint]:-} =~ ^[0-9a-f]{64}$ &&
+     ${inventory[gpu_bus_id]:-} =~ ^PCI:[0-9]+(@[0-9]+)?:[0-9]+:[0-9]+$ &&
+     ${inventory[driver_version]:-} =~ ^[0-9.]+$ &&
+     ${inventory[physical_count]:-} =~ ^[0-8]$ &&
+     ${inventory[virtual_candidate_count]:-} =~ ^[0-3]$ ]] ||
+    hybrid_fallback "the display inventory is malformed"
+
+  local live_bus live_driver
+  live_bus=$(live_gpu_bus_id) ||
+    hybrid_fallback "exactly one NVIDIA GPU is required"
+  [[ $live_bus == "${inventory[gpu_bus_id]}" ]] ||
+    hybrid_fallback "the display inventory belongs to GPU ${inventory[gpu_bus_id]}, not ${live_bus}"
+  live_driver=$(tr -d '[:space:]' <"$nvidia_version_file" 2>/dev/null) ||
+    hybrid_fallback "the NVIDIA driver version is unavailable"
+  [[ $live_driver == "${inventory[driver_version]}" ]] ||
+    hybrid_fallback "the display inventory was taken with NVIDIA ${inventory[driver_version]}, not ${live_driver}"
+
+  local physical_count=${inventory[physical_count]}
+  local virtual_count=${inventory[virtual_candidate_count]}
+  ((physical_count >= 1)) || hybrid_fallback "no physical output is connected"
+  ((virtual_count >= 1)) || hybrid_fallback "no free DisplayPort head is available"
+
+  local index dfp preferred width edid_file x=0
+  local all_dfps=() metamode_clauses=() custom_edid_items=()
+  # Physical outputs left to right at their preferred modes, as without PLANK.
+  for ((index = 1; index <= physical_count; index++)); do
+    dfp=${inventory[physical_${index}_dfp]:-}
+    preferred=${inventory[physical_${index}_preferred]:-}
+    [[ $dfp =~ ^DFP-[0-9]+$ ]] || hybrid_fallback "the display inventory is malformed"
+    width=1920
+    if [[ $preferred =~ ^([0-9]+)x([0-9]+)$ ]]; then
+      width=${BASH_REMATCH[1]}
+    fi
+    all_dfps+=("$dfp")
+    metamode_clauses+=("${dfp}: nvidia-auto-select +${x}+0")
+    x=$((x + width))
+  done
+  # Virtual heads carry distinct PLANK EDIDs and start switched off.
+  for ((index = 1; index <= virtual_count; index++)); do
+    dfp=${inventory[virtual_candidate_${index}_dfp]:-}
+    [[ $dfp =~ ^DFP-[0-9]+$ ]] || hybrid_fallback "the display inventory is malformed"
+    edid_file="${edid_dir}/virtual-${index}.edid"
+    [[ -r $edid_file && $(wc -c <"$edid_file") -eq 384 ]] ||
+      hybrid_fallback "packaged PLANK EDID is not readable or has the wrong size: ${edid_file}"
+    all_dfps+=("$dfp")
+    metamode_clauses+=("${dfp}: NULL")
+    custom_edid_items+=("${dfp}:${edid_file}")
+  done
+
+  local connected_monitors metamodes custom_edid
+  connected_monitors=$(printf '%s, ' "${all_dfps[@]}")
+  connected_monitors=${connected_monitors%, }
+  metamodes=$(printf '%s, ' "${metamode_clauses[@]}")
+  metamodes=${metamodes%, }
+  custom_edid=$(printf '%s; ' "${custom_edid_items[@]}")
+  custom_edid=${custom_edid%; }
+
+  # Carry the Autodesk DKU device options (Overlay needs depth 24) and the
+  # active screen's depth into the PLANK layout; never force depth 30 here.
+  local depth=24 kind name value carried_options=""
+  while IFS=$'\t' read -r kind name value; do
+    case $kind in
+      depth)
+        [[ $name =~ ^(8|15|16|24|30)$ ]] && depth=$name
+        ;;
+      option)
+        case ${name,,} in
+          connectedmonitor|usedisplaydevice|customedid|metamodes|nvidiaxineramainfoorder|allowemptyinitialconfiguration|busid)
+            continue
+            ;;
+        esac
+        if [[ $name =~ ^[A-Za-z0-9_]+$ && $value =~ ^[A-Za-z0-9\ ._,:+-]*$ ]]; then
+          carried_options+="    Option \"${name}\" \"${value}\""$'\n'
+        else
+          echo "skipping an unsupported DKU device option: ${name}" >&2
+        fi
+        ;;
+    esac
+  done < <(read_dku_configuration)
+
+  local output_directory=${output_file%/*}
+  install -d -m 0755 -- "$output_directory"
+  temporary_file=$(mktemp -- "${output_file}.tmp.XXXXXX")
+  trap 'rm -f -- "$temporary_file"' EXIT
+  {
+    echo "$generated_marker"
+    echo "# Inventory fingerprint: ${inventory[fingerprint]}"
+    echo "# Boot source: /etc/plank/host.conf [display] startup_layout = hybrid"
+    echo "# The physical outputs start as usual; the virtual heads stay switched off"
+    echo "# until a PLANK display arrangement uses them."
+    echo
+    echo 'Section "ServerFlags"'
+    echo '    Option "DefaultServerLayout" "PLANK Hybrid Display Layout"'
+    echo 'EndSection'
+    echo
+    echo 'Section "ServerLayout"'
+    echo '    Identifier "PLANK Hybrid Display Layout"'
+    echo '    Screen 0 "PLANK Hybrid Display Screen" 0 0'
+    echo 'EndSection'
+    echo
+    echo 'Section "Device"'
+    echo '    Identifier "PLANK NVIDIA GPU"'
+    echo '    Driver "nvidia"'
+    echo "    BusID \"${inventory[gpu_bus_id]}\""
+    echo '    Option "AllowEmptyInitialConfiguration" "True"'
+    echo "    Option \"ConnectedMonitor\" \"${connected_monitors}\""
+    echo "    Option \"UseDisplayDevice\" \"${connected_monitors}\""
+    echo "    Option \"CustomEDID\" \"${custom_edid}\""
+    echo "    Option \"MetaModes\" \"${metamodes}\""
+    echo "    Option \"nvidiaXineramaInfoOrder\" \"${connected_monitors}\""
+    printf '%s' "$carried_options"
+    echo 'EndSection'
+    echo
+    echo 'Section "Screen"'
+    echo '    Identifier "PLANK Hybrid Display Screen"'
+    echo '    Device "PLANK NVIDIA GPU"'
+    echo "    DefaultDepth ${depth}"
+    echo '    SubSection "Display"'
+    echo "        Depth ${depth}"
+    echo "        Virtual ${hybrid_virtual_width} ${hybrid_virtual_height}"
+    echo '    EndSubSection'
+    echo 'EndSection'
+  } >"$temporary_file"
+  chmod 0644 -- "$temporary_file"
+  if [[ -e $output_file ]] && cmp -s -- "$temporary_file" "$output_file"; then
+    echo "PLANK hybrid display topology is already current: ${connected_monitors}"
+    return 0
+  fi
+  if [[ -e $output_file ]] && ! head -n 1 -- "$output_file" | grep -Fxq -- "$generated_marker"; then
+    echo "refusing to replace a display configuration not owned by PLANK: ${output_file}" >&2
+    exit 1
+  fi
+  if display_manager_active; then
+    echo "refusing to change the display topology while the display manager is active; reboot to apply the configuration" >&2
+    exit 1
+  fi
+  mv -f -- "$temporary_file" "$output_file"
+  trap - EXIT
+  echo "Prepared PLANK hybrid display topology: ${connected_monitors}"
+}
+
 [[ -r $config_file ]] || {
   echo "PLANK host configuration is not readable: ${config_file}" >&2
   exit 1
@@ -209,6 +531,15 @@ remove_overlay() {
 
 if [[ $startup_policy == physical ]]; then
   remove_overlay
+  exit 0
+fi
+
+if [[ $startup_policy == hybrid ]]; then
+  # A cached inventory cannot prove that a plug has not moved since the last
+  # X server. Boot with the physical DKU layout; only the supervisor, after a
+  # fresh live inventory on this boot, may opt into the hybrid overlay.
+  [[ $apply_inventory == true ]] || hybrid_fallback "awaiting a fresh X-server inventory"
+  prepare_hybrid_overlay
   exit 0
 fi
 

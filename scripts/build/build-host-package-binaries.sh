@@ -995,6 +995,15 @@ if rg -q 'virtual_mode_[12]' "$repo_dir/packaging/host/linux/config/plank-host.c
 fi
 echo "host_display_startup_layout_gate=pass"
 
+# The display preparation helper's own behaviour: physical, virtual and hybrid
+# overlays, the four packaged EDIDs, the DKU carry-over and every fail-closed
+# fallback.
+bash "$repo_dir/tests/display/test-display-prepare.sh" >/dev/null || {
+  echo "host display-preparation tests failed" >&2
+  exit 1
+}
+echo "host_display_prepare_tests_gate=pass"
+
 rg -Fxq \
   'X-PLANK-ApplicationId=la.instinctual.Plank.Host' \
   "$repo_dir/packaging/host/linux/systemd/plank-host.service" || {
