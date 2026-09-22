@@ -150,13 +150,18 @@ and 1 otherwise; the display is restored either way.
 `--capture ENCODING_MODE` (an NVENC mode such as `hevc-10-444-nvenc`) also
 exercises the media path while the arrangement holds: it runs the media
 worker's capture probe as root against the leased X server. The probe packs the
-arrangement for that mode's encoder limit with the launch binding's rule,
-captures `--capture-frames` frames (default 120) of the X screen through the
-same NvFBC packed-capture copy a stream uses, encodes them with that mode and
-writes into `--capture-output` (default `/var/tmp/plank-capture-probe`):
-`capture.hevc` or `capture.h264` (an Annex B elementary stream), `capture.ppm`
-(the last packed frame, RGB; about 100 MB at 7680x4320), `probe.json` (plan,
-screen, frames, fps) and `host.log`. Its result is part of the report and of
+arrangement for that mode's encoder limit with the launch binding's rule and
+runs the stream's own video pipeline (capture thread, image pool, NVENC encode
+loop) for `--capture-frames` encoded frames (default 120), and writes into
+`--capture-output` (default `/var/tmp/plank-capture-probe`): `capture.hevc` or
+`capture.h264` (the Annex B elementary stream a client would receive),
+`capture.ppm` (one packed frame read back from the capture, RGB, about 100 MB
+at 7680x4320, with each output's slot framed in red, green, blue or magenta
+by entry and entry+1 white squares in its corner; the stream itself is
+unmarked), `probe.json` (plan, frames, fps, why the loop ended) and
+`host.log` (including "Video capture loop ended with status ...").
+On a static screen NvFBC delivers few new frames and the encoder repeats the
+last one at the minimum rate, so fps reflects the screen, not the encoder. Its result is part of the report and of
 the exit status. The probe can also run on its own, as root with the X
 environment of the active session:
 
