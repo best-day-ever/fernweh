@@ -102,8 +102,9 @@ malformed body; clients treat unknown states as `denied` and never show broker t
 3. `password` refuses locally what is shorter than the policy or equal to the
    one-time password (`reused`: its issuer knows it), otherwise changes it with
    kpasswd over a FAST `kadmin/changepw` ticket. IPA's soft errors map to
-   `too_short`, `too_simple` (also repeating/consecutive characters, palindromes),
-   `reused` (history) or `policy`. At most `enrol.max_password_attempts` (5).
+   `too_short`, `too_simple` (too few character classes, dictionary word,
+   repeating/consecutive characters, palindromes),
+   `reused` (password history) or `policy`. At most `enrol.max_password_attempts` (5).
 4. `totp` carries a 35-byte random key (IPA's default length) as
    `otpauth://totp/<issuer>:<user>?secret=<base32>&issuer=<issuer>&algorithm=SHA1&digits=6&period=30`
    and `secret` (56 base32 characters). The first code is checked locally (RFC 6238,
