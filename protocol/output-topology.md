@@ -525,9 +525,18 @@ request order:
 An output wider than the limit, or rows taller than the limit, fail the launch
 with `canvas_too_large`.
 
+The topology publishes the result as `capture_size` and each output's
+`capture_rect`. A packed capture depends on the encoding mode, so the Linux Host
+publishes it for the mode of the latest launch that asked for this
+arrangement, and folds it into the topology `generation`. A client that fetched
+the topology before that launch therefore gets `409` ("topology changed") and
+refreshes once, as for any other topology change. A packed launch streams at
+exactly `capture_size` from the NvFBC capture source; anything else is refused
+with `400`.
+
 The X desktop keeps the requested positions, so windows, the pointer and
 tablets behave as on the desk. Only the video is rearranged. The client
-presents each output's `source_rect` (capture coordinates) in its own window,
+presents each output's `capture_rect` (capture coordinates) in its own window,
 and sends pointer and touch positions in desktop coordinates, as described
 below.
 
@@ -547,12 +556,18 @@ it asks for it.
 - Each output adds:
   - `backing`: `physical`, `physical-viewport` or `virtual`;
   - `arrangement_index`: its entry number, or `-1` outside an arrangement.
-- `capture`: `{width, height}` of the encoded capture. It equals the desktop
-  size unless the capture is packed.
-  - When packed, `source_rect` is in capture coordinates and may lie outside
-    the desktop rectangle.
-  - A packed capture exists only during an arrangement lease, which only a
-    client that negotiated `0x8000000` can request.
+- `capture_size` (top level): `{width, height}` of the encoded capture. It
+  equals the desktop size unless the capture is packed, and is omitted when no
+  arrangement lease is live. The name avoids the macOS fixed-capture `capture`
+  object, which older clients use to detect that document type.
+- Each output adds `capture_rect` `{x, y, width, height}`: its rectangle in the
+  encoded capture, published with `capture_size`. It equals `source_rect`
+  unless the capture is packed.
+  - `source_rect` always keeps its schema-13 meaning, the output rectangle
+    relative to the desktop origin. Older parsers require it to lie inside the
+    desktop, which a packed position does not.
+- A packed capture exists only during an arrangement lease, which only a
+  client that negotiated `0x8000000` can request.
 
 The legacy fields are kept valid for schema-13 parsers that do not know the bit:
 
