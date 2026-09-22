@@ -84,7 +84,10 @@ impl PwReject {
     }
 
     /// Map IPA's policy text (kpasswd result string, LDAP diagnostic) to a code.
-    /// Strings from `libipa_pwd_extop.so` / `ipadb.so`.
+    /// On the kpasswd path the text comes from MIT kadmind (`chpass_util`,
+    /// `libkadm5srv`), e.g. "New password was used previously. ..." or
+    /// "New password does not have enough character classes."; the
+    /// `libipa_pwd_extop.so` / `ipadb.so` wordings are matched as well.
     pub fn from_ipa_text(text: &str) -> PwReject {
         let t = text.to_ascii_lowercase();
         if t.contains("too short") {
@@ -93,9 +96,11 @@ impl PwReject {
             || t.contains("repeating characters")
             || t.contains("consecutive characters")
             || t.contains("palindrome")
+            || t.contains("character classes")
+            || t.contains("dictionary")
         {
             PwReject::TooSimple
-        } else if t.contains("reuse") || t.contains("history") {
+        } else if t.contains("reuse") || t.contains("history") || t.contains("used previously") {
             PwReject::Reused
         } else {
             PwReject::Policy
@@ -183,6 +188,20 @@ mod tests {
         assert_eq!(PwReject::from_ipa_text("Password has repeating characters"), PwReject::TooSimple);
         assert_eq!(PwReject::from_ipa_text("Password reuse not permitted"), PwReject::Reused);
         assert_eq!(PwReject::from_ipa_text("Too soon to change password"), PwReject::Policy);
+        // MIT kadmind (libkadm5srv chpass_util / com_err), which is what the
+        // kpasswd result string carries on IPA.
+        assert_eq!(PwReject::from_ipa_text("New password is too short."), PwReject::TooShort);
+        assert_eq!(
+            PwReject::from_ipa_text("New password was used previously. Please choose a different password."),
+            PwReject::Reused
+        );
+        assert_eq!(
+            PwReject::from_ipa_text("New password does not have enough character classes."),
+            PwReject::TooSimple
+        );
+        assert_eq!(PwReject::from_ipa_text("Password does not contain enough character classes"), PwReject::TooSimple);
+        assert_eq!(PwReject::from_ipa_text("Password is in the password dictionary"), PwReject::TooSimple);
+        assert_eq!(PwReject::from_ipa_text("Current password's minimum life has not expired"), PwReject::Policy);
         assert_eq!(PwReject::from_ipa_text(""), PwReject::Policy);
     }
 
