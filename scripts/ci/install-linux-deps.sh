@@ -14,6 +14,11 @@ case "$role:$ID:$VERSION_ID" in
     dnf config-manager --set-enabled crb
     dnf install -y epel-release
     dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+    # A local, package-signature-checked mirror can supply the same CUDA RPMs
+    # when NVIDIA's CDN publishes metadata before its referenced files.
+    if [[ -n ${PLANK_CUDA_REPO_BASEURL:-} ]]; then
+      dnf config-manager --save --setopt="cuda-rhel9-x86_64.baseurl=${PLANK_CUDA_REPO_BASEURL}"
+    fi
     dnf install -y --setopt=install_weak_deps=False \
       autoconf automake clang cmake curl-minimal git libtool make nasm ninja-build patch \
       pkgconf-pkg-config ripgrep rpm-build cpio wget xz tar gzip python3 python3-jinja2 \

@@ -158,6 +158,7 @@ docker rm -f "$container_name" >/dev/null 2>&1 || true
 # minutes, and macOS zsh has no GNU `timeout` by default.
 docker run --rm --platform "$platform" --name "$container_name" \
   -e PLANK_BUILD_BRANCH="$build_branch" \
+  -e PLANK_CUDA_REPO_BASEURL="${PLANK_CUDA_REPO_BASEURL:-}" \
   -v "$repo_dir:/workspace" \
   -v "${deps_volume}:/deps" \
   "$image" \
