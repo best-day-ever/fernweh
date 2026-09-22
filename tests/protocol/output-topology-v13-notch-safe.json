@@ -1,0 +1,23 @@
+{
+  "schema_version": 13,
+  "feature_flags": 21495807,
+  "generation": "x11:laptop-3024x1890",
+  "layout": {
+    "kind": "single",
+    "virtual": true,
+    "virtual_modes": ["3024x1890"],
+    "output_count": 1,
+    "startup_kind": "physical",
+    "allowed_kinds": ["physical", "single", "dual-horizontal"]
+  },
+  "desktop": {"x": 0, "y": 0, "width": 3024, "height": 1890},
+  "outputs": [
+    {
+      "id": "x11:DP-4", "name": "DP-4", "x": 0, "y": 0,
+      "width": 3024, "height": 1890, "rotation": 0,
+      "refresh_millihz": 60000, "primary": true, "virtual": true,
+      "configured_mode": "3024x1890",
+      "source_rect": {"x": 0, "y": 0, "width": 3024, "height": 1890}
+    }
+  ]
+}

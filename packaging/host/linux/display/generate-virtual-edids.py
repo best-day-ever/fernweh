@@ -37,6 +37,9 @@ a02950302035008b882100001a023a80
 # client bookmark UI, and display-preparation helper synchronized with it.
 # Each tuple is:
 # pixel clock MHz, h active/start/end/total, v active/start/end/total.
+# The pool is full: 3 base-block timings plus 10 DisplayID timings (two
+# sections of five) is all that fits the 384-byte limit below. Adding a mode
+# means retiring one.
 MODE_TIMINGS = {
     "1024x2160": (157.53, 1024, 1072, 1104, 1180, 2160, 2163, 2173, 2225),
     "1280x2160": (192.24, 1280, 1328, 1360, 1440, 2160, 2163, 2173, 2225),
@@ -45,6 +48,10 @@ MODE_TIMINGS = {
     "2560x1440": (241.98, 2560, 2608, 2640, 2725, 1440, 1443, 1448, 1480),
     "2560x1600": (269.28, 2560, 2608, 2640, 2720, 1600, 1603, 1609, 1650),
     "2560x2160": (363.12, 2560, 2608, 2640, 2720, 2160, 2163, 2173, 2225),
+    # 14-inch MacBook Pro fullscreen below the camera housing (feature
+    # 0x1000000). CVT-RB porches; 16 extra blanking pixels and one extra
+    # line give an exact 60 Hz clock at 10 kHz resolution.
+    "3024x1890": (373.44, 3024, 3072, 3104, 3200, 1890, 1893, 1899, 1945),
     "3440x1440": (319.68, 3440, 3488, 3520, 3600, 1440, 1443, 1453, 1480),
     "3840x1600": (395.04, 3840, 3888, 3920, 4000, 1600, 1603, 1613, 1646),
     "3840x2160": (533.28, 3840, 3888, 3920, 4000, 2160, 2163, 2168, 2222),

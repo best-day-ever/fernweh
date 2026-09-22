@@ -24,7 +24,7 @@ done
 displayid_headers=$(for block_offset in 128 256; do
   od -An -j "$block_offset" -N 8 -tx1 "${edid_dir}/virtual-1.edid" | tr -d '[:space:]'
 done)
-[[ $displayid_headers == '70136703010300647013530000030050' ]]
+[[ $displayid_headers == '70136703010300647013670000030064' ]]
 for block_offset in 0 128 256; do
   checksum=$(od -An -j "$block_offset" -N 128 -tu1 "${edid_dir}/virtual-1.edid" |
     awk '{ for (field = 1; field <= NF; ++field) sum += $field } END { print sum % 256 }')
@@ -88,6 +88,18 @@ run_requested_prepare \
   --layout dual-horizontal --mode-1 4096x2160 --mode-2 1024x2160 >/dev/null
 grep -Fq 'DFP-0: 4096x2160 +0+0, DFP-2: 1024x2160 +4096+0' "$output_file"
 grep -Fq 'virtual-2.edid' "$output_file"
+
+run_requested_prepare --layout single --mode-1 3024x1890 >/dev/null
+grep -Fq 'DFP-0: 3024x1890 +0+0, DFP-2: NULL' "$output_file"
+grep -Fq 'Virtual 8192 2160' "$output_file"
+run_requested_prepare \
+  --layout dual-horizontal --mode-1 3024x1890 --mode-2 5120x2160 >/dev/null
+grep -Fq 'DFP-0: 3024x1890 +0+0, DFP-2: 5120x2160 +3024+0' "$output_file"
+# The panel size is not a mode: fullscreen stops at the camera housing.
+if run_requested_prepare --layout single --mode-1 3024x1964 >/dev/null 2>&1; then
+  echo "the unqualified 3024x1964 panel size was accepted" >&2
+  exit 1
+fi
 
 previous_hash=$(sha256sum "$output_file")
 printf '[display]\nstartup_layout = three\n' >"$config_file"
