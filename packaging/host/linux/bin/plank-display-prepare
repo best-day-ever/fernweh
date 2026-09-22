@@ -10,18 +10,23 @@ xorg_conf=/etc/X11/xorg.conf
 pci_driver_dir=/sys/bus/pci/drivers/nvidia
 nvidia_version_file=/sys/module/nvidia/version
 cleanup_only=false
+apply_inventory=false
 requested_layout=
 requested_mode_1=
 requested_mode_2=
 
 usage() {
-  echo "usage: $0 [--cleanup] [--config FILE] [--output FILE] [--edid-dir DIRECTORY] [--inventory FILE] [--xorg-conf FILE] [--pci-driver-dir DIRECTORY] [--nvidia-version-file FILE] [--layout LAYOUT --mode-1 MODE [--mode-2 MODE]]" >&2
+  echo "usage: $0 [--cleanup] [--apply-inventory] [--config FILE] [--output FILE] [--edid-dir DIRECTORY] [--inventory FILE] [--xorg-conf FILE] [--pci-driver-dir DIRECTORY] [--nvidia-version-file FILE] [--layout LAYOUT --mode-1 MODE [--mode-2 MODE]]" >&2
 }
 
 while (($#)); do
   case $1 in
     --cleanup)
       cleanup_only=true
+      shift
+      ;;
+    --apply-inventory)
+      apply_inventory=true
       shift
       ;;
     --config)
@@ -213,9 +218,9 @@ fi
 # --- hybrid: the physical startup plus up to three hidden virtual heads ------
 #
 # The host supervisor records the display inventory after every X start. The
-# overlay is written only from a cache that matches the live GPU and driver;
-# otherwise the host starts exactly like `physical`, and the supervisor
-# restarts the greeter once when a matching cache exists.
+# overlay is written only when the supervisor requests it after a fresh live
+# inventory. The boot service always starts like `physical`, so a moved plug
+# cannot be hidden by yesterday's overlay.
 
 hybrid_virtual_width=16384
 # The X screen can never grow beyond its boot-time Virtual size. Hardware
@@ -530,6 +535,10 @@ if [[ $startup_policy == physical ]]; then
 fi
 
 if [[ $startup_policy == hybrid ]]; then
+  # A cached inventory cannot prove that a plug has not moved since the last
+  # X server. Boot with the physical DKU layout; only the supervisor, after a
+  # fresh live inventory on this boot, may opt into the hybrid overlay.
+  [[ $apply_inventory == true ]] || hybrid_fallback "awaiting a fresh X-server inventory"
   prepare_hybrid_overlay
   exit 0
 fi

@@ -278,9 +278,18 @@ write_inventory() {
 run_hybrid_prepare() {
   PATH="${fake_bin}:${PATH}" \
     "$repo_dir/packaging/host/linux/bin/plank-display-prepare" \
+      --apply-inventory \
       --config "$config_file" --output "$output_file" --edid-dir "$edid_dir" \
       --inventory "$inventory_file" --xorg-conf "$xorg_conf" \
       --pci-driver-dir "$pci_dir" --nvidia-version-file "$version_file" "$@"
+}
+
+run_hybrid_boot_prepare() {
+  PATH="${fake_bin}:${PATH}" \
+    "$repo_dir/packaging/host/linux/bin/plank-display-prepare" \
+      --config "$config_file" --output "$output_file" --edid-dir "$edid_dir" \
+      --inventory "$inventory_file" --xorg-conf "$xorg_conf" \
+      --pci-driver-dir "$pci_dir" --nvidia-version-file "$version_file"
 }
 
 expect_physical_fallback() {
@@ -328,6 +337,12 @@ if grep -Fq 'virtual-4.edid' "$output_file"; then
 fi
 run_hybrid_prepare | grep -Fq 'already current'
 
+# Reboot starts with the DKU physical layout even when yesterday's cached
+# inventory still matches the GPU and driver; a moved plug needs a live read.
+run_hybrid_boot_prepare >/dev/null
+[[ ! -e $output_file ]]
+run_hybrid_prepare >/dev/null
+
 # An RPM with a missing packaged EDID must remove an existing overlay before
 # Xorg starts. Leaving the old CustomEDID path would strand the physical boot.
 mv -- "${edid_dir}/virtual-2.edid" "${edid_dir}/virtual-2.edid.saved"
@@ -345,6 +360,7 @@ grep -Fq 'Option "ConnectedMonitor" "DFP-5, DFP-4, DFP-0, DFP-2, DFP-6"' "$outpu
 missing_conf="${work_dir}/missing.conf"
 PATH="${fake_bin}:${PATH}" \
   "$repo_dir/packaging/host/linux/bin/plank-display-prepare" \
+    --apply-inventory \
     --config "$config_file" --output "$output_file" --edid-dir "$edid_dir" \
     --inventory "$inventory_file" --xorg-conf "$missing_conf" \
     --pci-driver-dir "$pci_dir" --nvidia-version-file "$version_file" >/dev/null

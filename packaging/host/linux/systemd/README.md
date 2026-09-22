@@ -99,16 +99,18 @@ session. The supervisor restores the exact pre-session NVIDIA MetaMode at
 disconnect. A host with `startup_layout = virtual` uses the packaged-EDID
 headless workflow and does not advertise a physical bookmark layout.
 
-`startup_layout = hybrid` starts like `physical` and also reserves up to three
-hidden virtual heads on free DisplayPort connectors (packaged EDIDs
-`virtual-1..3.edid`). The helper builds that overlay only from the display
-inventory the supervisor records after each X start
-(`/var/lib/plank/display-inventory`, root, 0600) and only when its GPU bus ID
-and driver version match the live GPU. It carries the Autodesk baseline's
-active device options and screen depth into the PLANK layout. Without a
-matching inventory it writes no overlay, exactly like `physical`, and the
-supervisor restarts the greeter once per inventory fingerprint when one
-exists and no session or lease is active. The RPM explicitly
+`startup_layout = hybrid` always starts Xorg with the physical DKU layout at
+boot, then reserves up to three hidden virtual heads on free DisplayPort
+connectors (packaged EDIDs `virtual-1..3.edid`) after the supervisor has read
+the live outputs. Only the supervisor calls the helper with
+`--apply-inventory`; the pre-GDM boot service removes any owned overlay, even
+if yesterday's cached inventory still matches the GPU and driver. The helper
+then builds the overlay from the freshly recorded inventory
+(`/var/lib/plank/display-inventory`, root, 0600). It carries the Autodesk
+baseline's active device options and screen depth into the PLANK layout. A
+missing or invalid inventory or packaged EDID leaves the physical layout in
+place. The supervisor restarts the greeter once per inventory fingerprint
+when no user session or lease is active. The RPM explicitly
 applies the packaged preset on upgrade so the pre-GDM cleanup cannot remain
 disabled while a stale owned overlay survives a reboot.
 
