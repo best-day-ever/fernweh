@@ -13,9 +13,9 @@ symlinks, special files, ACLs, extended attributes or data across sessions.
 
 ## Capability and authority
 
-The proposed launch feature is `ClipboardFilesFeature = 0x800000`, subject to a
-fresh registry collision check at implementation time. It requires text
-clipboard feature `0x400000` so that both peers share its session epoch,
+The launch feature is `ClipboardFilesFeature = 0x1000000`. The implementation
+moved past `0x400000`, which is allocated to desktop sign-out, and requires text
+clipboard feature `0x800000` so that both peers share its session epoch,
 ownership and revocation machinery.
 
 Negotiation yields one effective mode: `off`, `client-to-host`,

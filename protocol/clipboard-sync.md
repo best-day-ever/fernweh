@@ -18,7 +18,8 @@ scope for v1.
 
 ## Negotiation
 
-`ClipboardSyncFeature` is launch feature bit `0x400000`.
+`ClipboardSyncFeature` is launch feature bit `0x800000`. Bit `0x400000` is
+reserved by the desktop sign-out launch contract.
 
 - Only the macOS Client includes the bit in `plankFeatureFlags`, and only when
   offered by the Host. Linux Clients do not implement clipboard synchronization

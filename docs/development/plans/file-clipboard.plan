@@ -147,11 +147,11 @@ of 1 GiB. Administrative policy can force confirmation for every transfer.
 ## Negotiation and transport
 
 File clipboard gets a separate launch capability; it does not overload text
-feature `0x400000`. `0x800000` is available in the inspected target history and
-is the proposed `ClipboardFilesFeature`, but the implementation must recheck the
-merged feature registry before allocating it. Negotiation returns the effective
-direction policy, limits and staging support. A peer that lacks the bit keeps
-text clipboard behavior and never sees a file endpoint.
+feature `0x800000`. The merge-base registry already uses `0x400000` for desktop
+sign-out, so the implemented `ClipboardFilesFeature` is `0x1000000`.
+Negotiation returns the effective direction policy, limits and staging support.
+A peer that lacks the bit keeps text clipboard behavior and never sees a file
+endpoint.
 
 Mac launch schema must be bumped rather than silently changing schema 3. Linux
 launch responses expose the same effective policy. The capability is valid only

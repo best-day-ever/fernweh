@@ -7,7 +7,9 @@
 
 int main() {
     namespace topology = plank::topology;
-    static_assert(topology::feature_file_clipboard == 0x800000U);
+    static_assert(topology::feature_desktop_sign_out == 0x400000U);
+    static_assert(topology::feature_clipboard_sync == 0x800000U);
+    static_assert(topology::feature_file_clipboard == 0x1000000U);
     static_assert((topology::feature_flags & topology::feature_file_clipboard) == 0U,
                   "secure default must not advertise file clipboard");
 #if defined(__linux__) && defined(SUNSHINE_BUILD_X11)
