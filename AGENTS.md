@@ -81,6 +81,15 @@ FFmpeg software path. Never silently substitute H.264 High 8 4:4:4, 4:2:0,
 another codec, or any other profile. If neither exact hardware nor exact
 software decoding works, fail the connection clearly.
 
+The Linux Host's NVENC 4:2:0 bandwidth profiles (`h264-8-420-nvenc` H.264
+High 8-bit, `hevc-10-420-nvenc` HEVC Main10; limited-range BT.709 with the
+sRGB transfer) are an explicit bookmark choice for slow links, never a
+fallback for a 4:4:4 profile. On Apple Silicon, VideoToolbox hardware-decodes
+both to NV12/P010 surfaces; `apps/client/tests/nvenc420profile` proves each
+with its exact-profile test frame, and the client checks every live frame
+against the same contract. They are not yet qualified on the Development
+NUC's VA-API, where the same exact-format gate and software fallback apply.
+
 ## Build, Test, and Development Commands
 
 Experimental macOS Host work targets **macOS 27 or newer**, using SDK 27 or
