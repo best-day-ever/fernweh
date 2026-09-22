@@ -28,7 +28,10 @@ is present on both `master` and `plank/main`, with `target-branch: plank/main`.
 Common-C's inherited `atomics` default is not a PLANK build input. Do not schedule
 its old ENet/nanors dependencies. Host and Client `.gitmodules` explicitly track
 `plank/host` and `plank/client`, respectively. Root submodules track `main`.
-These branch hints affect update proposals; ordinary checkouts stay at exact
+BDE fork: the host and client submodules track the forks' `bde/main`; their
+`main` mirrors upstream and lacks every BDE commit, so a bump to it drops them
+(plank#15, #17). Upstream changes enter by merging upstream `main` into the
+fork's `bde/main`, never by a root gitlink bump. These branch hints affect update proposals; ordinary checkouts stay at exact
 committed gitlinks. Do not use `git submodule update --remote` for releases.
 
 Repository security alerts and automatic security-fix PRs are enabled for all
