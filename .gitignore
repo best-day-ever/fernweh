@@ -19,3 +19,6 @@ private-notes/
 private-audit/
 .env
 .env.local
+
+# Graphify code graph (scripts/agent/graph); local, rebuilt per checkout
+graphify-out/

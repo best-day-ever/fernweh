@@ -1,0 +1,10 @@
+# Paths Graphify must not index (scripts/agent/graph). Same syntax as .gitignore.
+third_party/
+apps/host/linux/third-party/
+apps/host/linux/cmake-build-*/
+apps/host/linux/gh-pages-template/
+apps/client/qmdnsengine/
+apps/client/h264bitstream/
+artifacts/
+build/
+target/
