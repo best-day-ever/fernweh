@@ -21,7 +21,7 @@ pub mod rate_control;
 
 pub const PROTOCOL_MAGIC: [u8; 4] = *b"DSM1";
 pub const PROTOCOL_VERSION: u16 = 8;
-pub const ABI_VERSION: u32 = 13;
+pub const ABI_VERSION: u32 = 14;
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS: u32 = 10_000;
 const DEFAULT_IDLE_TIMEOUT_MS: u32 = 10_000;
@@ -241,6 +241,7 @@ struct RuntimeOptions {
     keep_alive_interval: Duration,
     max_udp_payload_size: Option<u16>,
     initial_video_bitrate_bps: u64,
+    file_clipboard_enabled: bool,
 }
 
 struct SharedStatus {
@@ -378,6 +379,7 @@ pub struct PlankTransportConfig {
     pub private_key_path: *const c_char,
     pub certificate_sha256: *const c_char,
     pub session_token: *const c_char,
+    pub file_clipboard_enabled: u32,
 }
 
 #[repr(C)]
@@ -487,6 +489,11 @@ unsafe fn parse_config(config: *const PlankTransportConfig) -> Result<EndpointCo
         max_udp_payload_size: configured_max_udp_payload_size(config.max_udp_payload_size)?,
         initial_video_bitrate_bps: u64::from(config.initial_video_bitrate_kbps)
             .saturating_mul(1_000),
+        file_clipboard_enabled: match config.file_clipboard_enabled {
+            0 => false,
+            1 => true,
+            value => bail!("file_clipboard_enabled must be zero or one, got {value}"),
+        },
     };
     if config.session_mode > 1 {
         bail!("unsupported session_mode {}", config.session_mode);
@@ -1202,7 +1209,9 @@ pub unsafe extern "C" fn plank_transport_endpoint_create(
 /// # Safety
 /// `endpoint` must be null or a live handle returned by
 /// [`plank_transport_endpoint_create`] that has not been destroyed.
-pub unsafe extern "C" fn plank_transport_endpoint_start(endpoint: *mut PlankTransportEndpoint) -> i32 {
+pub unsafe extern "C" fn plank_transport_endpoint_start(
+    endpoint: *mut PlankTransportEndpoint,
+) -> i32 {
     catch_result(|| {
         let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
             return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
@@ -1268,7 +1277,9 @@ pub unsafe extern "C" fn plank_transport_endpoint_wait_ready(
 /// # Safety
 /// `endpoint` must be null or a live handle returned by
 /// [`plank_transport_endpoint_create`] that has not been destroyed.
-pub unsafe extern "C" fn plank_transport_endpoint_state(endpoint: *const PlankTransportEndpoint) -> u32 {
+pub unsafe extern "C" fn plank_transport_endpoint_state(
+    endpoint: *const PlankTransportEndpoint,
+) -> u32 {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         unsafe { endpoint.as_ref() }
             .map(|endpoint| endpoint.shared.state() as u32)
@@ -1884,7 +1895,9 @@ pub unsafe extern "C" fn plank_transport_endpoint_stats(
 /// # Safety
 /// `endpoint` must be null or a live handle returned by
 /// [`plank_transport_endpoint_create`] that has not been destroyed.
-pub unsafe extern "C" fn plank_transport_endpoint_stop(endpoint: *mut PlankTransportEndpoint) -> i32 {
+pub unsafe extern "C" fn plank_transport_endpoint_stop(
+    endpoint: *mut PlankTransportEndpoint,
+) -> i32 {
     catch_result(|| {
         let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
             return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
@@ -1998,12 +2011,13 @@ mod tests {
             private_key_path: ptr::null(),
             certificate_sha256: ptr::null(),
             session_token: ptr::null(),
+            file_clipboard_enabled: 0,
         }
     }
 
     #[test]
     fn public_header_abi_values_are_stable() {
-        assert_eq!(plank_transport_abi_version(), 13);
+        assert_eq!(plank_transport_abi_version(), 14);
         assert_eq!(EndpointState::Idle as u32, 1);
         assert_eq!(EndpointState::PeerValidation as u32, 3);
         assert_eq!(EndpointState::SetupReady as u32, 4);
@@ -2052,6 +2066,7 @@ mod tests {
                     keep_alive_interval: Duration::from_secs(1),
                     max_udp_payload_size: None,
                     initial_video_bitrate_bps: 0,
+                    file_clipboard_enabled: false,
                 },
             },
             mode: 2,

@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define PLANK_TRANSPORT_ABI_VERSION 13u
+#define PLANK_TRANSPORT_ABI_VERSION 14u
 
 typedef struct PlankTransportEndpoint PlankTransportEndpoint;
 typedef struct PlankTransportNativeEndpoint PlankTransportNativeEndpoint;
@@ -120,6 +120,8 @@ typedef struct PlankTransportConfig {
     const char *private_key_path;
     const char *certificate_sha256;
     const char *session_token;
+    /* Register authenticated file-control/content endpoints 8 and 10. */
+    uint32_t file_clipboard_enabled;
 } PlankTransportConfig;
 
 #define PLANK_TRANSPORT_NATIVE_VIDEO_CODEC_H264 0x48323634u
@@ -171,6 +173,12 @@ typedef struct PlankTransportNativeStats {
     uint64_t video_fec_source_symbols_missing;
     /* Missing originals in expired, unreconstructed FEC objects; not frame gaps. */
     uint64_t video_fec_source_symbols_unrecovered;
+    uint64_t file_control_packets_sent;
+    uint64_t file_control_packets_received;
+    uint64_t file_data_packets_sent;
+    uint64_t file_data_bytes_sent;
+    uint64_t file_data_packets_received;
+    uint64_t file_data_bytes_received;
 } PlankTransportNativeStats;
 
 uint32_t plank_transport_abi_version(void);
@@ -342,6 +350,27 @@ int32_t plank_transport_native_data_send(
         PlankTransportNativeEndpoint *endpoint,
         const uint8_t *payload, size_t payload_size);
 int32_t plank_transport_native_data_receive(
+        PlankTransportNativeEndpoint *endpoint,
+        uint8_t *payload, size_t payload_capacity,
+        size_t *payload_size_out, uint32_t timeout_ms);
+
+/*
+ * Authenticated clipboard-file lanes. The control lane is bounded to 64 KiB
+ * records. The content lane accepts one PLF2 data record containing at most
+ * 256 KiB of file bytes. Calls fail with INVALID_STATE when the launch did not
+ * enable file_clipboard_enabled on both peers.
+ */
+int32_t plank_transport_native_file_control_send(
+        PlankTransportNativeEndpoint *endpoint,
+        const uint8_t *payload, size_t payload_size);
+int32_t plank_transport_native_file_control_receive(
+        PlankTransportNativeEndpoint *endpoint,
+        uint8_t *payload, size_t payload_capacity,
+        size_t *payload_size_out, uint32_t timeout_ms);
+int32_t plank_transport_native_file_data_send(
+        PlankTransportNativeEndpoint *endpoint,
+        const uint8_t *payload, size_t payload_size);
+int32_t plank_transport_native_file_data_receive(
         PlankTransportNativeEndpoint *endpoint,
         uint8_t *payload, size_t payload_capacity,
         size_t *payload_size_out, uint32_t timeout_ms);
