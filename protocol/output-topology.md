@@ -393,8 +393,10 @@ A host advertising the bit adds `display_capabilities` to the topology document:
 - `max_canvas` bounds the bounding box of the requested desktop.
   - With `packed_capture: false` it is also the largest encoding size, so the
     capture equals the desktop.
-  - With `packed_capture: true` the host may pack output rectangles into a smaller
-    composite. Each output's `source_rect` then differs from its desktop rectangle.
+  - With `packed_capture: true` it is the boot-time X screen size. A desktop
+    larger than the launch's encoding limit is captured in rows (see "Packed
+    capture" below), and each output's `source_rect` then differs from its
+    desktop rectangle.
 - `encoding_limits` holds each encoding mode's NVENC (or software) maximum size,
   plus the size the host has qualified in real time.
   - The Linux Host lists the NVENC modes that passed its startup probe, with
@@ -407,8 +409,8 @@ A host advertising the bit adds `display_capabilities` to the topology document:
   largest carrier or viewport mode, so a host whose largest carrier is
   5120x2160 publishes `max_height` 4320. The shared vectors use their own
   capability fixtures and are not host output.
-- `max_canvas` is at most the boot-time X screen size and the largest encoder
-  size (`packed_capture: false`).
+- `max_canvas` is at most the boot-time X screen size, and also at most the
+  largest encoder size when `packed_capture` is false.
 
 A client may cache capabilities under their `fingerprint` to preview a layout
 before it connects. The host is always the authority.
@@ -449,7 +451,7 @@ Error codes, returned in `PlankDisplayArrangementError` with status 400:
 | `overlap` | two outputs overlap |
 | `output_too_small` | an output is below `output_limits` |
 | `output_too_large` | an output exceeds `output_limits` |
-| `canvas_too_large` | the desktop bounding box exceeds `max_canvas` (or cannot be packed) |
+| `canvas_too_large` | the desktop bounding box exceeds `max_canvas`, or its packed capture does not fit the launch's encoding limit |
 | `too_many_displays` | more than `max_outputs`, more than 4 entries, or no output left for an `auto` entry |
 | `no_physical_output` | an entry prefers `physical`, and no physical output is free for it |
 | `no_virtual_output` | an entry prefers `virtual`, and no virtual head is free for it |
@@ -465,7 +467,7 @@ Checks run in this order, and the first failure wins:
 6. Origin (`origin_not_zero`).
 7. Per-entry limits, in entry order (`output_too_small`, `output_too_large`).
 8. Overlap (`overlap`).
-9. Canvas (`canvas_too_large`).
+9. Canvas (`canvas_too_large`): the bounding box against `max_canvas`. At launch the host also checks the packed capture against the encoding mode's limit.
 10. More entries than `max_outputs` (`too_many_displays`).
 11. The backing rule below.
 
@@ -507,6 +509,32 @@ step 3. `tests/protocol/display-arrangement-v1.json` pins the grammar, the error
 codes and this rule. Host and client both run it, and a byte-identical copy
 lives in the host repository.
 
+### Packed capture
+
+A host with `packed_capture: true` captures the whole X screen and copies each
+output's rectangle into one capture for the encoder. If the desktop bounding box
+fits the launch's encoding limit (`encoding_limits[<mode>]`), the capture is the
+desktop itself, unchanged. Otherwise the outputs are laid out in rows, in
+request order:
+
+- An output starts a new row when it does not fit the rest of the current row's
+  width.
+- Each row is as tall as its tallest output.
+- Every output is placed top-left in its slot. Unused capture pixels are black.
+
+An output wider than the limit, or rows taller than the limit, fail the launch
+with `canvas_too_large`.
+
+The X desktop keeps the requested positions, so windows, the pointer and
+tablets behave as on the desk. Only the video is rearranged. The client
+presents each output's `source_rect` (capture coordinates) in its own window,
+and sends pointer and touch positions in desktop coordinates, as described
+below.
+
+The `packing` cases in `tests/protocol/display-arrangement-v1.json` pin this
+rule. A client uses the same rule to check a layout against its decoder before
+it asks for it.
+
 ### Topology during an arrangement lease
 
 - `layout.startup_policy` reports `physical`, `virtual` or `hybrid`.
@@ -519,6 +547,12 @@ lives in the host repository.
 - Each output adds:
   - `backing`: `physical`, `physical-viewport` or `virtual`;
   - `arrangement_index`: its entry number, or `-1` outside an arrangement.
+- `capture`: `{width, height}` of the encoded capture. It equals the desktop
+  size unless the capture is packed.
+  - When packed, `source_rect` is in capture coordinates and may lie outside
+    the desktop rectangle.
+  - A packed capture exists only during an arrangement lease, which only a
+    client that negotiated `0x8000000` can request.
 
 The legacy fields are kept valid for schema-13 parsers that do not know the bit:
 
