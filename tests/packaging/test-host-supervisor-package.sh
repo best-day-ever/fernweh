@@ -14,7 +14,7 @@ firewalld_service=${repo_dir}/packaging/host/linux/firewalld/plank.xml
 logrotate_policy=${repo_dir}/packaging/host/linux/logrotate/plank-host
 
 rg -Fxq 'ExecStart=/usr/libexec/plank/plank-host-supervisor' "$unit"
-rg -Fxq 'WantedBy=multi-user.target' "$unit"
+rg -Fxq 'WantedBy=graphical.target' "$unit"
 if rg -q '^EnvironmentFile=' "$unit"; then
   echo 'host service still loads a second environment configuration file' >&2
   exit 1
