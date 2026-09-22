@@ -31,6 +31,8 @@ pub struct Config {
     pub limits: Limits,
     #[serde(default)]
     pub passkey: PasskeyConfig,
+    #[serde(default)]
+    pub enrol: EnrolConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -174,6 +176,56 @@ impl PasskeyConfig {
     }
 }
 
+/// First sign-in and 2FA enrolment in the client (`/v1/enroll/*`, bde-linux
+/// `docs/plank-broker.md` §16). Gates: member of `group`, of none of
+/// `excluded_groups`, no OTP token or passkey yet, password set within `window_days`,
+/// and proof of that password (FAST AS for `kadmin/changepw`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnrolConfig {
+    /// Off: every `/v1/enroll/*` call answers 404, as on a broker without enrolment.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// IPA group whose members may enrol (G1).
+    #[serde(default = "d_enrol_group")]
+    pub group: String,
+    /// Members of these groups never enrol remotely (G2).
+    #[serde(default = "d_enrol_excluded")]
+    pub excluded_groups: Vec<String>,
+    /// The password must have been set at most this many days ago (G4).
+    #[serde(default = "d_7u64")]
+    pub window_days: u64,
+    /// Password proofs (`enroll/respond`) per user per 24 h, from any address.
+    #[serde(default = "d_5")]
+    pub daily_cap: u32,
+    /// Issuer label in the authenticator app (otpauth URI) and token description.
+    #[serde(default = "d_enrol_issuer")]
+    pub issuer: String,
+    /// LDAP URIs for the binds as the user (writes). Default: `ldap.uris`.
+    #[serde(default)]
+    pub ldap_uris: Option<Vec<String>>,
+    /// Lifetime of one enrolment conversation (bound to the client address).
+    #[serde(default = "d_600")]
+    pub conversation_ttl_secs: u64,
+    /// Wrong authenticator codes before the conversation is ended.
+    #[serde(default = "d_5")]
+    pub max_code_attempts: u32,
+    /// Refused new passwords before the conversation is ended.
+    #[serde(default = "d_5")]
+    pub max_password_attempts: u32,
+    /// Policy shown to the client when the broker cannot read IPA's global policy.
+    #[serde(default = "d_8")]
+    pub fallback_min_length: u32,
+    #[serde(default)]
+    pub fallback_min_classes: u32,
+}
+
+impl EnrolConfig {
+    pub fn user_ldap_uris<'a>(&'a self, ldap: &'a LdapConfig) -> &'a [String] {
+        self.ldap_uris.as_deref().unwrap_or(&ldap.uris)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
@@ -294,6 +346,27 @@ fn d_conntrack() -> PathBuf {
 fn d_table() -> String {
     "plank_broker".into()
 }
+fn d_true() -> bool {
+    true
+}
+fn d_enrol_group() -> String {
+    "fernweh".into()
+}
+fn d_enrol_excluded() -> Vec<String> {
+    vec!["admins".into(), "sysadmins".into()]
+}
+fn d_enrol_issuer() -> String {
+    "BDE Fernweh".into()
+}
+fn d_7u64() -> u64 {
+    7
+}
+fn d_8() -> u32 {
+    8
+}
+fn d_600() -> u64 {
+    600
+}
 fn d_3() -> u32 {
     3
 }
@@ -348,6 +421,11 @@ impl Default for RelayConfig {
     }
 }
 impl Default for PasskeyConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for EnrolConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -441,6 +519,41 @@ impl Config {
         if !(1..=60).contains(&self.passkey.challenge_timeout_secs) {
             bail!("passkey.challenge_timeout_secs must be 1-60");
         }
+        let e = &self.enrol;
+        if !crate::enrol::valid_group_name(&e.group)
+            || !e.excluded_groups.iter().all(|g| crate::enrol::valid_group_name(g))
+        {
+            bail!("enrol.group / enrol.excluded_groups: IPA group names only");
+        }
+        if e.excluded_groups.iter().any(|g| g.eq_ignore_ascii_case(&e.group)) {
+            bail!("enrol.group must not be one of enrol.excluded_groups");
+        }
+        if !(1..=90).contains(&e.window_days) {
+            bail!("enrol.window_days must be 1-90");
+        }
+        if e.daily_cap == 0 || e.max_code_attempts == 0 || e.max_password_attempts == 0 {
+            bail!("enrol.daily_cap / max_code_attempts / max_password_attempts must be at least 1");
+        }
+        if !(60..=3600).contains(&e.conversation_ttl_secs) {
+            bail!("enrol.conversation_ttl_secs must be 60-3600");
+        }
+        if e.issuer.trim().is_empty()
+            || e.issuer.len() > 64
+            || e.issuer.contains(':')
+            || e.issuer.chars().any(char::is_control)
+        {
+            bail!("enrol.issuer: 1-64 printable characters, no ':'");
+        }
+        if let Some(uris) = &e.ldap_uris {
+            if uris.is_empty() {
+                bail!("enrol.ldap_uris is empty");
+            }
+            for u in uris {
+                if !(u.starts_with("ldaps://") || u.starts_with("ldap://")) {
+                    bail!("enrol.ldap_uris: unsupported scheme in {u}");
+                }
+            }
+        }
         if self.public_endpoint.is_empty() || !crate::util::valid_hostname(&self.public_endpoint) {
             bail!("public_endpoint must be a host name");
         }
@@ -521,6 +634,37 @@ mod tests {
         assert!(with(r#""0.0.0.0/0""#).is_err());
         assert!(with(r#""203.0.113.0/24""#).is_err());
         assert!(with(r#""not-a-cidr""#).is_err());
+    }
+
+    #[test]
+    fn enrol_defaults_and_validation() {
+        let c = test_config();
+        assert!(c.enrol.enabled);
+        assert_eq!(c.enrol.group, "fernweh");
+        assert_eq!(c.enrol.excluded_groups, vec!["admins", "sysadmins"]);
+        assert_eq!(c.enrol.window_days, 7);
+        assert_eq!(c.enrol.daily_cap, 5);
+        assert_eq!(c.enrol.issuer, "BDE Fernweh");
+        assert_eq!(c.enrol.conversation_ttl_secs, 600);
+        assert_eq!(c.enrol.user_ldap_uris(&c.ldap), &c.ldap.uris[..]);
+        let base = include_str!("../packaging/broker.toml.example");
+        let with = |v: &str| Config::parse(&format!("{base}\n[enrol]\n{v}\n"));
+        // Exactly what bde-linux roles/plank_broker renders.
+        let c = with(
+            "enabled = true\ngroup = \"fernweh\"\nexcluded_groups = [\"admins\",\"sysadmins\"]\nwindow_days = 7\n\
+             daily_cap = 5\nissuer = \"BDE Fernweh\"",
+        )
+        .unwrap();
+        assert_eq!(c.enrol.issuer, "BDE Fernweh");
+        let c = with(r#"ldap_uris = ["ldaps://ipa1.example.org:636"]"#).unwrap();
+        assert_eq!(c.enrol.user_ldap_uris(&c.ldap), &["ldaps://ipa1.example.org:636".to_string()][..]);
+        assert!(with(r#"group = "admins""#).is_err());
+        assert!(with(r#"group = "bad group""#).is_err());
+        assert!(with("window_days = 0").is_err());
+        assert!(with("daily_cap = 0").is_err());
+        assert!(with(r#"issuer = "a:b""#).is_err());
+        assert!(with(r#"ldap_uris = ["http://x"]"#).is_err());
+        assert!(with("bogus = 1").is_err());
     }
 
     #[test]

@@ -281,6 +281,34 @@ async fn selftest(cfg: Config, cmd: SelftestCmd) -> Result<()> {
                         println!("assigned: {:?}", assigned_hosts(&v, &uv));
                     }
                 }
+                // Enrolment gate reads as the broker principal (§16). Tokens of other
+                // users are invisible without the "read OTP token ownership" permission,
+                // so 0 tokens for a user who has one means that permission is missing.
+                match dir.enrol_facts(&u).await {
+                    Err(e) => println!("enrolment facts: {e}"),
+                    Ok(None) => {}
+                    Ok(Some(f)) => {
+                        let base = cfg.ldap.base_dn(&cfg.kerberos.realm);
+                        let member = |g: &str| {
+                            let dn = plank_broker::util::norm_dn(&format!("cn={g},cn=groups,cn=accounts,{base}"));
+                            f.groups.iter().any(|x| plank_broker::util::norm_dn(x) == dn)
+                        };
+                        println!(
+                            "enrolment: member of {}={} excluded={:?} disabled={} last_password_change={:?} \
+                             password_expiration={:?} tokens={} passkeys={} auth_types={:?} policy={:?}",
+                            cfg.enrol.group,
+                            member(&cfg.enrol.group),
+                            cfg.enrol.excluded_groups.iter().filter(|g| member(g)).collect::<Vec<_>>(),
+                            f.disabled,
+                            f.last_password_change,
+                            f.password_expiration,
+                            f.tokens,
+                            f.passkeys,
+                            f.auth_types,
+                            f.policy
+                        );
+                    }
+                }
             }
         }
         SelftestCmd::Kerberos { user, host, password_only, cert_sha256, token_out } => {

@@ -8,7 +8,7 @@ host; the broker never decrypts the stream.
 
 Design and binding contracts (API, brokered connect, host GSSAPI admission,
 internals) live in the bestdayever `bde-linux` repository,
-`docs/plank-broker.md` §10 (passkeys: §13). This README covers the API as built,
+`docs/plank-broker.md` §10 (passkeys: §13, first sign-in and enrolment: §16). This README covers the API as built,
 the build and the deploy layout.
 
 ## Components
@@ -37,6 +37,12 @@ inside the session range, sane client address, target inside
 | `POST /v1/hosts/{fqdn}/connect` (Bearer) | `{route,endpoint,port,host_cert_sha256,username,gssapi_token,expires_in:30}`; `route` is `"relay"` (endpoint = broker name, port = lease) or `"direct"` (endpoint = host IPv4, port = `hosts.port`) | 401; 403 `denied` (not assigned, or the KDC refused the host ticket); 409 `{"state":"unavailable","reason":"offline"\|"certificate changed"\|"no address"}`; 503 no free port / relay / KDC |
 | `POST /v1/hosts/{fqdn}/keepalive` (Bearer) | `{"state":"ok","expires_in":90}` (lease or direct grant) | 404 `{"state":"no_lease"}` → call `connect` again |
 | `POST /v1/logout` (Bearer) | `{"state":"logged_out"}` | 401 |
+| `POST /v1/enroll/start {"username"[,"device_key"]}` | `{"conversation_id","prompts":[{"id":"password","style":"secret"}]}`, identical for every name | 429; 400 malformed; 404 when `enrol.enabled = false` |
+| `POST /v1/enroll/respond {"conversation_id","responses":[pw]}` | `already_enrolled` \| `new_password` + `policy` \| `totp` + `otpauth_uri`, `secret` | 200 `denied` (generic, ≥ `min_respond_ms`), 429, 400 |
+| `POST /v1/enroll/password {"conversation_id","new_password"}` | `totp` \| `password_rejected` + `reason` | 200 `denied` |
+| `POST /v1/enroll/totp {"conversation_id","code"}` | `authenticated` (auth/respond fields + `passkey_available`) \| `enrolled` \| `code_rejected` | 200 `denied` |
+| `POST /v1/enroll/passkey {"conversation_id","mapping"}` | `passkey_added` \| `passkey_rejected` | 200 `denied` |
+| `POST /v1/enroll/finish {"conversation_id"}` | `{"state":"done"}` (always) | 400 |
 
 ### Sign-in methods (§10.1, §13.3)
 
@@ -68,6 +74,66 @@ challenge of the same shape** (one random 32-byte credential id, random 32-byte
 challenge, `user_verification:true`) and denies the respond. At most
 `passkey.max_pending` passkey conversations (default 32) wait at a time,
 regardless of user; beyond that `auth/start` answers 429 `retry_after:10`.
+
+### First sign-in and enrolment (§16)
+
+For a user the studio created (or reset) with a one-time password: prove it, set a
+new password, add an authenticator (and, for passkey users, a passkey mapping) and
+end up signed in, all from the client, without the LAN-only portal. Every answer is
+HTTP 200 JSON (`{"state": …}`) except 429 `{"retry_after":s}` and 400 for a
+malformed body; clients treat unknown states as `denied` and never show broker text.
+
+1. `start` stores a conversation (client address, optional `device_key`, 10 min,
+   `enrol.conversation_ttl_secs`) and answers the same for every user name.
+2. `respond` counts against `enrol.daily_cap` (password proofs per user per 24 h,
+   any address), then checks, before anything changes and before the KDC is asked:
+   G1 member of `enrol.group` (`fernweh`), G2 of none of `enrol.excluded_groups`
+   (`admins`, `sysadmins`), G4 `krbLastPwdChange` within `enrol.window_days` (7),
+   account not disabled. Then G5: a FAST-armoured AS exchange for `kadmin/changepw`
+   with the password alone (every prompt refused, so an enabled OTP token makes it
+   fail: with FAST the KDC insists on the code). Then G3: no OTP token (enabled or
+   disabled, `cn=otp`) and no `ipapasskey`, read as the broker AND bound as the
+   user. Any failure is the generic `denied` (and counts like a failed sign-in); an
+   existing factor is revealed as `already_enrolled` only after the proof. A proven
+   conversation ends every other one of the same user. An expired password
+   (`krbPasswordExpiration` passed; admin-set passwords expire at once) answers
+   `new_password` with IPA's global policy (`krbPwdMinLength`, `krbPwdMinDiffChars`;
+   `enrol.fallback_*` when unreadable); a fresh self-chosen one goes straight to `totp`.
+3. `password` refuses locally what is shorter than the policy or equal to the
+   one-time password (`reused`: its issuer knows it), otherwise changes it with
+   kpasswd over a FAST `kadmin/changepw` ticket. IPA's soft errors map to
+   `too_short`, `too_simple` (also repeating/consecutive characters, palindromes),
+   `reused` (history) or `policy`. At most `enrol.max_password_attempts` (5).
+4. `totp` carries a 35-byte random key (IPA's default length) as
+   `otpauth://totp/<issuer>:<user>?secret=<base32>&issuer=<issuer>&algorithm=SHA1&digits=6&period=30`
+   and `secret` (56 base32 characters). The first code is checked locally (RFC 6238,
+   ±1 step), so wrong codes never reach IPA; `enrol.max_code_attempts` (5) wrong
+   codes end the conversation. A correct code: G3 again as the user, then the token
+   is written AS THE USER over LDAPS exactly like `otptoken_add` (objectclasses
+   `ipatoken`/`ipatokentotp`, uuid, owner = managedBy = the user, sha1/6/30, clock
+   offset 0, `ipatokenDisabled: TRUE`, description = issuer) and enabled
+   (`ipatokenDisabled: FALSE`); a failed enable deletes the entry again. The key is
+   zeroized afterwards. The session comes from a normal password‖code login (auth
+   indicator `otp`), device-bound when `start` carried a key: `authenticated` has
+   exactly the `auth/respond` fields plus `passkey_available`. When that login
+   fails (the code's step passed), `enrolled`: the client signs in normally with
+   the next code.
+5. `passkey` (only when `passkey_available`, i.e. `ipaUserAuthType` includes
+   `passkey`; users cannot change their auth types): validates
+   `passkey:<b64 credential id>,<b64 P-256 SPKI>` and adds it as the user (plus
+   object class `ipapasskeyuser` on first use). Once per conversation.
+6. `finish` zeroizes and drops the conversation (the reaper does the same on expiry).
+
+Identity: gate reads use the broker principal's GSSAPI bind. IPA's System
+permissions already let any principal read `memberOf`, `krbLastPwdChange`,
+`krbPasswordExpiration`, `ipaUserAuthType` and `ipapasskey`; tokens of other users
+need the `PLANK broker - read OTP token ownership` permission (bde-linux adds it).
+Without it the broker sees no tokens, and the check bound as the user still catches
+them. Writes simple-bind as `uid=<user>,cn=users,cn=accounts,<suffix>` over
+`enrol.ldap_uris` (default `ldap.uris`), stopping at the first server that refuses
+the credentials (each refused bind counts towards IPA's per-server lockout: 6
+failures, 10 min). The broker holds no IPA write right. `plank-broker selftest
+directory --user <u>` prints the gate facts the broker can read.
 
 ### Host list
 
@@ -133,6 +199,13 @@ reveal a session owner.
 - Limits: 5 `auth/start` per minute per IP; 3 failed responds per (user, IP) or 10
   per IP → 15 min block, enforced before the KDC is asked; bursts ≥ 20
   failures/min are audited (`failure_burst`).
+- Enrolment audit events: `enrol_start`, `enrol_proven` (`expired`), `enrol_denied`
+  (`reason`: `credentials`, `malformed`, `entitlement`, `privileged`, `window`,
+  `has_factor`, `limit`, `conversation`, `directory`, `kdc_unavailable`),
+  `enrol_password_changed`, `enrol_totp_created`, `enrol_totp_enabled`,
+  `enrol_login_ok` / `enrol_login_failed`, `enrol_passkey_added`; user and address
+  only, never a password, key, code or token. Enrolment failures share the sign-in
+  limiter (`credentials`, `malformed`, `entitlement`, `privileged`, `window` count).
 - Audit: JSON lines on stdout (journald), events `service_start`, `login_ok`,
   `login_fail` (both with `method`: `password_otp` or `passkey`; failure `reason`
   `credentials`, `malformed`, `username`, `conversation`, `ticket_lifetime`,
@@ -236,7 +309,7 @@ sudo -u plank-broker plank-broker pin list
 sudo -u plank-broker plank-broker pin reset ws1.example.org
 plank-broker check-config
 # live diagnostics (needs keytab read access):
-plank-broker selftest directory --user anna
+plank-broker selftest directory --user anna   # includes the enrolment gate facts
 plank-broker selftest kerberos --user anna --host ws1.example.org   # password, then OTP on stdin
 ```
 

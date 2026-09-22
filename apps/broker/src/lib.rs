@@ -10,6 +10,7 @@ pub mod broker;
 pub mod config;
 pub mod device;
 pub mod directory;
+pub mod enrol;
 pub mod hbac;
 pub mod kerberos;
 #[cfg(feature = "system")]
@@ -22,10 +23,13 @@ pub mod probe;
 pub mod ratelimit;
 pub mod relay;
 pub mod sessions;
+pub mod totp;
 pub mod util;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_enrol;
 
 /// SHA-256 (lower-case hex) over the SubjectPublicKeyInfo DER of the first
 /// certificate in `pem` — the value PLANK clients pin for the broker.
