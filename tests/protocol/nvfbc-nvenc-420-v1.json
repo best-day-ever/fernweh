@@ -1,0 +1,106 @@
+{
+  "plank_protocol_version": 13,
+  "required_feature_flag": "0x2000000",
+  "capture_source": "nvfbc",
+  "source_precision_bits": 8,
+  "source_format": "BGRA8888",
+  "encoder_backend": "nvenc-direct",
+  "tuples": [
+    {
+      "encoding_mode": "h264-8-420-nvenc",
+      "video_format": "0x0001",
+      "codec": "H.264/AVC High",
+      "profile_idc": 100,
+      "encoded_precision_bits": 8,
+      "cuda_surface": "NV12",
+      "native_request": {
+        "codec": 0,
+        "ten_bit": false,
+        "chroma": 0,
+        "encoder_csc_mode": 2,
+        "negotiated_format": 1
+      }
+    },
+    {
+      "encoding_mode": "hevc-10-420-nvenc",
+      "video_format": "0x0200",
+      "codec": "H.265/HEVC Main 10",
+      "general_profile_idc": 2,
+      "encoded_precision_bits": 10,
+      "cuda_surface": "P010 (MSB-aligned)",
+      "native_request": {
+        "codec": 1,
+        "ten_bit": true,
+        "chroma": 0,
+        "encoder_csc_mode": 2,
+        "negotiated_format": 512
+      }
+    }
+  ],
+  "chroma_sampling": "4:2:0",
+  "chroma_format_idc": 1,
+  "full_range": false,
+  "colour_primaries": 1,
+  "transfer_characteristics": 13,
+  "matrix_coefficients": 1,
+  "code_values": {
+    "8bit": {
+      "black": [
+        16,
+        128,
+        128
+      ],
+      "red": [
+        63,
+        102,
+        240
+      ],
+      "white": [
+        235,
+        128,
+        128
+      ]
+    },
+    "10bit": {
+      "black": [
+        64,
+        512,
+        512
+      ],
+      "red": [
+        250,
+        409,
+        960
+      ],
+      "white": [
+        940,
+        512,
+        512
+      ]
+    }
+  },
+  "rejected_native_requests": [
+    {
+      "encoding_mode": "h264-8-420-nvenc",
+      "encoder_csc_mode": 3,
+      "reason": "full range"
+    },
+    {
+      "encoding_mode": "h264-8-420-nvenc",
+      "encoder_csc_mode": 0,
+      "reason": "BT.601 matrix"
+    },
+    {
+      "encoding_mode": "hevc-10-420-nvenc",
+      "chroma": 1,
+      "reason": "4:4:4"
+    },
+    {
+      "encoding_mode": "hevc-10-420-nvenc",
+      "capture_source": "x11-native10",
+      "reason": "native 10-bit capture is identity 4:4:4 only"
+    }
+  ],
+  "hardware_encode_required": true,
+  "silent_fallback_allowed": false
+}

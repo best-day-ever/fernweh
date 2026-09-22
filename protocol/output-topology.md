@@ -34,7 +34,8 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x20000` — authenticated desktop stage for reconnect progress
 - `0x40000` — opaque media-worker instance identity for early replacement detection
 - `0x400000` — single-person workstation: named `409` refusals and confirmed sign-out of an idle desktop owner (Linux Host)
-- `0x1000000` — notch-safe Apple laptop virtual modes (`3024x1890`); see the allowlist below
+- `0x2000000` — NvFBC 8-bit source into direct NVENC 4:2:0 (`h264-8-420-nvenc`, `hevc-10-420-nvenc`), BT.709 limited range (Linux Host)
+- `0x4000000` — notch-safe Apple laptop virtual modes (`3024x1890`); see the allowlist below (Linux Host)
 
 ### Expected desktop handoff status
 
@@ -184,7 +185,7 @@ Virtual layouts persist one enumerated mode per requested output. The current
 `3840x1600`, `3840x2160`, `4096x2160`, and `5120x2160`. `3024x1890` is the
 fullscreen viewport of a 14-inch MacBook Pro in its default scaling: native
 fullscreen places the window below the camera housing, so the 3024x1964 panel
-size is never presented 1:1 and is not a mode. It requires feature `0x1000000`:
+size is never presented 1:1 and is not a mode. It requires feature `0x4000000`:
 a client offers or requests it, and accepts it in a topology document, only
 when the host advertises that bit; the host rejects it with 400 unless the
 launch negotiated the bit. Every timing is an exact 60 Hz reduced-blanking
@@ -347,7 +348,7 @@ identity, geometry, virtual provenance, source rectangles, exact layout
 binding, independent modes, allowed-layout capability, startup provenance, and
 the primary fallback. `tests/protocol/output-topology-v13-notch-safe.json`
 is the same physical-startup host presenting one `3024x1890` output with
-feature `0x1000000`; without that bit the same document is invalid. The
+feature `0x4000000`; without that bit the same document is invalid. The
 version-1, version-2, version-4, version-7, and
 version-8 and version-9 vectors remain historical
 evidence only; PLANK has no deployed legacy clients requiring a

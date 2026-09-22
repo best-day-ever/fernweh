@@ -49,7 +49,7 @@ MODE_TIMINGS = {
     "2560x1600": (269.28, 2560, 2608, 2640, 2720, 1600, 1603, 1609, 1650),
     "2560x2160": (363.12, 2560, 2608, 2640, 2720, 2160, 2163, 2173, 2225),
     # 14-inch MacBook Pro fullscreen below the camera housing (feature
-    # 0x1000000). CVT-RB porches; 16 extra blanking pixels and one extra
+    # 0x4000000). CVT-RB porches; 16 extra blanking pixels and one extra
     # line give an exact 60 Hz clock at 10 kHz resolution.
     "3024x1890": (373.44, 3024, 3072, 3104, 3200, 1890, 1893, 1899, 1945),
     "3440x1440": (319.68, 3440, 3488, 3520, 3600, 1440, 1443, 1453, 1480),
