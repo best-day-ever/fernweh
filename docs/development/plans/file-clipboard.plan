@@ -1,0 +1,407 @@
+# Bidirectional file clipboard
+
+Status: initial bidirectional implementation complete behind the explicit
+`file_clipboard` Host policy; paired desktop qualification remains pending.
+
+Branch: `bde/file-clipboard-design`. Baseline: BDE root `36cf6aa`, Client
+`a954b688`, Linux Host `9acec8c9`, Kymux `912ece5`.
+
+## Implemented slice
+
+The branch now includes text clipboard v1, feature/policy negotiation, separate
+bounded control and content lanes, portable v2 framing, Mac-to-X11 staging and
+paste release, and X11-to-Mac eager-cache staging with AppKit file-URL
+publication. It has no fixed file bitrate ceiling; content uses all available
+capacity while yielding to interactive/media pressure.
+
+The Mac receive path deliberately uses the documented eager-cache fallback,
+not unqualified `NSFilePromiseProvider` behavior. Transfer progress/cancel UI,
+automatic 24-hour cache cleanup, downloaded-file quarantine, concurrent
+opposite-direction offers, and paired Finder/Nautilus release qualification
+remain follow-up gates. The secure default is therefore still `off`.
+
+## Outcome
+
+A user can copy one or more regular files or directories on a local Mac and
+paste them into the connected Linux desktop, or copy them on the Linux desktop
+and paste them into a local Mac application such as Finder. The transfer:
+
+- belongs to the authenticated desktop session and user;
+- does not pass file contents through the broker or an HTTP control request;
+- cannot block keyboard, mouse, audio, video or small text clipboard updates;
+- reports preparation, progress, readiness, cancellation and failure;
+- never exposes a partially written file as complete;
+- preserves names, directory layout, bytes, modification times and portable
+  user mode bits, but not ownership, ACLs or extended attributes;
+- always copies across machines. It never propagates cut/delete semantics.
+
+The first shipping slice is Mac Client <-> Rocky Linux X11 Host. The wire and
+platform boundaries deliberately leave room for the native Mac Host and a
+future Windows Client without putting platform clipboard formats on the wire.
+
+## Baseline integration
+
+This implementation ports PLANK's accepted text clipboard work onto the BDE
+root, Client and Linux Host branches rather than growing a second ownership,
+negotiation or lifecycle system.
+
+The accepted upstream checkpoint is rooted at `a949440`; its tested package
+source is `16c5b998`, with Client `6663d569`, Linux Host `b8abf72c`, Client
+common-C `ef8ac14c` and Host common-C `3a97a58f`. Port the focused clipboard
+changes were ported rather than replacing the BDE forks with unrelated upstream history.
+File clipboard v2 depends on the v1 session epoch, focus policy, pasteboard
+ownership checks, X11 worker isolation and 512 KiB text bounds remaining intact.
+
+## Product behavior
+
+### Local Mac to remote Linux
+
+1. Finder or another local application places `NSPasteboardTypeFileURL` items
+   on the general pasteboard.
+2. Plank notices the file flavor while the stream owns input focus, but sends
+   neither metadata nor bytes merely because the user copied something.
+3. When the user presses the normal remote paste shortcut, the Client consumes
+   that key chord instead of forwarding it immediately. It sends a file offer,
+   displays transfer progress and keeps the paste pending.
+4. The Host validates policy, names, manifest limits and free space, then pulls
+   bounded ranges over the file endpoint into a private session staging area.
+5. Each file is written under a temporary name and atomically renamed only
+   after its declared length and SHA-256 digest match. After the whole transfer
+   is ready, the Host owns X11 `CLIPBOARD` with both `text/uri-list` and
+   `x-special/gnome-copied-files` copy representations pointing at the staged
+   top-level items.
+6. Only after the Host acknowledges that ownership does the Client inject one
+   paste chord. Apps that support file clipboard paste then copy the staged
+   items into their chosen destination.
+
+If preparation fails or the user cancels, Plank does not forward the withheld
+paste. It retains the user's original local clipboard and shows the reason.
+Plain-text paste continues through v1 without entering this state machine.
+
+### Remote Linux to local Mac
+
+1. The Host observes a new X11 `CLIPBOARD` owner. It queries `TARGETS`, prefers
+   `x-special/gnome-copied-files`, and falls back to `text/uri-list`.
+2. It accepts only local `file:` URLs with an empty or local host component.
+   A remote `cut` offer is represented as copy across the PLANK boundary.
+3. The Host creates a bounded manifest and sends an offer. It does not push file
+   content until the Client accepts or requests it.
+4. The Client represents each top-level item as an AppKit file promise if the
+   native qualification below proves that Finder and supported applications
+   consume promises from the general copy/paste pasteboard. A paste then causes
+   the promise worker to pull file ranges directly into the destination supplied
+   by AppKit.
+5. If general-pasteboard file promises are not reliable on every supported
+   macOS target, the supported fallback downloads into
+   `~/Library/Caches/PLANK/FileClipboard/<offer-id>/`, publishes real file
+   URLs only after the complete transfer is ready, and shows a `Ready to paste`
+   notification. The previous local clipboard remains untouched while staging.
+
+The fallback is correct but duplicates data when Finder pastes it elsewhere.
+It is not the desired large-media path. Do not claim lazy native paste until the
+Finder proof passes on macOS 13 and the current qualified macOS release.
+
+Manifest enumeration and file reads run on bounded file-I/O workers. They never
+run on the AppKit main queue, SDL event loop, XCB clipboard worker, capture
+thread or transport control loop.
+
+### Clipboard precedence
+
+- A real file-URL flavor wins over text flavors from the same pasteboard
+  generation. Plank must not leak Finder's path strings through text sync and
+  then also start a file transfer.
+- Plain text is never interpreted as a path or URL list.
+- File promises received from arbitrary local applications are a later
+  capability. The first slice accepts stable local file URLs only.
+- Re-copying anything replaces the previous offer. A newer local clipboard is
+  never overwritten or cleared by completion or cleanup from an older offer.
+- Repeated paste from an unchanged completed offer is supported while the
+  source lease and staged data remain valid.
+
+## User controls
+
+File clipboard is a distinct permission from text clipboard. The Host
+administrator sets the maximum allowed mode:
+
+- `off`
+- `client-to-host`
+- `host-to-client`
+- `bidirectional`
+
+The Client may choose a narrower per-host setting but cannot widen Host policy.
+The secure default remains text-only until file clipboard is explicitly
+enabled. LoginWindow, the root worker and unauthenticated discovery never read,
+advertise or stage files.
+
+The streaming toolbar gains one transfer popover. It shows item count, total
+bytes, direction, throughput, current item, and the states `Preparing`,
+`Transferring`, `Ready to paste`, `Cancelled` and `Failed`. It provides Cancel
+and, for a completed receive, Reveal. Errors name the affected item in the UI
+when safe, but filenames and content never enter ordinary logs.
+
+Large-transfer confirmation is a Client preference, with a default threshold
+of 1 GiB. Administrative policy can force confirmation for every transfer.
+
+## Negotiation and transport
+
+File clipboard gets a separate launch capability; it does not overload text
+feature `0x800000`. The merge-base registry already uses `0x400000` for desktop
+sign-out, so the implemented `ClipboardFilesFeature` is `0x1000000`.
+Negotiation returns the effective direction policy, limits and staging support.
+A peer that lacks the bit keeps text clipboard behavior and never sees a file
+endpoint.
+
+Mac launch schema must be bumped rather than silently changing schema 3. Linux
+launch responses expose the same effective policy. The capability is valid only
+for an authenticated user-desktop worker and is revoked with that worker.
+
+Bulk data must not use the input lane, Host event lane or the existing native
+session-data lane. Add two conditional reliable `DataProtocol` endpoints to the
+same authenticated QUIC connection:
+
+- endpoint 8: file control and manifests;
+- endpoint 10: bounded file-content responses.
+
+Those IDs are the next server-owned even IDs for both the direct endpoint
+manifest and a setup connection after promotion. Registration is conditional
+on the negotiated file feature on both peers. Keeping control and content on
+different QUIC streams prevents a large content record from blocking cancel,
+error or lease messages. It also keeps file work independent from setup and
+session-ready messages.
+
+The content sender uses 256 KiB maximum chunks, an 8 MiB maximum outstanding
+window and no more than two active files. The receiver drives the transfer with
+range requests, providing natural backpressure and supporting an AppKit promise
+that asks for one top-level item later. Queue limits are enforced before copying
+payload bytes.
+
+QUIC reliability and encryption do not by themselves protect interactive
+quality because all streams share congestion control. File content therefore
+yields whenever input/control queues are nonempty, media queues cross their
+low-water mark, RTT doubles from the session baseline, or the transport reports
+new unrecovered FEC symbols. There is no fixed file-transfer bitrate ceiling;
+when the session is healthy and interactive queues are clear, the transfer may
+use the available connection capacity. If Kymux cannot express stream
+priority, application yielding is mandatory and a Kymux change is optional,
+not a reason to send files on the existing data stream.
+
+The broker does not parse or store this protocol. Direct and relayed sessions
+carry it inside the existing end-to-end authenticated QUIC connection. Both
+routes require qualification because sustained traffic exercises different
+network and idle-time behavior.
+
+The normative message and state contract is in
+`protocol/clipboard-files-v2.md`.
+
+## Filesystem contract
+
+The first version transfers regular files, empty files and directories. It
+rejects symbolic links, hard-link preservation, sockets, devices, FIFOs and
+other special entries. Hidden files are ordinary entries. A macOS package is a
+directory tree and transfers under the same rules.
+
+The manifest contains only relative UTF-8 name components and platform-neutral
+metadata. It never sends an absolute source path. Receivers reject:
+
+- empty names, `.`, `..`, `/`, NUL or invalid UTF-8;
+- path depth over 64;
+- components over 255 UTF-8 bytes;
+- canonical or case-folded destination collisions;
+- more than 1,024 top-level items or 100,000 total entries;
+- manifests over 32 MiB;
+- a total declared size over the effective policy cap;
+- any integer overflow in counts, sizes or offsets.
+
+The initial policy cap is 1 TiB per transfer and two transfers total, one per
+direction. Both are administrator-reducible. The receiver also checks current
+free space and its private staging quota. `ENOSPC` remains a handled transfer
+failure because a preflight cannot reserve all filesystem capacity.
+
+Destination files belong to the authenticated desktop user. Plank creates
+private directories as `0700` and partial files as `0600`, applies the user's
+umask, preserves portable user read/write/execute bits and directory execute
+bits, and strips setuid, setgid and sticky bits. It preserves nanosecond mtime
+when available. It does not transfer uid/gid, ACLs, resource forks, Finder
+metadata, Linux capabilities or arbitrary extended attributes in v2.
+
+The Host staging root is an administrator-configurable directory on a real
+disk, defaulting to the authenticated user's XDG cache, never `$XDG_RUNTIME_DIR`
+or another likely tmpfs. The Mac fallback uses the user cache path above.
+Partial trees use a non-addressable `.partial` name and become clipboard-visible
+through one atomic directory rename.
+
+Completed staged content stays available while Plank still owns the related
+clipboard, plus a bounded grace period so the destination can finish reading.
+Unowned entries expire after 24 hours and are removed on the next Client/Host
+start. Cleanup checks the private root, transfer marker and ownership before
+deletion; it never recursively deletes a path supplied by the peer.
+
+## Source stability and integrity
+
+Opening a source by path and trusting an earlier manifest is a TOCTOU bug.
+Source registries are local and session-scoped:
+
+- Linux opens top-level roots as the desktop user, walks with directory file
+  descriptors, uses `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS`
+  where available, and rejects symlinks. The fallback uses `openat`,
+  `O_NOFOLLOW` and an explicit component walk.
+- macOS accepts only local file URLs, opens without following symlinks, and
+  validates the opened object against its recorded device, inode, size, ctime
+  and mtime before serving content.
+- A sender rechecks stable metadata after the last range. Mutation cancels the
+  affected transfer instead of delivering a mixed snapshot.
+- Sender and receiver calculate SHA-256 while serving sequential ranges. The
+  receiver renames a partial file only after size and final digest match.
+
+QUIC already protects packets in transit; the digest detects source mutation,
+implementation errors and incorrect range assembly.
+
+## Session and clipboard lifecycle
+
+Every offer carries a random 128-bit offer ID, clipboard generation and session
+epoch. Each paste/materialization adds a nonzero 64-bit materialization ID so a
+still-owned clipboard can be pasted more than once without reusing terminal
+transfer state. Messages from another epoch are rejected.
+
+- Before a materialization starts, a changed source clipboard sends Revoke and
+  closes its source registry. A valid Materialize request locks that exact
+  operation. A clipboard change then prevents another materialization but
+  does not corrupt or cancel the paste already in progress. This matches normal
+  file-copy behavior: copying something new does not abort an active copy.
+- A changed destination clipboard cancels an unstarted promise only if Plank
+  still owns that exact pasteboard change count or X11 selection. It does not
+  abort a materialization already writing to an application's destination.
+  Eager fallback staging may finish, but must not overwrite the newer clipboard;
+  its popover exposes an explicit `Copy files` action instead.
+- Disconnect, logout, desktop handoff, takeover, account change and worker
+  replacement cancel active transfers, close source handles and delete partial
+  destination data.
+- Completed fallback data may remain under the bounded cache policy, but its
+  old transfer capability is never valid in a new session.
+- File promises fail clearly after disconnect; v2 does not resume across a new
+  authenticated connection.
+- Cancellation is idempotent. Late chunks are ignored after state is terminal.
+
+## Security properties
+
+- Only the authenticated active desktop owner can negotiate or access files.
+- Direction policy is enforced independently at both peers.
+- No file metadata or byte is accepted before feature negotiation and policy
+  agreement.
+- Client-to-Host content begins only after an explicit remote paste gesture.
+- X11 offers are accepted only from the active user's `CLIPBOARD`; `PRIMARY`
+  does not trigger file transfer.
+- URI lists accept local file URLs only. Network URLs and text paths are never
+  dereferenced.
+- Remote cut becomes copy. No peer can request source deletion.
+- Files are never executed, opened or previewed automatically.
+- Mac receives should apply ordinary downloaded-file quarantine provenance;
+  executable and application-bundle behavior needs security review during the
+  native spike.
+- Logs include direction, state, counts, byte totals, duration and stable error
+  codes, never paths, names, content, tokens or digests.
+- Malformed control records terminate the file subsystem and transfer. They do
+  not need to tear down video unless endpoint framing or session authentication
+  is compromised.
+
+## Implementation phases
+
+### Phase 0: prove platform behavior and port text v1
+
+- Port the accepted text clipboard implementation onto BDE branches.
+- Build a throwaway native Mac probe that writes `NSFilePromiseProvider` objects
+  to `NSPasteboard.general` and verify ordinary Cmd-V into Finder on macOS 13
+  and the current qualified macOS release. Also test multiple files, a directory,
+  cancellation and a promise completing after the source app loses focus.
+- Capture actual Finder pasteboard types for copied files. Do not infer support
+  from drag-and-drop documentation; Apple explicitly distinguishes the dragging
+  pasteboard from normal copy/paste.
+- On Rocky X11, capture Nautilus and the deployed file manager's `TARGETS` and
+  payloads for copy and cut. Prove that publishing both URI formats supports
+  paste into the supported file manager.
+- Record the chosen Mac strategy in this plan before implementing bulk transfer.
+
+### Phase 1: protocol and transport
+
+- Add the feature allocation, launch-policy response and fixed v2 wire helper.
+- Add conditional control/content DataProtocol endpoints, bounded queues,
+  priority yielding and metrics to `plank-transport`.
+- Add portable encode/decode vectors, malformed-frame tests, queue-pressure
+  tests and fuzz/ASan/UBSan coverage before platform code consumes the API.
+
+### Phase 2: Client to Linux Host vertical slice (implemented)
+
+- Read stable Mac file URLs and intercept file paste.
+- Build manifests without following links.
+- Implement the Linux receiver, private stage, atomic completion and X11 URI
+  provider.
+- Release the paste chord only after the Host confirms X11 ownership.
+- Add progress/cancel UI and policy controls. (Policy is implemented; UI is
+  pending.)
+
+### Phase 3: Linux Host to Mac Client vertical slice (implemented with eager fallback)
+
+- Extend the isolated XCB worker to query file targets and parse URI lists with
+  INCR support and separate limits from text.
+- Implement the Linux source registry and Mac destination writer.
+- Use qualified AppKit promises or the explicitly reported eager fallback.
+- Preserve newer local pasteboard ownership through cancel and teardown.
+
+### Phase 4: hardening and release qualification (pending)
+
+- Exercise direct and broker-relayed routes under sustained video/audio/input.
+- Validate limits, disk-full, source mutation, permission denial, disconnect,
+  reconnect, takeover, logout/login and crash cleanup.
+- Build branch-qualified Host and Client packages before enabling the default
+  or publishing a release. The implementation may merge while default-off so
+  paired acceptance can run from the shared repository.
+
+### Phase 5: Mac Host
+
+Reuse the protocol and AppKit adapter inside the authorized desktop worker.
+Keep LoginWindow disabled, access NSPasteboard on the main queue, and retain the
+existing authority callback and change-count ownership rules. This phase cannot
+weaken the Linux Host release gate.
+
+## Verification matrix
+
+Automated coverage must protect behavior, not source spelling:
+
+- single file, empty file, multiple files and nested directory round trips;
+- Unicode, decomposed Unicode, hidden files, executable user bit and mtime;
+- exact-limit names/counts/manifest/total bytes and one-over-limit rejection;
+- invalid UTF-8, traversal, absolute names, duplicate/case-folded names,
+  symlink, FIFO, device and integer-overflow rejection;
+- peer sends data before Ack, wrong epoch/transfer/entry, overlapping or
+  out-of-order range, overlong chunk, wrong size/digest and late data;
+- source changes during transfer, unreadable source and destination `ENOSPC`;
+- cancel at offer, manifest, content and atomic-rename boundaries;
+- copy A -> B -> A, re-copy identical items, newer local clipboard, repeated
+  paste and paste immediately after copy;
+- disconnect/reconnect, takeover, desktop handoff, login/logout and process
+  crash with no reusable capability or surviving partial file;
+- no file endpoints or filesystem access when policy is text-only;
+- direct and relayed 20 GiB transfer while video, audio, keyboard, mouse and
+  Wacom remain usable, with no control queue overflow and no unbounded memory;
+- SHA-256 equality for every received file and deterministic tree comparison.
+
+Manual acceptance must cover Finder and the supported Rocky file manager in
+both directions, a directory with thousands of media files, a file larger than
+4 GiB, repeated paste, transfer cancellation, insufficient disk, Spaces/focus
+changes, and a destination application that does not accept file clipboard
+formats. That last case must fail visibly; Plank must not claim that every
+remote application implements file paste.
+
+## External protocol references
+
+- Apple's `NSFilePromiseProvider` contract:
+  <https://developer.apple.com/documentation/appkit/nsfilepromiseprovider>
+- Apple's warning that dragging uses a pasteboard distinct from normal
+  copy/paste:
+  <https://developer.apple.com/documentation/appkit/supporting-drag-and-drop-through-file-promises>
+- Microsoft's mature pull/range model for remote clipboard files:
+  <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpeclip/30688d09-96b6-46f8-af18-ea1998bb7987>
+- GNOME's file clipboard representations:
+  <https://mail.gnome.org/archives/commits-list/2022-January/msg01597.html>
+- Freedesktop clipboard specifications:
+  <https://specifications.freedesktop.org/>
