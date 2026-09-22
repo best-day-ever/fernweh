@@ -112,6 +112,49 @@ exists and no session or lease is active. The RPM explicitly
 applies the packaged preset on upgrade so the pre-GDM cleanup cannot remain
 disabled while a stale owned overlay survives a reboot.
 
+### Qualify a workstation's display arrangements
+
+The supervisor binary has two root-only modes for hardware qualification.
+They need no client and no signed-in account: they act on the active seat0
+X server, the GDM greeter or a user desktop, as that session's user.
+
+```sh
+# The display inventory and the display_capabilities a client would see
+# (encoding_limits come from the media worker and are empty here).
+sudo /usr/libexec/plank/plank-host-supervisor --print-inventory [--json]
+
+# Apply one canonical arrangement with the client lease transaction, hold it,
+# restore it, and report every step.
+sudo /usr/libexec/plank/plank-host-supervisor \
+  --qualify-arrangement '1:3024x1890+0+270:auto,1920x1080+3024+0:auto' \
+  [--hold SECONDS] [--json]
+```
+
+`--qualify-arrangement` refuses to run (exit 3) unless it is root, the policy
+is `physical` or `hybrid`, no PLANK display lease exists
+(`/run/plank/host/display-state` is absent), no display transition is
+pending and no other qualification runs. A stream bound without a lease (a
+`physical` bookmark on a physical host) is not visible to it, so check that
+nobody is connected first. It captures the inventory, evaluates and plans the
+request with the same functions the lease path uses (exit 4 with the reason,
+nothing changed, if the host cannot present it), then runs the same apply
+transaction: snapshot, visibility, settle, one CurrentMetaMode, primary,
+verify with one retry. It prints the MetaMode, the xrandr visibility
+arguments, each output's backing and carrier, the verify result and the
+xrandr rectangles, holds for `--hold` seconds (default 10, at most 3600; Ctrl-C
+ends the hold early), restores the exact snapshot and non-desktop values and
+verifies them. It exits 0 only when the apply and the restore both verified,
+and 1 otherwise; the display is restored either way.
+
+A qualification run never writes `display-state` or `display-transition`, so
+the media worker and clients never see it. It keeps its own lease record in
+`/run/plank/host/display-qualify` under an exclusive lock. While the lock is
+held the supervisor refuses client display transitions (`busy`) and skips
+the hybrid greeter restart. If the run dies without restoring (for example
+SIGKILL), the lock disappears with it and the running supervisor restores
+the recorded snapshot within about a second; without a running supervisor,
+the next qualification run does it first.
+
 The client is interactive and ships no systemd user service or desktop
 autostart entry. Launch it explicitly from the desktop application icon or the
 `plank-client` command. Enable only the host services:
