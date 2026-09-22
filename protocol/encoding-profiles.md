@@ -16,6 +16,8 @@ backend or format.
 | NvFBC 8-bit | H.264 8-bit 4:4:4 NVENC | `nvenc-direct` | `0x0004` | 4:4:4 | 8 | Identity GBR |
 | NvFBC 8-bit | H.265 8-bit 4:4:4 NVENC | `nvenc-direct` | `0x0400` | 4:4:4 | 8 | Identity GBR |
 | NvFBC 8-bit | H.265 10-bit 4:4:4 NVENC | `nvenc-direct` | `0x0800` | 4:4:4 | 10 | Identity GBR; 8-bit source up-converted |
+| NvFBC 8-bit | H.264 8-bit 4:2:0 NVENC | `nvenc-direct` | `0x0001` | 4:2:0 | 8 | Limited-range BT.709 YCbCr, sRGB transfer |
+| NvFBC 8-bit | H.265 10-bit 4:2:0 NVENC | `nvenc-direct` | `0x0200` | 4:2:0 | 10 | Limited-range BT.709 YCbCr, sRGB transfer; 8-bit source up-converted |
 | Native X11/XShm 10-bit (Experimental) | H.264 10-bit 4:4:4 — x264 | `software-cuda` | `0x0008` | 4:4:4 | 10 | Identity GBR |
 | Native X11/XShm 10-bit (Experimental) | H.265 10-bit 4:4:4 NVENC | `nvenc-direct` | `0x0800` | 4:4:4 | 10 | Identity GBR |
 
@@ -42,12 +44,36 @@ headroom, but it does not claim native 10-bit capture precision. H.264 10-bit
 NVENC is not offered because the qualified Ampere and Turing hosts do not
 support it.
 
-H.264 NVENC is limited to a maximum encoded dimension of `4096x2160`. The
-Client disables `5120x2160` in both bookmark editors while an H.264 NVENC
+H.264 NVENC (4:4:4 and 4:2:0) is limited to a maximum encoded dimension of
+`4096x2160`. The Client disables `5120x2160` in both bookmark editors while an H.264 NVENC
 profile is selected and moves an existing incompatible selection to
 `4096x2160`. Software x264 and HEVC NVENC profiles retain the qualified
 `5120x2160` mode. Bookmark persistence independently rejects an explicit
 virtual-display mode that exceeds the selected H.264 NVENC profile limit.
+
+## NVENC 4:2:0 (bandwidth profiles)
+
+The two 4:2:0 NVENC tuples exist for remote (WAN) use, where the 4:4:4
+identity profiles need more bandwidth than the link has. They are a visible
+bookmark choice, never a fallback: a 4:4:4 bookmark still fails rather than
+dropping to 4:2:0. Wire modes are `h264-8-420-nvenc` (H.264 High, video format
+`0x0001`) and `hevc-10-420-nvenc` (HEVC Main10, `0x0200`), NvFBC only, feature
+`0x2000000`. The client sends `chroma=0` and `encoder_csc_mode=2`
+(`COLORSPACE_REC_709 << 1`, limited range); the host accepts nothing else for
+these modes. CUDA converts BGRA to NV12 or MSB-aligned P010 with the BT.709
+matrix and rounded limited-range code values (8-bit black/white 16/235,
+chroma 128). The VUI carries BT.709 primaries and matrix, limited range and the
+sRGB transfer (13), because the captured desktop is sRGB-encoded: clients
+present the stream with the same tone curve as the 4:4:4 identity profiles.
+
+The host advertises each mode only after its own startup probe encodes an IDR
+whose SPS proves the profile (H.264 High / HEVC Main10), 4:2:0, the bit depth
+and that exact VUI; it then also advertises `SCM_HEVC_MAIN10` for the HEVC
+mode. H.264 NVENC keeps the `4096x2160` limit below. The client validates the
+decoded test frame's depth, 4:2:0 geometry, BT.709 matrix and primaries,
+limited range and sRGB transfer before it accepts a hardware path; VideoToolbox
+decodes both on Apple Silicon. `tests/protocol/nvfbc-nvenc-420-v1.json` is the
+negotiation vector.
 
 `tests/protocol/nvfbc-hevc10-nvenc-v1.json` is the exact negotiation and
 pipeline test vector for this tuple. Hosts must reject it when feature `0x2000`
