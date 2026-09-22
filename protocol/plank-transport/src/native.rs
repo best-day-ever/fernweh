@@ -21,6 +21,8 @@ pub const VIDEO_ENDPOINT_ID: u16 = 0;
 pub const AUDIO_ENDPOINT_ID: u16 = 2;
 pub const INPUT_ENDPOINT_ID: u16 = 4;
 pub const DATA_ENDPOINT_ID: u16 = 6;
+pub const FILE_CONTROL_ENDPOINT_ID: u16 = 8;
+pub const FILE_DATA_ENDPOINT_ID: u16 = 10;
 pub const SETUP_DATA_ENDPOINT_ID: u16 = 0;
 pub const SETUP_VIDEO_ENDPOINT_ID: u16 = 2;
 pub const SETUP_AUDIO_ENDPOINT_ID: u16 = 4;
@@ -32,6 +34,12 @@ pub struct NativeOptions {
     pub idle_timeout: Duration,
     pub keep_alive_interval: Duration,
     pub max_udp_payload_size: Option<u16>,
+    pub file_clipboard_enabled: bool,
+}
+
+pub struct NativeFileProtocols {
+    pub control: DataProtocol,
+    pub content: DataProtocol,
 }
 
 pub struct NativeServerProtocols {
@@ -40,6 +48,7 @@ pub struct NativeServerProtocols {
     pub audio: AudioServerProtocol,
     pub input: InputProtocol,
     pub data: DataProtocol,
+    pub files: Option<NativeFileProtocols>,
 }
 
 pub struct NativeClientProtocols {
@@ -49,6 +58,7 @@ pub struct NativeClientProtocols {
     pub audio: AudioClientProtocol,
     pub input: InputProtocol,
     pub data: DataProtocol,
+    pub files: Option<NativeFileProtocols>,
 }
 
 pub struct NativeSetupServerProtocols {
@@ -95,6 +105,7 @@ impl NativeServerProtocols {
         AudioServerProtocol,
         InputProtocol,
         DataProtocol,
+        Option<NativeFileProtocols>,
     ) {
         (
             self.connection,
@@ -102,6 +113,7 @@ impl NativeServerProtocols {
             self.audio,
             self.input,
             self.data,
+            self.files,
         )
     }
 }
@@ -182,6 +194,7 @@ impl NativeClientProtocols {
         AudioClientProtocol,
         InputProtocol,
         DataProtocol,
+        Option<NativeFileProtocols>,
         Vec<u8>,
     ) {
         (
@@ -190,6 +203,7 @@ impl NativeClientProtocols {
             self.audio,
             self.input,
             self.data,
+            self.files,
             self.peer_certificate_der,
         )
     }
@@ -284,15 +298,31 @@ pub async fn accept_server(
     verify_endpoint_id(input_id, INPUT_ENDPOINT_ID, "input")?;
     let (data_id, data_endpoint) = connection.register_data_endpoint().await?;
     verify_endpoint_id(data_id, DATA_ENDPOINT_ID, "data")?;
+    let file_endpoints = if options.file_clipboard_enabled {
+        let (control_id, control_endpoint) = connection.register_data_endpoint().await?;
+        verify_endpoint_id(control_id, FILE_CONTROL_ENDPOINT_ID, "file control")?;
+        let (content_id, content_endpoint) = connection.register_data_endpoint().await?;
+        verify_endpoint_id(content_id, FILE_DATA_ENDPOINT_ID, "file content")?;
+        Some((control_endpoint, content_endpoint))
+    } else {
+        None
+    };
 
     let ready = async {
         let video = video_endpoint.ready().await?;
         let audio = audio_endpoint.ready().await?;
         let input = input_endpoint.ready().await?;
         let data = data_endpoint.ready().await?;
-        Ok::<_, kyproto::ProtocolError>((video, audio, input, data))
+        let files = match file_endpoints {
+            Some((control, content)) => Some(NativeFileProtocols {
+                control: control.ready().await?,
+                content: content.ready().await?,
+            }),
+            None => None,
+        };
+        Ok::<_, kyproto::ProtocolError>((video, audio, input, data, files))
     };
-    let (video, audio, input, data) = tokio::time::timeout(options.handshake_timeout, ready)
+    let (video, audio, input, data, files) = tokio::time::timeout(options.handshake_timeout, ready)
         .await
         .context("timed out starting native KyProto endpoints")??;
 
@@ -302,6 +332,7 @@ pub async fn accept_server(
         audio,
         input,
         data,
+        files,
     })
 }
 
@@ -324,11 +355,26 @@ pub async fn connect_client(
             connection.connect_audio_endpoint(AUDIO_ENDPOINT_ID, AudioProtocol::UnreliableFec)?;
         let input_endpoint = connection.connect_input_endpoint(INPUT_ENDPOINT_ID)?;
         let data_endpoint = connection.connect_data_endpoint(DATA_ENDPOINT_ID)?;
+        let file_endpoints = if options.file_clipboard_enabled {
+            Some((
+                connection.connect_data_endpoint(FILE_CONTROL_ENDPOINT_ID)?,
+                connection.connect_data_endpoint(FILE_DATA_ENDPOINT_ID)?,
+            ))
+        } else {
+            None
+        };
 
         let video = video_endpoint.ready().await?;
         let audio = audio_endpoint.ready().await?;
         let input = input_endpoint.ready().await?;
         let data = data_endpoint.ready().await?;
+        let files = match file_endpoints {
+            Some((control, content)) => Some(NativeFileProtocols {
+                control: control.ready().await?,
+                content: content.ready().await?,
+            }),
+            None => None,
+        };
         Ok::<_, anyhow::Error>(NativeClientProtocols {
             connection,
             peer_certificate_der,
@@ -336,6 +382,7 @@ pub async fn connect_client(
             audio,
             input,
             data,
+            files,
         })
     };
 
@@ -406,7 +453,12 @@ pub async fn connect_setup_client(
 pub async fn promote_setup_server(
     connection: &Connection,
     options: NativeOptions,
-) -> Result<(VideoServerProtocol, AudioServerProtocol, InputProtocol)> {
+) -> Result<(
+    VideoServerProtocol,
+    AudioServerProtocol,
+    InputProtocol,
+    Option<NativeFileProtocols>,
+)> {
     let (video_id, video_endpoint) = connection
         .register_video_endpoint(VideoProtocol::UnreliableFec)
         .await?;
@@ -417,37 +469,73 @@ pub async fn promote_setup_server(
     verify_endpoint_id(audio_id, SETUP_AUDIO_ENDPOINT_ID, "setup audio")?;
     let (input_id, input_endpoint) = connection.register_input_endpoint().await?;
     verify_endpoint_id(input_id, SETUP_INPUT_ENDPOINT_ID, "setup input")?;
+    let file_endpoints = if options.file_clipboard_enabled {
+        let (control_id, control_endpoint) = connection.register_data_endpoint().await?;
+        verify_endpoint_id(control_id, FILE_CONTROL_ENDPOINT_ID, "setup file control")?;
+        let (content_id, content_endpoint) = connection.register_data_endpoint().await?;
+        verify_endpoint_id(content_id, FILE_DATA_ENDPOINT_ID, "setup file content")?;
+        Some((control_endpoint, content_endpoint))
+    } else {
+        None
+    };
     let ready = async {
         let video = video_endpoint.ready().await?;
         let audio = audio_endpoint.ready().await?;
         let input = input_endpoint.ready().await?;
-        Ok::<_, kyproto::ProtocolError>((video, audio, input))
+        let files = match file_endpoints {
+            Some((control, content)) => Some(NativeFileProtocols {
+                control: control.ready().await?,
+                content: content.ready().await?,
+            }),
+            None => None,
+        };
+        Ok::<_, kyproto::ProtocolError>((video, audio, input, files))
     };
-    let (video, audio, input) = tokio::time::timeout(options.handshake_timeout, ready)
+    let (video, audio, input, files) = tokio::time::timeout(options.handshake_timeout, ready)
         .await
         .context("timed out promoting server KyProto endpoints")??;
-    Ok((video, audio, input))
+    Ok((video, audio, input, files))
 }
 
 pub async fn promote_setup_client(
     connection: &Connection,
     options: NativeOptions,
-) -> Result<(VideoClientProtocol, AudioClientProtocol, InputProtocol)> {
+) -> Result<(
+    VideoClientProtocol,
+    AudioClientProtocol,
+    InputProtocol,
+    Option<NativeFileProtocols>,
+)> {
     let video_endpoint =
         connection.connect_video_endpoint(SETUP_VIDEO_ENDPOINT_ID, VideoProtocol::UnreliableFec)?;
     let audio_endpoint =
         connection.connect_audio_endpoint(SETUP_AUDIO_ENDPOINT_ID, AudioProtocol::UnreliableFec)?;
     let input_endpoint = connection.connect_input_endpoint(SETUP_INPUT_ENDPOINT_ID)?;
+    let file_endpoints = if options.file_clipboard_enabled {
+        Some((
+            connection.connect_data_endpoint(FILE_CONTROL_ENDPOINT_ID)?,
+            connection.connect_data_endpoint(FILE_DATA_ENDPOINT_ID)?,
+        ))
+    } else {
+        None
+    };
     let ready = async {
         let video = video_endpoint.ready().await?;
         let audio = audio_endpoint.ready().await?;
         let input = input_endpoint.ready().await?;
-        Ok::<_, kyproto::ProtocolError>((video, audio, input))
+        let files = match file_endpoints {
+            Some((control, content)) => Some(NativeFileProtocols {
+                control: control.ready().await?,
+                content: content.ready().await?,
+            }),
+            None => None,
+        };
+        Ok::<_, kyproto::ProtocolError>((video, audio, input, files))
     };
-    let (video, audio, input) = tokio::time::timeout(options.handshake_timeout, ready)
+    let (video, audio, input, files) = tokio::time::timeout(options.handshake_timeout, ready)
         .await
         .context("timed out promoting client KyProto endpoints")??;
-    Ok((video, audio, input))
+    Ok((video, audio, input, files))
 }
 
 #[cfg(test)]
@@ -535,6 +623,8 @@ mod tests {
         assert_eq!(AUDIO_ENDPOINT_ID, VIDEO_ENDPOINT_ID + 2);
         assert_eq!(INPUT_ENDPOINT_ID, AUDIO_ENDPOINT_ID + 2);
         assert_eq!(DATA_ENDPOINT_ID, INPUT_ENDPOINT_ID + 2);
+        assert_eq!(FILE_CONTROL_ENDPOINT_ID, DATA_ENDPOINT_ID + 2);
+        assert_eq!(FILE_DATA_ENDPOINT_ID, FILE_CONTROL_ENDPOINT_ID + 2);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -554,6 +644,7 @@ mod tests {
             idle_timeout: Duration::from_secs(10),
             keep_alive_interval: Duration::from_secs(1),
             max_udp_payload_size: Some(1344),
+            file_clipboard_enabled: true,
         };
         let rate_policy = TransportRatePolicy::new(100_000_000);
         let server_options = kynet::common::CommonServerOptions {
@@ -590,6 +681,7 @@ mod tests {
             audio: mut server_audio,
             input: mut server_input,
             data: mut server_data,
+            files: server_files,
         } = server_protocols.expect("native KyProto server handshake failed");
         let NativeClientProtocols {
             connection: client_connection,
@@ -597,8 +689,11 @@ mod tests {
             audio: mut client_audio,
             input: mut client_input,
             data: mut client_data,
+            files: client_files,
             peer_certificate_der: _,
         } = client_protocols.expect("native KyProto client handshake failed");
+        let mut server_files = server_files.expect("server file endpoints were not negotiated");
+        let mut client_files = client_files.expect("client file endpoints were not negotiated");
 
         let video_send_started = tokio::time::Instant::now();
         server_video
@@ -809,6 +904,44 @@ mod tests {
                 .expect("native client data endpoint closed");
         assert_eq!(received_server_data.payload, server_data_payload);
 
+        let file_offer_payload = Bytes::from_static(b"PLF2-offer-begin");
+        client_files
+            .control
+            .send
+            .send(DataPacket {
+                payload: file_offer_payload.clone(),
+            })
+            .await
+            .expect("failed to send native file-control packet");
+        let received_file_offer =
+            tokio::time::timeout(Duration::from_secs(5), server_files.control.recv.recv())
+                .await
+                .expect("native file-control receive timed out")
+                .expect("native file-control receive failed")
+                .expect("native server file-control endpoint closed");
+        assert_eq!(received_file_offer.payload, file_offer_payload);
+
+        let file_data_payload = Bytes::from(
+            (0..256 * 1024)
+                .map(|index| ((index * 19 + 7) & 0xff) as u8)
+                .collect::<Vec<_>>(),
+        );
+        server_files
+            .content
+            .send
+            .send(DataPacket {
+                payload: file_data_payload.clone(),
+            })
+            .await
+            .expect("failed to send native file-data packet");
+        let received_file_data =
+            tokio::time::timeout(Duration::from_secs(5), client_files.content.recv.recv())
+                .await
+                .expect("native file-data receive timed out")
+                .expect("native file-data receive failed")
+                .expect("native client file-data endpoint closed");
+        assert_eq!(received_file_data.payload, file_data_payload);
+
         let server_stats = server_connection.connection_stats().await;
         let client_stats = client_connection.connection_stats().await;
         assert!(server_stats.rtt.is_some());
@@ -859,6 +992,7 @@ mod tests {
             idle_timeout: Duration::from_secs(10),
             keep_alive_interval: Duration::from_secs(1),
             max_udp_payload_size: Some(1_344),
+            file_clipboard_enabled: false,
         };
         let rate_policy = TransportRatePolicy::new(150_000_000);
         let server_options = kynet::common::CommonServerOptions {
@@ -894,6 +1028,7 @@ mod tests {
             audio: _,
             input: _,
             data: _,
+            files: _,
         } = server_protocols.expect("loss-test server handshake failed");
         let NativeClientProtocols {
             connection: client_connection,
@@ -901,6 +1036,7 @@ mod tests {
             audio: _,
             input: _,
             data: _,
+            files: _,
             peer_certificate_der: _,
         } = client_protocols.expect("loss-test client handshake failed");
 
@@ -987,8 +1123,12 @@ mod tests {
         assert!(forwarded_server_packets.load(Ordering::Relaxed) > 20_000);
         assert!(dropped_server_packets.load(Ordering::Relaxed) > 500);
         let fec = client_connection.protocol_stats();
-        let source = fec.video_fec_source_symbols.expect("missing FEC denominator");
-        let missing = fec.video_fec_source_symbols_missing.expect("missing pre-FEC counter");
+        let source = fec
+            .video_fec_source_symbols
+            .expect("missing FEC denominator");
+        let missing = fec
+            .video_fec_source_symbols_missing
+            .expect("missing pre-FEC counter");
         assert!(source > 0 && missing > 0 && missing <= source);
         assert_eq!(fec.video_fec_source_symbols_unrecovered, Some(0));
         eprintln!("fec_loss_matrix_frames=240 source={source} missing={missing} unrecovered=0");

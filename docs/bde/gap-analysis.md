@@ -80,7 +80,7 @@ Plus, outside `dnf`:
   `cargo 1.89.0 (c24e10642 2025-06-23)`), via `rustup-init` pinned to
   `1.28.2`. Builds `protocol/plank-transport` (which wraps `kyber-kymux`)
   as a static lib linked into the host binary. ABI is pinned
-  (`PLANK_TRANSPORT_ABI_VERSION 13`) — a mismatched transport source is a
+  (`PLANK_TRANSPORT_ABI_VERSION 14`) — a mismatched transport source is a
   hard build-stop, not a runtime issue.
 - **Boost 1.89.0**, header-only, fetched from GitHub releases and
   checksum-verified (`boost-1.89.0-cmake.tar.xz`,

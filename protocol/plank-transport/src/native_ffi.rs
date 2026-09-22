@@ -6,8 +6,8 @@ use super::native::{self, NativeClientProtocols, NativeOptions, NativeServerProt
 use super::{
     EndpointConfig, EndpointState, PLANK_TRANSPORT_DROPPED, PLANK_TRANSPORT_ERROR_BUFFER_TOO_SMALL,
     PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT, PLANK_TRANSPORT_ERROR_INVALID_STATE,
-    PLANK_TRANSPORT_ERROR_PANIC, PLANK_TRANSPORT_ERROR_RUNTIME, PLANK_TRANSPORT_OK, PLANK_TRANSPORT_TIMEOUT,
-    PlankTransportConfig, catch_result, init_crypto_once, parse_config,
+    PLANK_TRANSPORT_ERROR_PANIC, PLANK_TRANSPORT_ERROR_RUNTIME, PLANK_TRANSPORT_OK,
+    PLANK_TRANSPORT_TIMEOUT, PlankTransportConfig, catch_result, init_crypto_once, parse_config,
 };
 use crate::rate_control::{PlankRateControllerFactory, TransportRatePolicy};
 use anyhow::{Context, Result, anyhow};
@@ -38,10 +38,16 @@ const INPUT_SEND_CAPACITY: usize = 128;
 const INPUT_RECEIVE_CAPACITY: usize = 128;
 const DATA_SEND_CAPACITY: usize = 64;
 const DATA_RECEIVE_CAPACITY: usize = 64;
+const FILE_CONTROL_SEND_CAPACITY: usize = 64;
+const FILE_CONTROL_RECEIVE_CAPACITY: usize = 64;
+const FILE_DATA_SEND_CAPACITY: usize = 32;
+const FILE_DATA_RECEIVE_CAPACITY: usize = 32;
 const MAX_VIDEO_FRAME_SIZE: usize = 64 * 1024 * 1024;
 const MAX_AUDIO_PACKET_SIZE: usize = 64 * 1024;
 const MAX_INPUT_PACKET_SIZE: usize = u16::MAX as usize;
 const MAX_DATA_PACKET_SIZE: usize = 1024 * 1024;
+const MAX_FILE_CONTROL_PACKET_SIZE: usize = 64 * 1024 + 56;
+const MAX_FILE_DATA_PACKET_SIZE: usize = 256 * 1024 + 56 + 32;
 const VIDEO_METADATA_SIZE: usize = 16;
 const VIDEO_FLAG_KEY: u32 = 1;
 const VIDEO_CODEC_H264: u32 = u32::from_be_bytes(*b"H264");
@@ -84,6 +90,10 @@ struct NativeQueues {
     input_receive: VecDeque<NativeInputPacket>,
     data_send: VecDeque<Bytes>,
     data_receive: VecDeque<Bytes>,
+    file_control_send: VecDeque<Bytes>,
+    file_control_receive: VecDeque<Bytes>,
+    file_data_send: VecDeque<Bytes>,
+    file_data_receive: VecDeque<Bytes>,
 }
 
 #[derive(Default)]
@@ -104,6 +114,12 @@ struct NativeStats {
     input_packets_received: AtomicU64,
     data_packets_sent: AtomicU64,
     data_packets_received: AtomicU64,
+    file_control_packets_sent: AtomicU64,
+    file_control_packets_received: AtomicU64,
+    file_data_packets_sent: AtomicU64,
+    file_data_bytes_sent: AtomicU64,
+    file_data_packets_received: AtomicU64,
+    file_data_bytes_received: AtomicU64,
     quic_rtt_us: AtomicU64,
     quic_packets_lost: AtomicU64,
     kyproto_packets_dropped: AtomicU64,
@@ -135,10 +151,15 @@ struct NativeShared {
     audio_send_notify: tokio::sync::Notify,
     input_send_notify: tokio::sync::Notify,
     data_send_notify: tokio::sync::Notify,
+    file_control_send_notify: tokio::sync::Notify,
+    file_data_send_notify: tokio::sync::Notify,
     video_receive_changed: Condvar,
     audio_receive_changed: Condvar,
     input_receive_changed: Condvar,
     data_receive_changed: Condvar,
+    file_control_receive_changed: Condvar,
+    file_data_receive_changed: Condvar,
+    file_clipboard_enabled: bool,
     stats: NativeStats,
     rate_policy: Arc<TransportRatePolicy>,
 }
@@ -148,6 +169,7 @@ impl NativeShared {
         peer_certificate_approval_required: bool,
         setup_mode: bool,
         initial_video_bitrate_bps: u64,
+        file_clipboard_enabled: bool,
     ) -> Self {
         Self {
             #[cfg(feature = "sender-timing")]
@@ -171,10 +193,15 @@ impl NativeShared {
             audio_send_notify: tokio::sync::Notify::new(),
             input_send_notify: tokio::sync::Notify::new(),
             data_send_notify: tokio::sync::Notify::new(),
+            file_control_send_notify: tokio::sync::Notify::new(),
+            file_data_send_notify: tokio::sync::Notify::new(),
             video_receive_changed: Condvar::new(),
             audio_receive_changed: Condvar::new(),
             input_receive_changed: Condvar::new(),
             data_receive_changed: Condvar::new(),
+            file_control_receive_changed: Condvar::new(),
+            file_data_receive_changed: Condvar::new(),
+            file_clipboard_enabled,
             stats: NativeStats::default(),
             rate_policy: TransportRatePolicy::new(initial_video_bitrate_bps),
         }
@@ -203,6 +230,8 @@ impl NativeShared {
         self.audio_receive_changed.notify_all();
         self.input_receive_changed.notify_all();
         self.data_receive_changed.notify_all();
+        self.file_control_receive_changed.notify_all();
+        self.file_data_receive_changed.notify_all();
         self.stop_notify.notify_waiters();
         self.peer_certificate_approved_notify.notify_waiters();
         self.session_authorized_notify.notify_waiters();
@@ -210,6 +239,8 @@ impl NativeShared {
         self.audio_send_notify.notify_waiters();
         self.input_send_notify.notify_waiters();
         self.data_send_notify.notify_waiters();
+        self.file_control_send_notify.notify_waiters();
+        self.file_data_send_notify.notify_waiters();
     }
 }
 
@@ -260,6 +291,12 @@ pub struct PlankTransportNativeStats {
     pub video_fec_source_symbols: u64,
     pub video_fec_source_symbols_missing: u64,
     pub video_fec_source_symbols_unrecovered: u64,
+    pub file_control_packets_sent: u64,
+    pub file_control_packets_received: u64,
+    pub file_data_packets_sent: u64,
+    pub file_data_bytes_sent: u64,
+    pub file_data_packets_received: u64,
+    pub file_data_bytes_received: u64,
 }
 
 pub struct PlankTransportNativeEndpoint {
@@ -275,6 +312,7 @@ fn native_options(options: super::RuntimeOptions) -> NativeOptions {
         idle_timeout: options.idle_timeout,
         keep_alive_interval: options.keep_alive_interval,
         max_udp_payload_size: options.max_udp_payload_size,
+        file_clipboard_enabled: options.file_clipboard_enabled,
     }
 }
 
@@ -360,7 +398,9 @@ async fn send_video(
             #[cfg(feature = "sender-timing")]
             let result = if let Some(start) = timing {
                 let (result, measurements) = kynet::sender_timing::measure(submission).await;
-                shared.sender_trace.finish(start, trace_frame, result.is_err(), measurements);
+                shared
+                    .sender_trace
+                    .finish(start, trace_frame, result.is_err(), measurements);
                 result
             } else {
                 submission.await
@@ -684,6 +724,140 @@ async fn receive_data(
     Ok(())
 }
 
+async fn send_file_control(
+    shared: Arc<NativeShared>,
+    mut send: kymux_types::ProtocolSend<DataPacket>,
+) -> Result<()> {
+    loop {
+        let notified = shared.file_control_send_notify.notified();
+        let payload = shared.queues.lock().unwrap().file_control_send.pop_front();
+        if let Some(payload) = payload {
+            send.send(DataPacket { payload }).await?;
+            shared
+                .stats
+                .file_control_packets_sent
+                .fetch_add(1, Ordering::Relaxed);
+            continue;
+        }
+        if shared.stop.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        notified.await;
+    }
+}
+
+async fn receive_file_control(
+    shared: Arc<NativeShared>,
+    mut recv: kymux_types::ProtocolRecv<DataPacket>,
+) -> Result<()> {
+    while let Some(packet) = recv.recv().await? {
+        if packet.payload.is_empty() || packet.payload.len() > MAX_FILE_CONTROL_PACKET_SIZE {
+            return Err(anyhow!("native file control packet size is invalid"));
+        }
+        {
+            let mut queues = shared.queues.lock().unwrap();
+            if queues.file_control_receive.len() == FILE_CONTROL_RECEIVE_CAPACITY {
+                return Err(anyhow!("native file control receive queue exhausted"));
+            }
+            queues.file_control_receive.push_back(packet.payload);
+        }
+        shared
+            .stats
+            .file_control_packets_received
+            .fetch_add(1, Ordering::Relaxed);
+        shared.file_control_receive_changed.notify_one();
+    }
+    Ok(())
+}
+
+async fn send_file_data(
+    shared: Arc<NativeShared>,
+    mut send: kymux_types::ProtocolSend<DataPacket>,
+) -> Result<()> {
+    loop {
+        let notified = shared.file_data_send_notify.notified();
+        // File content deliberately yields to interactive session data queued
+        // by the application before consuming another bulk record.
+        let payload = {
+            let mut queues = shared.queues.lock().unwrap();
+            if !queues.input_send.is_empty() || !queues.data_send.is_empty() {
+                None
+            } else {
+                queues.file_data_send.pop_front()
+            }
+        };
+        if let Some(payload) = payload {
+            let size = payload.len() as u64;
+            send.send(DataPacket { payload }).await?;
+            shared
+                .stats
+                .file_data_packets_sent
+                .fetch_add(1, Ordering::Relaxed);
+            shared
+                .stats
+                .file_data_bytes_sent
+                .fetch_add(size, Ordering::Relaxed);
+            continue;
+        }
+        if shared.stop.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        tokio::select! {
+            _ = notified => {},
+            _ = tokio::time::sleep(Duration::from_millis(2)) => {},
+        }
+    }
+}
+
+async fn receive_file_data(
+    shared: Arc<NativeShared>,
+    mut recv: kymux_types::ProtocolRecv<DataPacket>,
+) -> Result<()> {
+    while let Some(packet) = recv.recv().await? {
+        if packet.payload.is_empty() || packet.payload.len() > MAX_FILE_DATA_PACKET_SIZE {
+            return Err(anyhow!("native file content packet size is invalid"));
+        }
+        let size = packet.payload.len() as u64;
+        {
+            let mut queues = shared.queues.lock().unwrap();
+            if queues.file_data_receive.len() == FILE_DATA_RECEIVE_CAPACITY {
+                return Err(anyhow!("native file content receive queue exhausted"));
+            }
+            queues.file_data_receive.push_back(packet.payload);
+        }
+        shared
+            .stats
+            .file_data_packets_received
+            .fetch_add(1, Ordering::Relaxed);
+        shared
+            .stats
+            .file_data_bytes_received
+            .fetch_add(size, Ordering::Relaxed);
+        shared.file_data_receive_changed.notify_one();
+    }
+    Ok(())
+}
+
+async fn hold_file_protocols(
+    shared: Arc<NativeShared>,
+    protocols: Option<native::NativeFileProtocols>,
+) -> Result<()> {
+    let Some(protocols) = protocols else {
+        return std::future::pending::<Result<()>>().await;
+    };
+    let mut control_send = Box::pin(send_file_control(shared.clone(), protocols.control.send));
+    let mut control_receive =
+        Box::pin(receive_file_control(shared.clone(), protocols.control.recv));
+    let mut data_send = Box::pin(send_file_data(shared.clone(), protocols.content.send));
+    let mut data_receive = Box::pin(receive_file_data(shared, protocols.content.recv));
+    tokio::select! {
+        result = &mut control_send => active_lane_result(result, "native file control sender"),
+        result = &mut control_receive => active_lane_result(result, "native file control receiver"),
+        result = &mut data_send => active_lane_result(result, "native file content sender"),
+        result = &mut data_receive => active_lane_result(result, "native file content receiver"),
+    }
+}
+
 async fn sample_stats(
     shared: Arc<NativeShared>,
     provider: kyproto::KyProtoStatsProvider,
@@ -713,8 +887,12 @@ async fn sample_stats(
         );
         *shared.stats.video_fec.lock().unwrap() = (
             protocol.video_fec_source_symbols.unwrap_or_default(),
-            protocol.video_fec_source_symbols_missing.unwrap_or_default(),
-            protocol.video_fec_source_symbols_unrecovered.unwrap_or_default(),
+            protocol
+                .video_fec_source_symbols_missing
+                .unwrap_or_default(),
+            protocol
+                .video_fec_source_symbols_unrecovered
+                .unwrap_or_default(),
         );
     }
 }
@@ -726,12 +904,13 @@ fn active_lane_result(result: Result<()>, lane: &str) -> Result<()> {
 
 async fn hold_server(shared: Arc<NativeShared>, protocols: NativeServerProtocols) -> Result<()> {
     let stats_provider = protocols.connection().stats_provider();
-    let (connection, video, audio, input, data) = protocols.into_parts();
+    let (connection, video, audio, input, data, files) = protocols.into_parts();
     let mut video = Box::pin(send_video(shared.clone(), video));
     let mut audio = Box::pin(send_audio(shared.clone(), audio));
     let mut input = Box::pin(receive_input(shared.clone(), input.recv));
     let mut data_send = Box::pin(send_data(shared.clone(), data.send));
     let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
+    let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
@@ -741,6 +920,7 @@ async fn hold_server(shared: Arc<NativeShared>, protocols: NativeServerProtocols
         result = &mut input => active_lane_result(result, "native input receiver"),
         result = &mut data_send => active_lane_result(result, "native data sender"),
         result = &mut data_receive => active_lane_result(result, "native data receiver"),
+        result = &mut file_protocols => active_lane_result(result, "native file protocols"),
         result = &mut stats => active_lane_result(result, "native stats sampler"),
         result = connection.closed() => result.context("native KyProto connection closed"),
     }
@@ -748,7 +928,8 @@ async fn hold_server(shared: Arc<NativeShared>, protocols: NativeServerProtocols
 
 async fn hold_client(shared: Arc<NativeShared>, protocols: NativeClientProtocols) -> Result<()> {
     let stats_provider = protocols.connection().stats_provider();
-    let (connection, video, audio, input, data, peer_certificate_der) = protocols.into_parts();
+    let (connection, video, audio, input, data, files, peer_certificate_der) =
+        protocols.into_parts();
     *shared.peer_certificate.lock().unwrap() = peer_certificate_der;
     if shared.peer_certificate_approval_required {
         shared.set_state(EndpointState::PeerValidation);
@@ -770,6 +951,7 @@ async fn hold_client(shared: Arc<NativeShared>, protocols: NativeClientProtocols
     let mut input = Box::pin(send_input(shared.clone(), input.send));
     let mut data_send = Box::pin(send_data(shared.clone(), data.send));
     let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
+    let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
@@ -779,6 +961,7 @@ async fn hold_client(shared: Arc<NativeShared>, protocols: NativeClientProtocols
         result = &mut input => active_lane_result(result, "native input sender"),
         result = &mut data_send => active_lane_result(result, "native data sender"),
         result = &mut data_receive => active_lane_result(result, "native data receiver"),
+        result = &mut file_protocols => active_lane_result(result, "native file protocols"),
         result = &mut stats => active_lane_result(result, "native stats sampler"),
         result = connection.closed() => result.context("native KyProto connection closed"),
     }
@@ -812,17 +995,19 @@ async fn hold_setup_server(
         }
     }
 
-    let (video, audio, input) =
+    let (video, audio, input, files) =
         native::promote_setup_server(&connection, native_options(options)).await?;
     let mut video = Box::pin(send_video(shared.clone(), video));
     let mut audio = Box::pin(send_audio(shared.clone(), audio));
     let mut input = Box::pin(receive_input(shared.clone(), input.recv));
+    let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
         _ = shared.stop_notify.notified() => Ok(()),
         result = &mut video => result.context("native video sender failed"),
         result = &mut audio => result.context("native audio sender failed"),
         result = &mut input => result.context("native input receiver failed"),
+        result = &mut file_protocols => result.context("native file protocols failed"),
         result = &mut data_send => result.context("native data sender failed"),
         result = &mut data_receive => result.context("native data receiver failed"),
         result = &mut stats => result.context("native stats sampler failed"),
@@ -872,17 +1057,19 @@ async fn hold_setup_client(
         }
     }
 
-    let (video, audio, input) =
+    let (video, audio, input, files) =
         native::promote_setup_client(&connection, native_options(options)).await?;
     let mut video = Box::pin(receive_video(shared.clone(), video));
     let mut audio = Box::pin(receive_audio(shared.clone(), audio));
     let mut input = Box::pin(send_input(shared.clone(), input.send));
+    let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
         _ = shared.stop_notify.notified() => Ok(()),
         result = &mut video => result.context("native video receiver failed"),
         result = &mut audio => result.context("native audio receiver failed"),
         result = &mut input => result.context("native input sender failed"),
+        result = &mut file_protocols => result.context("native file protocols failed"),
         result = &mut data_send => result.context("native data sender failed"),
         result = &mut data_receive => result.context("native data receiver failed"),
         result = &mut stats => result.context("native stats sampler failed"),
@@ -1100,7 +1287,7 @@ mod completion_tests {
             EndpointState::SetupReady,
             EndpointState::Ready,
         ] {
-            let shared = NativeShared::new(false, false, 150_000_000);
+            let shared = NativeShared::new(false, false, 150_000_000, false);
             shared.set_state(phase);
             finish_worker(&shared, Ok(()));
             assert_eq!(shared.state(), EndpointState::Failed);
@@ -1111,7 +1298,7 @@ mod completion_tests {
     #[test]
     fn explicit_local_stop_remains_stopped() {
         for result in [Ok(()), Err(anyhow!("closed during local shutdown"))] {
-            let shared = NativeShared::new(false, false, 150_000_000);
+            let shared = NativeShared::new(false, false, 150_000_000, false);
             shared.stop.store(true, Ordering::Release);
             finish_worker(&shared, result);
             assert_eq!(shared.state(), EndpointState::Stopped);
@@ -1121,7 +1308,7 @@ mod completion_tests {
 
     #[test]
     fn transport_failure_keeps_original_error() {
-        let shared = NativeShared::new(false, false, 150_000_000);
+        let shared = NativeShared::new(false, false, 150_000_000, false);
         finish_worker(&shared, Err(anyhow!("original transport error")));
         assert_eq!(shared.state(), EndpointState::Failed);
         assert_eq!(
@@ -1132,7 +1319,7 @@ mod completion_tests {
 
     #[test]
     fn queued_control_precedes_peer_close() {
-        let shared = NativeShared::new(false, false, 150_000_000);
+        let shared = NativeShared::new(false, false, 150_000_000, false);
         shared
             .queues
             .lock()
@@ -1274,6 +1461,11 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_create(
                 options.initial_video_bitrate_bps
             }
         };
+        let file_clipboard_enabled = match &config {
+            EndpointConfig::Server { options, .. } | EndpointConfig::Client { options, .. } => {
+                options.file_clipboard_enabled
+            }
+        };
         let endpoint = Box::new(PlankTransportNativeEndpoint {
             config,
             mode,
@@ -1281,6 +1473,7 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_create(
                 peer_certificate_approval_required,
                 setup_mode,
                 initial_video_bitrate_bps,
+                file_clipboard_enabled,
             )),
             worker: Mutex::new(None),
         });
@@ -1870,6 +2063,174 @@ pub unsafe extern "C" fn plank_transport_native_data_receive(
 }
 
 /// # Safety
+/// All non-null pointers must remain valid for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_file_control_send(
+    endpoint: *mut PlankTransportNativeEndpoint,
+    payload: *const u8,
+    payload_size: usize,
+) -> i32 {
+    catch_result(|| {
+        let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        if !endpoint.shared.file_clipboard_enabled {
+            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+        }
+        if payload.is_null() || !(1..=MAX_FILE_CONTROL_PACKET_SIZE).contains(&payload_size) {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        }
+        if endpoint.shared.state() != EndpointState::Ready {
+            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+        }
+        let mut queues = endpoint.shared.queues.lock().unwrap();
+        if queues.file_control_send.len() == FILE_CONTROL_SEND_CAPACITY {
+            return PLANK_TRANSPORT_TIMEOUT;
+        }
+        queues
+            .file_control_send
+            .push_back(Bytes::copy_from_slice(unsafe {
+                std::slice::from_raw_parts(payload, payload_size)
+            }));
+        drop(queues);
+        endpoint.shared.file_control_send_notify.notify_one();
+        PLANK_TRANSPORT_OK
+    })
+}
+
+/// # Safety
+/// All non-null output pointers must name writable storage of the stated size.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_file_control_receive(
+    endpoint: *mut PlankTransportNativeEndpoint,
+    payload: *mut u8,
+    payload_capacity: usize,
+    payload_size_out: *mut usize,
+    timeout_ms: u32,
+) -> i32 {
+    catch_result(|| {
+        let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        if !endpoint.shared.file_clipboard_enabled || payload_size_out.is_null() {
+            return if payload_size_out.is_null() {
+                PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT
+            } else {
+                PLANK_TRANSPORT_ERROR_INVALID_STATE
+            };
+        }
+        let Some(packet) = wait_pop(
+            &endpoint.shared,
+            &endpoint.shared.file_control_receive_changed,
+            Duration::from_millis(timeout_ms.into()),
+            |queues| queues.file_control_receive.front().cloned(),
+        ) else {
+            return if endpoint.shared.state() == EndpointState::Failed {
+                PLANK_TRANSPORT_ERROR_RUNTIME
+            } else {
+                PLANK_TRANSPORT_TIMEOUT
+            };
+        };
+        let result = copy_bytes_out(&packet, payload, payload_capacity, payload_size_out);
+        if result != PLANK_TRANSPORT_OK {
+            return result;
+        }
+        endpoint
+            .shared
+            .queues
+            .lock()
+            .unwrap()
+            .file_control_receive
+            .pop_front();
+        PLANK_TRANSPORT_OK
+    })
+}
+
+/// # Safety
+/// All non-null pointers must remain valid for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_file_data_send(
+    endpoint: *mut PlankTransportNativeEndpoint,
+    payload: *const u8,
+    payload_size: usize,
+) -> i32 {
+    catch_result(|| {
+        let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        if !endpoint.shared.file_clipboard_enabled {
+            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+        }
+        if payload.is_null() || !(1..=MAX_FILE_DATA_PACKET_SIZE).contains(&payload_size) {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        }
+        if endpoint.shared.state() != EndpointState::Ready {
+            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+        }
+        let mut queues = endpoint.shared.queues.lock().unwrap();
+        if queues.file_data_send.len() == FILE_DATA_SEND_CAPACITY {
+            return PLANK_TRANSPORT_TIMEOUT;
+        }
+        queues
+            .file_data_send
+            .push_back(Bytes::copy_from_slice(unsafe {
+                std::slice::from_raw_parts(payload, payload_size)
+            }));
+        drop(queues);
+        endpoint.shared.file_data_send_notify.notify_one();
+        PLANK_TRANSPORT_OK
+    })
+}
+
+/// # Safety
+/// All non-null output pointers must name writable storage of the stated size.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_file_data_receive(
+    endpoint: *mut PlankTransportNativeEndpoint,
+    payload: *mut u8,
+    payload_capacity: usize,
+    payload_size_out: *mut usize,
+    timeout_ms: u32,
+) -> i32 {
+    catch_result(|| {
+        let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        if !endpoint.shared.file_clipboard_enabled || payload_size_out.is_null() {
+            return if payload_size_out.is_null() {
+                PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT
+            } else {
+                PLANK_TRANSPORT_ERROR_INVALID_STATE
+            };
+        }
+        let Some(packet) = wait_pop(
+            &endpoint.shared,
+            &endpoint.shared.file_data_receive_changed,
+            Duration::from_millis(timeout_ms.into()),
+            |queues| queues.file_data_receive.front().cloned(),
+        ) else {
+            return if endpoint.shared.state() == EndpointState::Failed {
+                PLANK_TRANSPORT_ERROR_RUNTIME
+            } else {
+                PLANK_TRANSPORT_TIMEOUT
+            };
+        };
+        let result = copy_bytes_out(&packet, payload, payload_capacity, payload_size_out);
+        if result != PLANK_TRANSPORT_OK {
+            return result;
+        }
+        endpoint
+            .shared
+            .queues
+            .lock()
+            .unwrap()
+            .file_data_receive
+            .pop_front();
+        PLANK_TRANSPORT_OK
+    })
+}
+
+/// # Safety
 /// `stats` must name writable storage and `endpoint` must remain live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plank_transport_native_endpoint_stats(
@@ -1912,6 +2273,14 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_stats(
             video_fec_source_symbols: fec.0,
             video_fec_source_symbols_missing: fec.1,
             video_fec_source_symbols_unrecovered: fec.2,
+            file_control_packets_sent: stats.file_control_packets_sent.load(Ordering::Relaxed),
+            file_control_packets_received: stats
+                .file_control_packets_received
+                .load(Ordering::Relaxed),
+            file_data_packets_sent: stats.file_data_packets_sent.load(Ordering::Relaxed),
+            file_data_bytes_sent: stats.file_data_bytes_sent.load(Ordering::Relaxed),
+            file_data_packets_received: stats.file_data_packets_received.load(Ordering::Relaxed),
+            file_data_bytes_received: stats.file_data_bytes_received.load(Ordering::Relaxed),
         };
         PLANK_TRANSPORT_OK
     })
