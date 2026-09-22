@@ -33,6 +33,9 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x10000` — explicit GDM-to-user desktop handoff notice on the native control channel
 - `0x20000` — authenticated desktop stage for reconnect progress
 - `0x40000` — opaque media-worker instance identity for early replacement detection
+- `0x400000` — single-person workstation: named `409` refusals and confirmed sign-out of an idle desktop owner (Linux Host)
+- `0x800000` — bounded authenticated UTF-8 clipboard synchronization
+- `0x1000000` — negotiated file clipboard control/content lanes
 
 ### Expected desktop handoff status
 
@@ -338,3 +341,19 @@ the primary fallback. The version-1, version-2, version-4, version-7, and
 version-8 and version-9 vectors remain historical
 evidence only; PLANK has no deployed legacy clients requiring a
 silent version fallback.
+
+### Single-person workstation and desktop sign-out
+
+With `0x400000` (Linux Host, bits `0x80000`-`0x200000` belong to the macOS
+fixed-capture preview), `/launch` and `/resume` refuse a stream that another
+account holds with `status_code` `409` and two elements:
+`PlankDesktopOwner` (account name) and `PlankDesktopSignOut`: `connected`
+when that account is streaming (greeter or desktop), or `available` when it
+owns a desktop no stream is using. With `available`, the bearer token stays
+valid; repeating the request with `plankSignOutDesktop=1` and
+`plankSignOutOwner=<PlankDesktopOwner>` ends that desktop session and answers
+`503` with `PlankDesktopSignOut` `started`, consuming the token. The Client
+then reconnects from scratch and lands on the greeter. The Host's
+`security.desktop_handoff` setting gates `available` and sign-out; the
+`connected` refusal is unconditional. See the Host's
+`docs/plank-desktop-handoff.md`.

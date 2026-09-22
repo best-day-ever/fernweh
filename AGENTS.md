@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+> **BDE fork:** this checkout is best-day-ever/plank. Before working here also read
+> `docs/bde/agents.md`: fork branches and PR flow, local builds, client/broker/host contracts, the code graph
+> (`scripts/agent/graph`) and the shared agent memory.
+
 ## Project Structure & Module Organization
 
 This repository is in late integration and production hardening. It has a

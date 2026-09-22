@@ -39,18 +39,16 @@ The first shipping slice is Mac Client <-> Rocky Linux X11 Host. The wire and
 platform boundaries deliberately leave room for the native Mac Host and a
 future Windows Client without putting platform clipboard formats on the wire.
 
-## Required baseline integration
+## Baseline integration
 
-The BDE branches do not yet contain PLANK's accepted text clipboard work. File
-clipboard must not grow a second ownership, negotiation or lifecycle system.
-Before implementation, port the reviewed text clipboard v1 changes onto the BDE
-root, Client and Linux Host branches and rerun all broker, remembered-session,
-device-session and package gates.
+This implementation ports PLANK's accepted text clipboard work onto the BDE
+root, Client and Linux Host branches rather than growing a second ownership,
+negotiation or lifecycle system.
 
 The accepted upstream checkpoint is rooted at `a949440`; its tested package
 source is `16c5b998`, with Client `6663d569`, Linux Host `b8abf72c`, Client
 common-C `ef8ac14c` and Host common-C `3a97a58f`. Port the focused clipboard
-changes rather than replacing the BDE forks with unrelated upstream history.
+changes were ported rather than replacing the BDE forks with unrelated upstream history.
 File clipboard v2 depends on the v1 session epoch, focus policy, pasteboard
 ownership checks, X11 worker isolation and 512 KiB text bounds remaining intact.
 
