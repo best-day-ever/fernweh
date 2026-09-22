@@ -48,8 +48,6 @@ const MAX_INPUT_PACKET_SIZE: usize = u16::MAX as usize;
 const MAX_DATA_PACKET_SIZE: usize = 1024 * 1024;
 const MAX_FILE_CONTROL_PACKET_SIZE: usize = 64 * 1024 + 56;
 const MAX_FILE_DATA_PACKET_SIZE: usize = 256 * 1024 + 56 + 32;
-const FILE_DATA_RATE_BYTES_PER_SECOND: f64 = 50_000_000.0 / 8.0;
-const FILE_DATA_BURST_BYTES: f64 = (2 * 256 * 1024) as f64;
 const VIDEO_METADATA_SIZE: usize = 16;
 const VIDEO_FLAG_KEY: u32 = 1;
 const VIDEO_CODEC_H264: u32 = u32::from_be_bytes(*b"H264");
@@ -776,18 +774,10 @@ async fn send_file_data(
     shared: Arc<NativeShared>,
     mut send: kymux_types::ProtocolSend<DataPacket>,
 ) -> Result<()> {
-    let mut tokens = FILE_DATA_BURST_BYTES;
-    let mut last_refill = Instant::now();
     let mut baseline_rtt_us = 0_u64;
     let mut last_unrecovered = 0_u64;
     loop {
         let notified = shared.file_data_send_notify.notified();
-        let now = Instant::now();
-        tokens = (tokens
-            + now.duration_since(last_refill).as_secs_f64() * FILE_DATA_RATE_BYTES_PER_SECOND)
-            .min(FILE_DATA_BURST_BYTES);
-        last_refill = now;
-
         let rtt_us = shared.stats.quic_rtt_us.load(Ordering::Relaxed);
         if rtt_us != 0 && baseline_rtt_us == 0 {
             baseline_rtt_us = rtt_us;
@@ -804,25 +794,15 @@ async fn send_file_data(
         // consuming another bulk record.
         let payload = {
             let mut queues = shared.queues.lock().unwrap();
-            let next_size = queues
-                .file_data_send
-                .front()
-                .map(|payload| payload.len() as f64)
-                .unwrap_or_default();
             if !queues.input_send.is_empty()
                 || !queues.data_send.is_empty()
                 || queues.video_send.len() > 1
                 || queues.audio_send.len() > 4
                 || network_pressure
-                || next_size > tokens
             {
                 None
             } else {
-                let payload = queues.file_data_send.pop_front();
-                if let Some(payload) = &payload {
-                    tokens -= payload.len() as f64;
-                }
-                payload
+                queues.file_data_send.pop_front()
             }
         };
         if let Some(payload) = payload {

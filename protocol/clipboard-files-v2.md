@@ -1,7 +1,7 @@
 # Clipboard files v2
 
-Status: proposed, not implemented. This contract depends on authenticated text
-clipboard v1 being integrated into the BDE branches first.
+Status: implemented for the Mac Client and Linux X11 Host behind explicit
+default-off negotiation. Paired desktop release qualification is pending.
 
 ## Scope
 

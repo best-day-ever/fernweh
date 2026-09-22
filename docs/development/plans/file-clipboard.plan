@@ -1,10 +1,24 @@
 # Bidirectional file clipboard
 
-Status: design only. No file bytes, clipboard contents, system settings or
-production machines are changed by this plan.
+Status: initial bidirectional implementation complete behind the explicit
+`file_clipboard` Host policy; paired desktop qualification remains pending.
 
 Branch: `bde/file-clipboard-design`. Baseline: BDE root `36cf6aa`, Client
 `a954b688`, Linux Host `9acec8c9`, Kymux `912ece5`.
+
+## Implemented slice
+
+The branch now includes text clipboard v1, feature/policy negotiation, separate
+bounded control and content lanes, portable v2 framing, Mac-to-X11 staging and
+paste release, and X11-to-Mac eager-cache staging with AppKit file-URL
+publication. It has no fixed file bitrate ceiling; content uses all available
+capacity while yielding to interactive/media pressure.
+
+The Mac receive path deliberately uses the documented eager-cache fallback,
+not unqualified `NSFilePromiseProvider` behavior. Transfer progress/cancel UI,
+automatic 24-hour cache cleanup, downloaded-file quarantine, concurrent
+opposite-direction offers, and paired Finder/Nautilus release qualification
+remain follow-up gates. The secure default is therefore still `off`.
 
 ## Outcome
 
@@ -165,13 +179,13 @@ payload bytes.
 
 QUIC reliability and encryption do not by themselves protect interactive
 quality because all streams share congestion control. File content therefore
-uses a token bucket and yields whenever input/control queues are nonempty, media
-queues cross their low-water mark, RTT doubles from the session baseline, or
-the transport reports new unrecovered FEC symbols. Start with a conservative
-50 Mbit/s default and expose a user limit. Hardware qualification may raise the
-default; it must not remove pacing. If Kymux cannot express stream priority,
-application pacing is mandatory and a Kymux change is optional, not a reason to
-send files on the existing data stream.
+yields whenever input/control queues are nonempty, media queues cross their
+low-water mark, RTT doubles from the session baseline, or the transport reports
+new unrecovered FEC symbols. There is no fixed file-transfer bitrate ceiling;
+when the session is healthy and interactive queues are clear, the transfer may
+use the available connection capacity. If Kymux cannot express stream
+priority, application yielding is mandatory and a Kymux change is optional,
+not a reason to send files on the existing data stream.
 
 The broker does not parse or store this protocol. Direct and relayed sessions
 carry it inside the existing end-to-end authenticated QUIC connection. Both
@@ -313,20 +327,21 @@ transfer state. Messages from another epoch are rejected.
 
 - Add the feature allocation, launch-policy response and fixed v2 wire helper.
 - Add conditional control/content DataProtocol endpoints, bounded queues,
-  pacing and metrics to `plank-transport`.
+  priority yielding and metrics to `plank-transport`.
 - Add portable encode/decode vectors, malformed-frame tests, queue-pressure
   tests and fuzz/ASan/UBSan coverage before platform code consumes the API.
 
-### Phase 2: Client to Linux Host vertical slice
+### Phase 2: Client to Linux Host vertical slice (implemented)
 
 - Read stable Mac file URLs and intercept file paste.
 - Build manifests without following links.
 - Implement the Linux receiver, private stage, atomic completion and X11 URI
   provider.
 - Release the paste chord only after the Host confirms X11 ownership.
-- Add progress/cancel UI and policy controls.
+- Add progress/cancel UI and policy controls. (Policy is implemented; UI is
+  pending.)
 
-### Phase 3: Linux Host to Mac Client vertical slice
+### Phase 3: Linux Host to Mac Client vertical slice (implemented with eager fallback)
 
 - Extend the isolated XCB worker to query file targets and parse URI lists with
   INCR support and separate limits from text.
@@ -334,13 +349,14 @@ transfer state. Messages from another epoch are rejected.
 - Use qualified AppKit promises or the explicitly reported eager fallback.
 - Preserve newer local pasteboard ownership through cancel and teardown.
 
-### Phase 4: hardening and release qualification
+### Phase 4: hardening and release qualification (pending)
 
 - Exercise direct and broker-relayed routes under sustained video/audio/input.
 - Validate limits, disk-full, source mutation, permission denial, disconnect,
   reconnect, takeover, logout/login and crash cleanup.
-- Build branch-qualified Host and Client packages. Do not merge, publish or
-  deploy before paired acceptance.
+- Build branch-qualified Host and Client packages before enabling the default
+  or publishing a release. The implementation may merge while default-off so
+  paired acceptance can run from the shared repository.
 
 ### Phase 5: Mac Host
 
