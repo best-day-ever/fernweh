@@ -328,6 +328,13 @@ if grep -Fq 'virtual-4.edid' "$output_file"; then
 fi
 run_hybrid_prepare | grep -Fq 'already current'
 
+# An RPM with a missing packaged EDID must remove an existing overlay before
+# Xorg starts. Leaving the old CustomEDID path would strand the physical boot.
+mv -- "${edid_dir}/virtual-2.edid" "${edid_dir}/virtual-2.edid.saved"
+expect_physical_fallback "a missing packaged hybrid EDID"
+mv -- "${edid_dir}/virtual-2.edid.saved" "${edid_dir}/virtual-2.edid"
+run_hybrid_prepare >/dev/null
+
 # Two physical outputs, left to right at their preferred widths.
 write_inventory two
 run_hybrid_prepare >/dev/null

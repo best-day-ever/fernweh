@@ -402,10 +402,8 @@ prepare_hybrid_overlay() {
     dfp=${inventory[virtual_candidate_${index}_dfp]:-}
     [[ $dfp =~ ^DFP-[0-9]+$ ]] || hybrid_fallback "the display inventory is malformed"
     edid_file="${edid_dir}/virtual-${index}.edid"
-    [[ -r $edid_file && $(wc -c <"$edid_file") -eq 384 ]] || {
-      echo "packaged PLANK EDID is not readable or has the wrong size: ${edid_file}" >&2
-      exit 1
-    }
+    [[ -r $edid_file && $(wc -c <"$edid_file") -eq 384 ]] ||
+      hybrid_fallback "packaged PLANK EDID is not readable or has the wrong size: ${edid_file}"
     all_dfps+=("$dfp")
     metamode_clauses+=("${dfp}: NULL")
     custom_edid_items+=("${dfp}:${edid_file}")
