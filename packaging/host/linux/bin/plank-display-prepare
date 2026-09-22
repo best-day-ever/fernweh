@@ -218,9 +218,10 @@ fi
 # restarts the greeter once when a matching cache exists.
 
 hybrid_virtual_width=16384
-# Hardware probe P6: the NVIDIA driver preallocates the framebuffer at the
-# Virtual size, so reserve a row of four UHD outputs or 8K beside UHD, not 8192.
-hybrid_virtual_height=4608
+# The X screen can never grow beyond its boot-time Virtual size. Hardware
+# probe P6 showed the NVIDIA driver does not preallocate the framebuffer at
+# that size (greeter VRAM is unchanged), so reserve the full 16384x8192.
+hybrid_virtual_height=8192
 
 declare -A inventory=()
 

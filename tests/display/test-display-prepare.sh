@@ -310,7 +310,7 @@ grep -Fq 'Option "ConnectedMonitor" "DFP-4, DFP-0, DFP-2, DFP-6"' "$output_file"
 grep -Fq 'Option "UseDisplayDevice" "DFP-4, DFP-0, DFP-2, DFP-6"' "$output_file"
 grep -Fq "Option \"CustomEDID\" \"DFP-0:${edid_dir}/virtual-1.edid; DFP-2:${edid_dir}/virtual-2.edid; DFP-6:${edid_dir}/virtual-3.edid\"" "$output_file"
 grep -Fq 'Option "MetaModes" "DFP-4: nvidia-auto-select +0+0, DFP-0: NULL, DFP-2: NULL, DFP-6: NULL"' "$output_file"
-grep -Fq 'Virtual 16384 4608' "$output_file"
+grep -Fq 'Virtual 16384 8192' "$output_file"
 # The DKU device options and depth are carried; its UseDisplayDevice is not.
 grep -Fxq '    Option "Overlay" "on"' "$output_file"
 grep -Fxq '    Option "HardDPMS" "False"' "$output_file"
