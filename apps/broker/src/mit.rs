@@ -25,6 +25,7 @@ use std::sync::RwLock;
 
 use zeroize::Zeroizing;
 
+use crate::enrol::{PwChangeError, PwReject};
 use crate::kerberos::LoginOptions;
 use crate::kerberos::{channel_binding_data, Kerberos, KrbError, PasskeyAsk, UserTicket};
 use crate::passkey::{Challenge, PA_TYPE as PA_REDHAT_PASSKEY};
@@ -147,6 +148,15 @@ extern "C" {
     fn krb5_get_error_message(ctx: KrbCtx, code: i32) -> *const c_char;
     fn krb5_free_error_message(ctx: KrbCtx, msg: *const c_char);
     fn krb5_get_prompt_types(ctx: KrbCtx) -> *mut i32;
+    fn krb5_change_password(
+        ctx: KrbCtx,
+        creds: *mut KrbCreds,
+        newpw: *const c_char,
+        result_code: *mut c_int,
+        result_code_string: *mut KrbData,
+        result_string: *mut KrbData,
+    ) -> i32;
+    fn krb5_free_data_contents(ctx: KrbCtx, data: *mut KrbData);
 }
 
 type OmUint32 = u32;
@@ -242,12 +252,28 @@ const GSS_C_AF_UNSPEC: OmUint32 = 0;
 
 const KRB5_KDC_UNREACH: i32 = -1765328228;
 const KRB5_REALM_CANT_RESOLVE: i32 = -1765328164;
+// "Cannot find KDC for realm": no kdc/kpasswd_server configured or resolvable for the realm.
+const KRB5_REALM_UNKNOWN: i32 = -1765328230;
+/// Infrastructure failures (no reachable or configured KDC/kpasswd server). They must never
+/// count as a user's failed credential: that would feed the broker's per-user limiter and
+/// lock people out over a configuration error.
+fn is_unavailable(code: i32) -> bool {
+    matches!(code, KRB5_KDC_UNREACH | KRB5_REALM_CANT_RESOLVE | KRB5_REALM_UNKNOWN)
+}
+
 const KRB5_PROMPT_TYPE_PASSWORD: i32 = 1;
 const KRB5_PROMPT_TYPE_PREAUTH: i32 = 4;
 /// Returned from the prompter to abort the exchange (maps to "denied").
 const PROMPT_ABORT: i32 = libc::ECANCELED;
 /// `PA-OTP-CHALLENGE`.
 const KRB5_PADATA_OTP_CHALLENGE: i32 = 141;
+/// kpasswd result codes (RFC 3244).
+const KRB5_KPASSWD_SUCCESS: c_int = 0;
+const KRB5_KPASSWD_AUTHERROR: c_int = 3;
+const KRB5_KPASSWD_SOFTERROR: c_int = 4;
+const KRB5_KPASSWD_ACCESSDENIED: c_int = 5;
+/// Service of the password-change ticket (enrolment proof, kpasswd).
+const CHANGEPW_SERVICE: &CStr = c"kadmin/changepw";
 
 /// RAII krb5 context.
 struct Ctx(KrbCtx);
@@ -273,7 +299,7 @@ impl Ctx {
     }
     fn err(&self, code: i32, what: &str) -> KrbError {
         let m = format!("{what}: {}", self.msg(code));
-        if code == KRB5_KDC_UNREACH || code == KRB5_REALM_CANT_RESOLVE {
+        if is_unavailable(code) {
             KrbError::Unavailable(m)
         } else {
             KrbError::Denied(m)
@@ -545,7 +571,69 @@ impl MitKerberos {
     }
 }
 
+/// NUL-terminated copy of a secret for the C API, wiped on drop.
+fn c_secret(s: &str) -> Result<Zeroizing<Vec<u8>>, KrbError> {
+    if s.as_bytes().contains(&0) {
+        return Err(KrbError::Denied("NUL in secret".into()));
+    }
+    let mut v = Zeroizing::new(Vec::with_capacity(s.len() + 1));
+    v.extend_from_slice(s.as_bytes());
+    v.push(0);
+    Ok(v)
+}
+
+fn data_text(d: &KrbData) -> String {
+    if d.data.is_null() || d.length == 0 {
+        return String::new();
+    }
+    let raw = unsafe { std::slice::from_raw_parts(d.data as *const u8, d.length as usize) };
+    String::from_utf8_lossy(raw).chars().filter(|c| !c.is_control()).collect()
+}
+
 impl MitKerberos {
+    /// FAST-armoured AS exchange for `kadmin/changepw` answered with `password`
+    /// alone (enrolment proof, kpasswd). Every prompt is refused, so an OTP challenge
+    /// (enabled token: FAST makes the KDC insist) fails the exchange. An expired
+    /// password works: the KDC issues changepw tickets for it. `creds` must be freed.
+    fn changepw_creds(
+        &self,
+        ctx: &Ctx,
+        username: &str,
+        password: &Zeroizing<String>,
+        creds: &mut KrbCreds,
+    ) -> Result<(), KrbError> {
+        self.refresh_armor(false)?;
+        let _armor = self.armor.read().unwrap();
+        let princ = Princ::parse(ctx, &format!("{username}@{}", self.realm))?;
+        let opt = Opt::new(ctx)?;
+        let armor = CString::new(self.armor_ccache.clone()).unwrap();
+        let pw = c_secret(password)?;
+        let rc = unsafe {
+            krb5_get_init_creds_opt_set_forwardable(opt.1, 0);
+            krb5_get_init_creds_opt_set_proxiable(opt.1, 0);
+            krb5_get_init_creds_opt_set_tkt_life(opt.1, 300);
+            let mut rc = krb5_get_init_creds_opt_set_fast_ccache_name(ctx.0, opt.1, armor.as_ptr());
+            if rc == 0 {
+                rc = krb5_get_init_creds_password(
+                    ctx.0,
+                    creds,
+                    princ.1,
+                    pw.as_ptr() as *const c_char,
+                    Some(refuse_prompter),
+                    ptr::null_mut(),
+                    0,
+                    CHANGEPW_SERVICE.as_ptr(),
+                    opt.1,
+                );
+            }
+            rc
+        };
+        if rc != 0 {
+            return Err(ctx.err(rc, "AS exchange (kadmin/changepw)"));
+        }
+        Ok(())
+    }
+
     fn user_ccache(&self, opts: LoginOptions) -> String {
         if opts.persistent {
             format!("FILE:{}/pb-{}.ccache", self.session_dir.display(), random_hex(16))
@@ -795,5 +883,79 @@ impl Kerberos for MitKerberos {
                 cc.destroy();
             }
         }
+    }
+
+    fn prove_password(&self, username: &str, password: &Zeroizing<String>) -> Result<(), KrbError> {
+        let ctx = Ctx::new()?;
+        let mut creds = zero_creds();
+        let r = self.changepw_creds(&ctx, username, password, &mut creds);
+        unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+        r
+    }
+
+    fn change_password(
+        &self,
+        username: &str,
+        old: &Zeroizing<String>,
+        new: &Zeroizing<String>,
+    ) -> Result<(), PwChangeError> {
+        let ctx = Ctx::new().map_err(PwChangeError::Krb)?;
+        let mut creds = zero_creds();
+        if let Err(e) = self.changepw_creds(&ctx, username, old, &mut creds) {
+            unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+            return Err(PwChangeError::Krb(e));
+        }
+        let new = match c_secret(new) {
+            Ok(n) => n,
+            Err(e) => {
+                unsafe { krb5_free_cred_contents(ctx.0, &mut creds) };
+                return Err(PwChangeError::Krb(e));
+            }
+        };
+        let mut code: c_int = 0;
+        let mut code_string = KrbData { magic: 0, length: 0, data: ptr::null_mut() };
+        let mut result_string = KrbData { magic: 0, length: 0, data: ptr::null_mut() };
+        let rc = unsafe {
+            krb5_change_password(
+                ctx.0,
+                &mut creds,
+                new.as_ptr() as *const c_char,
+                &mut code,
+                &mut code_string,
+                &mut result_string,
+            )
+        };
+        let text = data_text(&result_string);
+        unsafe {
+            krb5_free_data_contents(ctx.0, &mut code_string);
+            krb5_free_data_contents(ctx.0, &mut result_string);
+            krb5_free_cred_contents(ctx.0, &mut creds);
+        }
+        if rc != 0 {
+            return Err(PwChangeError::Krb(ctx.err(rc, "kpasswd")));
+        }
+        match code {
+            KRB5_KPASSWD_SUCCESS => Ok(()),
+            // IPA reports policy violations as soft errors with its policy text.
+            KRB5_KPASSWD_SOFTERROR => Err(PwChangeError::Rejected(PwReject::from_ipa_text(&text))),
+            KRB5_KPASSWD_AUTHERROR | KRB5_KPASSWD_ACCESSDENIED => {
+                Err(PwChangeError::Krb(KrbError::Denied(format!("kpasswd result {code}: {text}"))))
+            }
+            _ => Err(PwChangeError::Krb(KrbError::Unavailable(format!("kpasswd result {code}: {text}")))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    #[test]
+    fn locating_the_kdc_or_kpasswd_server_is_not_a_credential_failure() {
+        assert!(is_unavailable(KRB5_KDC_UNREACH));
+        assert!(is_unavailable(KRB5_REALM_CANT_RESOLVE));
+        assert!(is_unavailable(KRB5_REALM_UNKNOWN));
+        // KRB5KDC_ERR_PREAUTH_FAILED: a wrong password stays a denial.
+        assert!(!is_unavailable(-1765328360));
     }
 }

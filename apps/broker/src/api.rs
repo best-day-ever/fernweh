@@ -187,6 +187,151 @@ async fn auth_respond(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo
     }
 }
 
+// ---------------------------------------------------------------- enrolment (§16)
+
+/// Enrolment answers: 200 JSON except 429 (rate limit) and 400 (malformed body).
+/// Every other failure is the generic 200 `{"state":"denied"}`.
+fn enrol_error(e: ApiError) -> Response {
+    match e {
+        ApiError::RateLimited(_) => e.into_response(),
+        ApiError::BadRequest => (StatusCode::BAD_REQUEST, Json(json!({"state": "denied"}))).into_response(),
+        _ => (StatusCode::OK, Json(json!({"state": "denied"}))).into_response(),
+    }
+}
+
+fn enrol_result<T: serde::Serialize>(r: Result<T, ApiError>) -> Response {
+    match r {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => enrol_error(e),
+    }
+}
+
+/// Parse a body that may carry secrets from a buffer that is wiped right after.
+fn parse_secret<T: serde::de::DeserializeOwned>(body: Bytes) -> Option<T> {
+    let mut raw = Zeroizing::new(body.to_vec());
+    drop(body);
+    let parsed = serde_json::from_slice::<T>(&raw).ok();
+    zeroize::Zeroize::zeroize(&mut *raw);
+    parsed
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolStartReq {
+    username: String,
+    #[serde(default)]
+    device_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolRespondReq {
+    conversation_id: String,
+    responses: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolPasswordReq {
+    conversation_id: String,
+    new_password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolTotpReq {
+    conversation_id: String,
+    code: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolPasskeyReq {
+    conversation_id: String,
+    mapping: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolFinishReq {
+    conversation_id: String,
+}
+
+async fn enroll_start(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo<SocketAddr>, body: Bytes) -> Response {
+    if !b.cfg.enrol.enabled {
+        return not_found().await;
+    }
+    let Ok(req) = serde_json::from_slice::<EnrolStartReq>(&body) else { return enrol_error(ApiError::BadRequest) };
+    let device = match req.device_key.as_deref() {
+        None => None,
+        Some(k) if k.len() <= 200 => match STANDARD.decode(k).ok().and_then(|der| DeviceKey::from_spki(&der)) {
+            Some(d) => Some(d),
+            None => return enrol_error(ApiError::BadRequest),
+        },
+        Some(_) => return enrol_error(ApiError::BadRequest),
+    };
+    enrol_result(b.enroll_start(client_ip(&ci), &req.username, device).await)
+}
+
+async fn enroll_respond(
+    State(b): State<Arc<Broker>>,
+    ConnectInfo(ci): ConnectInfo<SocketAddr>,
+    body: Bytes,
+) -> Response {
+    if !b.cfg.enrol.enabled {
+        return not_found().await;
+    }
+    let Some(req) = parse_secret::<EnrolRespondReq>(body) else { return enrol_error(ApiError::BadRequest) };
+    let responses: Vec<Zeroizing<String>> = req.responses.into_iter().map(Zeroizing::new).collect();
+    enrol_result(b.enroll_respond(client_ip(&ci), &req.conversation_id, responses).await)
+}
+
+async fn enroll_password(
+    State(b): State<Arc<Broker>>,
+    ConnectInfo(ci): ConnectInfo<SocketAddr>,
+    body: Bytes,
+) -> Response {
+    if !b.cfg.enrol.enabled {
+        return not_found().await;
+    }
+    let Some(req) = parse_secret::<EnrolPasswordReq>(body) else { return enrol_error(ApiError::BadRequest) };
+    let new = Zeroizing::new(req.new_password);
+    enrol_result(b.enroll_password(client_ip(&ci), &req.conversation_id, new).await)
+}
+
+async fn enroll_totp(State(b): State<Arc<Broker>>, ConnectInfo(ci): ConnectInfo<SocketAddr>, body: Bytes) -> Response {
+    if !b.cfg.enrol.enabled {
+        return not_found().await;
+    }
+    let Some(req) = parse_secret::<EnrolTotpReq>(body) else { return enrol_error(ApiError::BadRequest) };
+    let code = Zeroizing::new(req.code);
+    enrol_result(b.enroll_totp(client_ip(&ci), &req.conversation_id, &code).await)
+}
+
+async fn enroll_passkey(
+    State(b): State<Arc<Broker>>,
+    ConnectInfo(ci): ConnectInfo<SocketAddr>,
+    body: Bytes,
+) -> Response {
+    if !b.cfg.enrol.enabled {
+        return not_found().await;
+    }
+    let Ok(req) = serde_json::from_slice::<EnrolPasskeyReq>(&body) else { return enrol_error(ApiError::BadRequest) };
+    enrol_result(b.enroll_passkey(client_ip(&ci), &req.conversation_id, &req.mapping).await)
+}
+
+async fn enroll_finish(
+    State(b): State<Arc<Broker>>,
+    ConnectInfo(ci): ConnectInfo<SocketAddr>,
+    body: Bytes,
+) -> Response {
+    if !b.cfg.enrol.enabled {
+        return not_found().await;
+    }
+    let Ok(req) = serde_json::from_slice::<EnrolFinishReq>(&body) else { return enrol_error(ApiError::BadRequest) };
+    Json(b.enroll_finish(client_ip(&ci), &req.conversation_id)).into_response()
+}
+
 async fn hosts(
     State(b): State<Arc<Broker>>,
     ConnectInfo(ci): ConnectInfo<SocketAddr>,
@@ -266,6 +411,12 @@ pub fn router(b: Arc<Broker>) -> Router {
         .route("/v1/hosts/{id}/connect", post(connect))
         .route("/v1/hosts/{id}/keepalive", post(keepalive))
         .route("/v1/logout", post(logout))
+        .route("/v1/enroll/start", post(enroll_start))
+        .route("/v1/enroll/respond", post(enroll_respond))
+        .route("/v1/enroll/password", post(enroll_password))
+        .route("/v1/enroll/totp", post(enroll_totp))
+        .route("/v1/enroll/passkey", post(enroll_passkey))
+        .route("/v1/enroll/finish", post(enroll_finish))
         .fallback(not_found)
         .layer(DefaultBodyLimit::max(8 * 1024))
         .layer(axum::middleware::map_response(no_store))

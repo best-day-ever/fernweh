@@ -30,6 +30,9 @@ use crate::relay::{Relay, RelayRequest};
 use crate::sessions::{SessionRecord, SessionStore};
 use crate::util::{random_token, sha256, valid_username, Clock};
 
+mod enrol;
+pub use enrol::{EnrolPrompt, EnrolReply, EnrolStartReply};
+
 // ---------------------------------------------------------------- replies
 
 #[derive(Debug, Serialize, PartialEq, Clone)]
@@ -313,6 +316,10 @@ pub struct Broker {
     /// Live passkey worker threads (including ones still winding down).
     passkey_workers: Arc<AtomicUsize>,
     passkey_rp_id: String,
+    /// Enrolment conversations (§16), separate from sign-in conversations.
+    enrol: Mutex<HashMap<String, enrol::EnrolConv>>,
+    /// Enrolment password proofs per user in the last 24 h (`enrol.daily_cap`).
+    enrol_daily: Mutex<HashMap<String, std::collections::VecDeque<Instant>>>,
 }
 
 const PROMPTS: [Prompt; 2] = [
@@ -344,6 +351,8 @@ impl Broker {
             users: Mutex::new(HashMap::new()),
             passkey_workers: Arc::new(AtomicUsize::new(0)),
             passkey_rp_id,
+            enrol: Mutex::new(HashMap::new()),
+            enrol_daily: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1391,6 +1400,7 @@ impl Broker {
         for (k, ccache) in renew {
             self.renew_session(k, ccache).await;
         }
+        self.reap_enrol(now);
         self.limiter.lock().unwrap().gc(now);
     }
 
@@ -1495,7 +1505,6 @@ impl Broker {
             }
         }
     }
-
 
     #[cfg(test)]
     pub(crate) fn lease_count(&self) -> usize {

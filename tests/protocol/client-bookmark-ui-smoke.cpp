@@ -23,6 +23,15 @@ static QObject* item(QQmlContext* context, const char* name)
     return result;
 }
 
+// Capture source and encoding profile live in the shared PlankVideoSettings
+// component (objectNames "captureSource" and "encodingProfile").
+static QObject* videoControl(QQmlContext* context, const char* settings, const char* control)
+{
+    auto* result = item(context, settings)->findChild<QObject*>(QString::fromLatin1(control));
+    require(result != nullptr, control);
+    return result;
+}
+
 static void checkEdit(QQuickWindow* window, QQmlContext* mainContext,
                       const QString& address, const QString& output)
 {
@@ -44,8 +53,8 @@ static void checkEdit(QQuickWindow* window, QQmlContext* mainContext,
     require(!bitrates.hasError(), "saved per-profile bitrates");
     require(QMetaObject::invokeMethod(dialog, "open"), "open Edit");
     QTimer::singleShot(6000, qApp, [window, context, dialog, output]() {
-        require(item(context, "editCaptureSource")->property("count").toInt() == 1, "Edit Mac-only capture");
-        require(item(context, "editEncodingProfile")->property("currentIndex").toInt() == 1, "Edit preserves Apple444");
+        require(videoControl(context, "editVideoSettings", "captureSource")->property("count").toInt() == 1, "Edit Mac-only capture");
+        require(videoControl(context, "editVideoSettings", "encodingProfile")->property("currentIndex").toInt() == 1, "Edit preserves Apple444");
         require(item(context, "editHostLayout")->property("currentIndex").toInt() == 0, "Edit preserves Match");
         require(window->grabWindow().save(output + "/mac-edit.png"), "Edit screenshot");
         QMetaObject::invokeMethod(dialog, "close");
@@ -74,8 +83,8 @@ static void runBookmarkSmoke()
         require(QMetaObject::invokeMethod(dialog, "open"), "open Add");
         item(context, "addressText")->setProperty("text", address);
         QTimer::singleShot(6000, qApp, [window, context, dialog, address, output]() {
-            auto* capture = item(context, "addCaptureSource");
-            auto* profile = item(context, "addEncodingProfile");
+            auto* capture = videoControl(context, "addVideoSettings", "captureSource");
+            auto* profile = videoControl(context, "addVideoSettings", "encodingProfile");
             auto* layout = item(context, "addHostLayout");
             auto* resolution = item(context, "addVirtualMode1");
             require(capture->property("hostPlatform").toInt() == 2, "real Mac discovery");
@@ -95,14 +104,17 @@ static void runBookmarkSmoke()
                 require(QMetaObject::invokeMethod(dialog, "close"), "close Add");
                 require(QMetaObject::invokeMethod(dialog, "open"), "reopen Add");
                 item(context, "addressText")->setProperty("text", "");
-                auto* capture = item(context, "addCaptureSource");
+                auto* capture = videoControl(context, "addVideoSettings", "captureSource");
                 require(capture->property("count").toInt() == 3, "unknown/offline choices");
                 require(QMetaObject::invokeMethod(capture, "selectCaptureSource", Q_ARG(QVariant, QVariant(2))), "manual Mac selection");
-                require(item(context, "addEncodingProfile")->property("count").toInt() == 2, "manual Mac profiles");
+                require(videoControl(context, "addVideoSettings", "encodingProfile")->property("count").toInt() == 2, "manual Mac profiles");
                 item(context, "addressText")->setProperty("text", address);
                 item(context, "nicknameText")->setProperty("text", "UI qualification");
                 item(context, "addHostLayout")->setProperty("currentIndex", 0);
-                item(context, "addEncodingProfile")->setProperty("currentIndex", 1);
+                // Apple HEVC 10-bit 4:4:4 (profile 8), through the component so
+                // the value it submits follows the selection.
+                require(QMetaObject::invokeMethod(item(context, "addVideoSettings"), "selectProfile",
+                                                  Q_ARG(QVariant, QVariant(8))), "select Apple444");
                 require(QMetaObject::invokeMethod(dialog, "accept"), "save isolated bookmark");
                 QTimer::singleShot(2500, qApp, [window, context, address, output]() {
                     checkEdit(window, context, address, output);
