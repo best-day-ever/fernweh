@@ -37,6 +37,7 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x800000` — bounded authenticated UTF-8 clipboard synchronization
 - `0x1000000` — negotiated file clipboard control/content lanes
 - `0x2000000` — NvFBC 8-bit source into direct NVENC 4:2:0 (`h264-8-420-nvenc`, `hevc-10-420-nvenc`), BT.709 limited range (Linux Host)
+- `0x4000000` — notch-safe Apple laptop virtual modes (`3024x1890`); see the allowlist below (Linux Host)
 
 ### Expected desktop handoff status
 
@@ -182,8 +183,17 @@ their host-layout requirement. `configured` is resolved to the authenticated
 topology's exact current layout before launch; it is not sent as a wildcard.
 Virtual layouts persist one enumerated mode per requested output. The current
 60 Hz allowlist is `1024x2160`, `1280x2160`, `1920x1080`, `1920x1200`,
-`2560x1440`, `2560x1600`, `2560x2160`, `3440x1440`, `3840x1600`,
-`3840x2160`, `4096x2160`, and `5120x2160`. The host compares the requested
+`2560x1440`, `2560x1600`, `2560x2160`, `3024x1890`, `3440x1440`,
+`3840x1600`, `3840x2160`, `4096x2160`, and `5120x2160`. `3024x1890` is the
+fullscreen viewport of a 14-inch MacBook Pro in its default scaling: native
+fullscreen places the window below the camera housing, so the 3024x1964 panel
+size is never presented 1:1 and is not a mode. It requires feature `0x4000000`:
+a client offers or requests it, and accepts it in a topology document, only
+when the host advertises that bit; the host rejects it with 400 unless the
+launch negotiated the bit. Every timing is an exact 60 Hz reduced-blanking
+timing carried in each virtual output's 384-byte EDID (three base-block and
+ten DisplayID timings), which is now full: a further mode means retiring one.
+The host compares the requested
 layout and both modes with the live topology before claiming the one-use PAM
 launch state. A mismatch returns 425 and submits only the enumerated layout,
 modes, and authenticated account UID to the root supervisor. Headless virtual
@@ -338,7 +348,10 @@ temporarily presenting the Flame-style 3840x2160 primary plus 1280x2160
 secondary virtual layout. Parsers must preserve order-independent
 identity, geometry, virtual provenance, source rectangles, exact layout
 binding, independent modes, allowed-layout capability, startup provenance, and
-the primary fallback. The version-1, version-2, version-4, version-7, and
+the primary fallback. `tests/protocol/output-topology-v13-notch-safe.json`
+is the same physical-startup host presenting one `3024x1890` output with
+feature `0x4000000`; without that bit the same document is invalid. The
+version-1, version-2, version-4, version-7, and
 version-8 and version-9 vectors remain historical
 evidence only; PLANK has no deployed legacy clients requiring a
 silent version fallback.
