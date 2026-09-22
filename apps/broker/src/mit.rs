@@ -252,6 +252,15 @@ const GSS_C_AF_UNSPEC: OmUint32 = 0;
 
 const KRB5_KDC_UNREACH: i32 = -1765328228;
 const KRB5_REALM_CANT_RESOLVE: i32 = -1765328164;
+// "Cannot find KDC for realm": no kdc/kpasswd_server configured or resolvable for the realm.
+const KRB5_REALM_UNKNOWN: i32 = -1765328230;
+/// Infrastructure failures (no reachable or configured KDC/kpasswd server). They must never
+/// count as a user's failed credential: that would feed the broker's per-user limiter and
+/// lock people out over a configuration error.
+fn is_unavailable(code: i32) -> bool {
+    matches!(code, KRB5_KDC_UNREACH | KRB5_REALM_CANT_RESOLVE | KRB5_REALM_UNKNOWN)
+}
+
 const KRB5_PROMPT_TYPE_PASSWORD: i32 = 1;
 const KRB5_PROMPT_TYPE_PREAUTH: i32 = 4;
 /// Returned from the prompter to abort the exchange (maps to "denied").
@@ -290,7 +299,7 @@ impl Ctx {
     }
     fn err(&self, code: i32, what: &str) -> KrbError {
         let m = format!("{what}: {}", self.msg(code));
-        if code == KRB5_KDC_UNREACH || code == KRB5_REALM_CANT_RESOLVE {
+        if is_unavailable(code) {
             KrbError::Unavailable(m)
         } else {
             KrbError::Denied(m)
@@ -934,5 +943,19 @@ impl Kerberos for MitKerberos {
             }
             _ => Err(PwChangeError::Krb(KrbError::Unavailable(format!("kpasswd result {code}: {text}")))),
         }
+    }
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    #[test]
+    fn locating_the_kdc_or_kpasswd_server_is_not_a_credential_failure() {
+        assert!(is_unavailable(KRB5_KDC_UNREACH));
+        assert!(is_unavailable(KRB5_REALM_CANT_RESOLVE));
+        assert!(is_unavailable(KRB5_REALM_UNKNOWN));
+        // KRB5KDC_ERR_PREAUTH_FAILED: a wrong password stays a denial.
+        assert!(!is_unavailable(-1765328360));
     }
 }
