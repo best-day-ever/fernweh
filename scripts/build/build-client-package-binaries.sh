@@ -930,9 +930,17 @@ for required_bookmark_profile_token in \
     exit 1
   }
 done
+# The Add and Edit bookmark dialogs (and the remote workstation settings)
+# share PlankVideoSettings.qml for capture source, profile and bitrates.
+for bookmark_dialog in main.qml PcView.qml; do
+  rg -Fq 'PlankVideoSettings {' "$source_dir/app/gui/$bookmark_dialog" || {
+    echo "bookmark dialog must use the shared video settings: ${bookmark_dialog}" >&2
+    exit 1
+  }
+done
 for required_bookmark_profile_ui_token in \
-  'addEncodingProfile' \
-  'editEncodingProfile' \
+  'addVideoSettings.videoProfile' \
+  'editVideoSettings.videoProfile' \
   'computerModel.plankVideoProfile(index)'; do
   rg -Fq "$required_bookmark_profile_ui_token" \
     "$source_dir/app/gui/main.qml" "$source_dir/app/gui/PcView.qml" || {
@@ -940,7 +948,11 @@ for required_bookmark_profile_ui_token in \
     exit 1
   }
 done
-rg -Fq 'addEncodingProfile.currentIndex = 6' \
+rg -Fq 'id: profileBox' "$source_dir/app/gui/PlankVideoSettings.qml" || {
+  echo "PLANK encoding-profile selector is missing from the shared video settings" >&2
+  exit 1
+}
+rg -U -q 'addVideoSettings\.load\(StreamingPreferences\.PLANK_CAPTURE_NVFBC_8BIT,[[:space:]]*StreamingPreferences\.PLANK_PROFILE_NVENC_HEVC_10BIT_444,' \
   "$source_dir/app/gui/main.qml" || {
   echo "new bookmarks do not default to H.265 10-bit 4:4:4 NVENC" >&2
   exit 1
@@ -980,15 +992,23 @@ for required_bookmark_bitrate_token in \
   }
 done
 for required_bookmark_bitrate_ui_token in \
-  addBitrateSlider \
-  editBitrateSlider \
-  'Startup encoder target:' \
-  'Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.' \
-  'rememberProfileBitrate' \
+  'addVideoSettings.officeBitratesKbps' \
+  'editVideoSettings.officeBitratesKbps' \
   'computerModel.plankProfileBitratesKbps(index)'; do
   rg -Fq "$required_bookmark_bitrate_ui_token" \
     "$source_dir/app/gui/main.qml" "$source_dir/app/gui/PcView.qml" || {
     echo "PLANK bookmark bitrate UI is missing: ${required_bookmark_bitrate_ui_token}" >&2
+    exit 1
+  }
+done
+for required_profile_bitrate_ui_token in \
+  'id: officeSlider' \
+  'Startup encoder target: %1 Mbps' \
+  'Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.' \
+  'function remember(values, value)'; do
+  rg -Fq "$required_profile_bitrate_ui_token" \
+    "$source_dir/app/gui/PlankVideoSettings.qml" || {
+    echo "PLANK bookmark bitrate UI is missing: ${required_profile_bitrate_ui_token}" >&2
     exit 1
   }
 done
@@ -1001,6 +1021,7 @@ if rg -n \
 fi
 if rg -n 'NVENC \(Experimental\)' \
   "$source_dir/app/gui/main.qml" "$source_dir/app/gui/PcView.qml" \
+  "$source_dir/app/gui/PlankVideoSettings.qml" \
   "$repo_dir/protocol/encoding-profiles.md"; then
   echo "NVENC encoding profiles must not be labeled Experimental" >&2
   exit 1
@@ -1013,16 +1034,14 @@ for native_capture_label in \
     exit 1
   }
 done
-for bookmark_dialog in main.qml PcView.qml; do
-  rg -Fq 'PlankCaptureSourceBox {' "$source_dir/app/gui/$bookmark_dialog" || {
-    echo "bookmark dialog must use the shared host-aware capture selector" >&2
-    exit 1
-  }
-done
+rg -Fq 'PlankCaptureSourceBox {' "$source_dir/app/gui/PlankVideoSettings.qml" || {
+  echo "bookmark dialog must use the shared host-aware capture selector" >&2
+  exit 1
+}
 for native_x264_profile_label in \
   'H.264 10-bit 4:4:4 (identity GBR) — x264'; do
   rg -Fq "$native_x264_profile_label" \
-    "$source_dir/app/gui/main.qml" "$source_dir/app/gui/PcView.qml" || {
+    "$source_dir/app/gui/PlankVideoSettings.qml" || {
     echo "native X11 profile must identify x264 explicitly" >&2
     exit 1
   }
@@ -1276,7 +1295,7 @@ for required_bookmark_token in \
     exit 1
   }
 done
-rg -U -q 'addNewHostManually\(addressText\.text\.trim\(\),[[:space:]]*nicknameText\.text\.trim\(\),[[:space:]]*addHostLayout\.currentIndex,[[:space:]]*addVirtualMode1\.currentIndex,[[:space:]]*addVirtualMode2\.currentIndex,[[:space:]]*addScalingChoice\.currentIndex,[[:space:]]*addEncodingProfile\.model\.get\(' \
+rg -U -q 'addNewHostManually\(addressText\.text\.trim\(\),[[:space:]]*nicknameText\.text\.trim\(\),[[:space:]]*addHostLayout\.currentIndex,[[:space:]]*addVirtualMode1\.currentIndex,[[:space:]]*addVirtualMode2\.currentIndex,[[:space:]]*addScalingChoice\.currentIndex,[[:space:]]*addVideoSettings\.videoProfile,[[:space:]]*addVideoSettings\.captureSource,' \
   "$source_dir/app/gui/main.qml" || {
   echo "manual workstation dialog does not submit address, nickname, host layout, independent virtual modes, scaling, and encoding profile" >&2
   exit 1
