@@ -29,7 +29,7 @@ class CollectionTests(unittest.TestCase):
 
     def arguments(self, branch='main', content=b'fixture'):
         suffix = '' if branch == 'main' else '-' + branch
-        package = self.root / ('plank-client_1.2.3' + suffix + '_arm64.dmg')
+        package = self.root / ('BDE-fernweh_1.2.3' + suffix + '_arm64.dmg')
         package.write_bytes(content)
         return SimpleNamespace(source_root=self.root, source_commit='HEAD', package=package,
             product='client', platform='macos', architecture='arm64', target_os='macos-27',

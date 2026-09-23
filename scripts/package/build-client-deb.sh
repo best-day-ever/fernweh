@@ -165,7 +165,7 @@ version_output=$(
     env -u LD_LIBRARY_PATH \
     "$stage_dir/usr/bin/plank-client" --version 2>&1
 )
-grep -Fxq "PLANK ${package_version}" <<<"$version_output" || {
+grep -Fxq "BDE fernweh ${package_version}" <<<"$version_output" || {
   echo "packaged client did not report the expected PLANK version" >&2
   printf '%s\n' "$version_output" >&2
   exit 1
@@ -302,14 +302,14 @@ grep -Fq './usr/share/metainfo/la.instinctual.Plank.Client.appdata.xml' \
 }
 desktop_entry=$(dpkg-deb --fsys-tarfile "$deb_file" | \
   tar -xOf - ./usr/share/applications/la.instinctual.Plank.Client.desktop)
-grep -Fxq 'Name=BDE Fernweh Client' <<<"$desktop_entry" || {
-  echo "client desktop metadata does not identify BDE Fernweh Client" >&2
+grep -Fxq 'Name=BDE fernweh' <<<"$desktop_entry" || {
+  echo "client desktop metadata does not identify BDE fernweh" >&2
   exit 1
 }
 appstream_metadata=$(dpkg-deb --fsys-tarfile "$deb_file" | \
   tar -xOf - ./usr/share/metainfo/la.instinctual.Plank.Client.appdata.xml)
-grep -Fq '<name>BDE Fernweh Client</name>' <<<"$appstream_metadata" || {
-  echo "client AppStream metadata does not identify BDE Fernweh Client" >&2
+grep -Fq '<name>BDE fernweh</name>' <<<"$appstream_metadata" || {
+  echo "client AppStream metadata does not identify BDE fernweh" >&2
   exit 1
 }
 grep -Fq './usr/share/icons/hicolor/512x512/apps/plank-client.png' \

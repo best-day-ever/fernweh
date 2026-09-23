@@ -17,8 +17,9 @@ build=${PLANK_MAC_CLIENT_BUILD:-"$output/build"}
 # An explicitly retained build is reconfigured/rebuilt, never trusted blindly.
 bash "$source_root/scripts/build/build-macos-client.sh" "$source_root" "$build"
 mkdir "$output/image"
-app="$output/image/BDE Fernweh Client.app"
+app="$output/image/BDE fernweh.app"
 ditto "$build/app/plank-client.app" "$app"
+cp "$source_root/scripts/package/fernweh-install-update.sh" "$app/Contents/Resources/fernweh-install-update.sh"
 "$PLANK_QT_ROOT/bin/macdeployqt" "$app" \
     "-qmldir=$source_root/apps/client/app/gui" -always-overwrite -no-strip
 # macdeployqt selects Cocoa only; retain the small offscreen plugin so the
@@ -88,14 +89,14 @@ if ! app_version=$(QT_QPA_PLATFORM=offscreen "$app/Contents/MacOS/plank-client" 
     echo 'Packaged Client failed offscreen launch; inspect ~/Library/Logs/PLANK/Client' >&2
     exit 1
 fi
-[[ $app_version == "PLANK $PLANK_PACKAGE_VERSION" ]] || {
+[[ $app_version == "BDE fernweh $PLANK_PACKAGE_VERSION" ]] || {
     echo "Packaged Client version mismatch: $app_version" >&2; exit 1;
 }
 test "$(/usr/libexec/PlistBuddy -c 'Print :PLANKVersion' "$app/Contents/Info.plist")" = "$PLANK_PACKAGE_VERSION"
 ln -s /Applications "$output/image/Applications"
-dmg="$output/plank-client_${PLANK_PACKAGE_VERSION}_arm64.dmg"
+dmg="$output/BDE-fernweh_${PLANK_PACKAGE_VERSION}_arm64.dmg"
 python3 "$source_root/scripts/test/check-package-build-paths.py" "$app"
-hdiutil create -volname "BDE Fernweh Client $PLANK_PACKAGE_VERSION" -srcfolder "$output/image" -format UDZO "$dmg"
+hdiutil create -volname "BDE fernweh $PLANK_PACKAGE_VERSION" -srcfolder "$output/image" -format UDZO "$dmg"
 codesign --timestamp --sign "$PLANK_MACOS_SIGNING_IDENTITY" "$dmg"
 notary_flags=(--keychain-profile "$PLANK_NOTARY_PROFILE")
 if [[ -n ${PLANK_NOTARY_KEYCHAIN:-} ]]; then
