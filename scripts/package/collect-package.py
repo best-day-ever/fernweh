@@ -57,7 +57,8 @@ def collect(args):
         expected = 'plank-' + args.product + '-' + version + '-' + release
         pattern = re.escape(expected) + r'\.el\d+\.' + re.escape(args.architecture) + r'\.rpm'
     else:
-        expected = 'plank-' + args.product + '_' + effective + '_' + args.architecture + extension
+        prefix = 'BDE-fernweh' if (args.product, args.platform, extension) == ('client', 'macos', '.dmg') else 'plank-' + args.product
+        expected = prefix + '_' + effective + '_' + args.architecture + extension
         pattern = re.escape(expected)
     if not re.fullmatch(pattern, source.name):
         raise ValueError('filename disagrees with product/version/branch/architecture')
