@@ -574,6 +574,22 @@ async fn offline_policy_denied_and_unassigned_hosts() {
 }
 
 #[tokio::test]
+async fn connect_reprobes_cached_offline_host_after_desktop_handoff() {
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "secret123456")]), direct_lan);
+    let token = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
+    h.b.probe_all().await; // Pin the original host certificate.
+    h.prober.certs.lock().unwrap().insert(WS1.into(), None);
+    h.b.probe_all().await; // Cache the brief handoff outage.
+    h.prober.certs.lock().unwrap().insert(WS1.into(), Some([1u8; 32]));
+
+    let reply = h.b.connect(LAN, &token, WS1, "e").await.unwrap();
+    assert_eq!(reply.route, "direct");
+    assert_eq!(reply.host_cert_sha256, hex::encode([1u8; 32]));
+    assert_eq!(h.pins.get(WS1), Some(hex::encode([1u8; 32])));
+    assert_eq!(h.b.direct_count(), 1);
+}
+
+#[tokio::test]
 async fn bearer_is_required_and_hashed() {
     let h = harness();
     let t = h.login().await;

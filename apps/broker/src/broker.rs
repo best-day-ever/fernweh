@@ -1320,9 +1320,14 @@ impl Broker {
         let Some(target) = view.remote_hosts.iter().find(|h| h.fqdn == host).and_then(|h| h.ipv4) else {
             return Err(ApiError::Unavailable("no address"));
         };
+        // The periodic status cache is suitable for listing workstations, but
+        // a desktop handoff briefly takes the host listener offline. Recheck a
+        // cached offline result on an explicit connection request so a newly
+        // started desktop worker is not rejected for the cache's full lifetime.
+        // Preserve a recorded pin mismatch until the administrator resets it.
         let st = match self.status_fresh(host) {
-            Some(s) => s,
-            None => self.probe_one(host, target).await,
+            Some(s) if s.online || s.pin_mismatch => s,
+            _ => self.probe_one(host, target).await,
         };
         if st.pin_mismatch {
             return Err(ApiError::Unavailable("certificate changed"));
