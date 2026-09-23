@@ -119,6 +119,147 @@ fn z(v: &[&str]) -> Vec<Zeroizing<String>> {
     v.iter().map(|s| Zeroizing::new(s.to_string())).collect()
 }
 
+fn test_passkey_mapping() -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+    let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap();
+    let mut point = [0u8; 65];
+    point.copy_from_slice(key.public_key().as_ref());
+    format!("passkey:{},{}", STANDARD.encode([7u8; 32]), STANDARD.encode(crate::device::DeviceKey(point).to_spki()))
+}
+
+fn setup_bearer<'a>(
+    device: &crate::device::testkey::TestDevice,
+    token: &'a str,
+    time: u64,
+    path: &str,
+) -> crate::broker::Bearer<'a> {
+    use crate::device::{proof_message, DeviceProof};
+    let digest = crate::util::sha256(b"");
+    crate::broker::Bearer {
+        token,
+        proof: Some(DeviceProof {
+            method: "POST".into(),
+            path: path.into(),
+            time,
+            signature: device.sign(&proof_message("POST", path, time, token, &digest)),
+            body_sha256: digest,
+        }),
+    }
+}
+
+#[tokio::test]
+async fn fresh_otp_session_can_add_one_passkey_without_admin_rights() {
+    let h = harness();
+    h.dir.passwords.lock().unwrap().insert("anna".into(), "secret".into());
+    h.dir.enrol.lock().unwrap().insert(
+        "anna".into(),
+        crate::enrol::EnrolFacts {
+            auth_types: vec!["password".into(), "otp".into(), "passkey".into()],
+            ..Default::default()
+        },
+    );
+    let device = crate::device::testkey::TestDevice::new();
+    let device_key = crate::device::DeviceKey::from_spki(&device.spki()).unwrap();
+    let c = h.b.auth_start_method(IP, "anna", crate::broker::Method::PasswordOtp, Some(device_key)).await.unwrap();
+    let reply = h.b.auth_respond(IP, &c.conversation_id, z(&["secret", "123456"])).await.unwrap();
+    assert!(reply.passkey_setup_available);
+    let mapping = test_passkey_mapping();
+    let app = crate::api::router(h.b.clone());
+    let body = serde_json::json!({"mapping": mapping}).to_string();
+    assert_eq!(call(&app, "POST", "/v1/passkeys/setup", None, &body).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        call(&app, "POST", "/v1/passkeys/setup", Some(&reply.session_token), &body).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let now = crate::util::Clock::unix(&*h.clock);
+    h.b.setup_passkey(setup_bearer(&device, &reply.session_token, now, "/v1/passkeys/setup"), &mapping).await.unwrap();
+    assert_eq!(h.dir.passkeys.lock().unwrap().as_slice(), &[("anna".to_string(), mapping.clone())]);
+    h.b.setup_passkey(setup_bearer(&device, &reply.session_token, now + 1, "/v1/passkeys/setup"), &mapping)
+        .await
+        .unwrap();
+    assert_eq!(
+        h.b.setup_passkey(
+            setup_bearer(&device, &reply.session_token, now + 2, "/v1/passkeys/setup"),
+            &test_passkey_mapping()
+        )
+        .await,
+        Err(ApiError::Denied)
+    );
+    assert_eq!(h.audit.count("passkey_setup_added"), 1);
+    let events = serde_json::to_string(&h.audit.events()).unwrap();
+    assert!(!events.contains("secret"));
+}
+
+#[tokio::test]
+async fn passkey_setup_requires_fresh_otp_and_enabled_ipa_type() {
+    let h = harness();
+    h.dir.passwords.lock().unwrap().insert("anna".into(), "secret".into());
+    let device = crate::device::testkey::TestDevice::new();
+    let device_key = crate::device::DeviceKey::from_spki(&device.spki()).unwrap();
+    let c =
+        h.b.auth_start_method(IP, "anna", crate::broker::Method::PasswordOtp, Some(device_key.clone())).await.unwrap();
+    let first = h.b.auth_respond(IP, &c.conversation_id, z(&["secret", "123456"])).await.unwrap();
+    assert!(!first.passkey_setup_available);
+    let now = crate::util::Clock::unix(&*h.clock);
+    assert_eq!(
+        h.b.setup_passkey(
+            setup_bearer(&device, &first.session_token, now, "/v1/passkeys/setup"),
+            &test_passkey_mapping()
+        )
+        .await,
+        Err(ApiError::Denied)
+    );
+    h.dir.enrol.lock().unwrap().insert(
+        "anna".into(),
+        crate::enrol::EnrolFacts {
+            auth_types: vec!["password".into(), "otp".into(), "passkey".into()],
+            ..Default::default()
+        },
+    );
+    let unbound = h.b.auth_start(IP, "anna").unwrap();
+    let unbound = h.b.auth_respond(IP, &unbound.conversation_id, z(&["secret", "123456"])).await.unwrap();
+    assert!(!unbound.passkey_setup_available, "a bearer alone cannot enroll a new key");
+    let c =
+        h.b.auth_start_method(IP, "anna", crate::broker::Method::PasswordOtp, Some(device_key.clone())).await.unwrap();
+    let second = h.b.auth_respond(IP, &c.conversation_id, z(&["secret", "123456"])).await.unwrap();
+    assert!(second.passkey_setup_available);
+    h.clock.advance(Duration::from_secs(300));
+    let now = crate::util::Clock::unix(&*h.clock);
+    assert_eq!(
+        h.b.setup_passkey(
+            setup_bearer(&device, &second.session_token, now, "/v1/passkeys/setup"),
+            &test_passkey_mapping()
+        )
+        .await,
+        Err(ApiError::Denied)
+    );
+    let c = h.b.auth_start_method(IP, "anna", crate::broker::Method::PasswordOtp, Some(device_key)).await.unwrap();
+    let third = h.b.auth_respond(IP, &c.conversation_id, z(&["secret", "123456"])).await.unwrap();
+    h.b.skip_passkey_setup(setup_bearer(&device, &third.session_token, now + 1, "/v1/passkeys/setup/skip"))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.b.setup_passkey(
+            setup_bearer(&device, &third.session_token, now + 2, "/v1/passkeys/setup"),
+            &test_passkey_mapping()
+        )
+        .await,
+        Err(ApiError::Denied)
+    );
+    h.b.logout(setup_bearer(&device, &third.session_token, now + 3, "/v1/logout")).await.unwrap();
+    assert_eq!(
+        h.b.setup_passkey(
+            setup_bearer(&device, &third.session_token, now + 4, "/v1/passkeys/setup"),
+            &test_passkey_mapping()
+        )
+        .await,
+        Err(ApiError::Unauthorized)
+    );
+}
+
 impl H {
     async fn login_from(&self, ip: IpAddr, user: &str, pw: &str, otp: &str) -> Result<String, ApiError> {
         let c = self.b.auth_start(ip, user)?;
