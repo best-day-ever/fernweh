@@ -33,6 +33,16 @@ pub struct Config {
     pub passkey: PasskeyConfig,
     #[serde(default)]
     pub enrol: EnrolConfig,
+    /// Optional directory containing the current macOS client release.
+    #[serde(default)]
+    pub client_updates: Option<ClientUpdatesConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientUpdatesConfig {
+    /// Root-owned, broker-readable directory with current.json and immutable DMGs.
+    pub directory: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -463,6 +473,11 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(updates) = &self.client_updates {
+            if !updates.directory.is_absolute() {
+                bail!("client_updates.directory must be absolute");
+            }
+        }
         let l = &self.limits;
         if l.device_session_idle_secs == 0 || l.device_session_idle_secs > l.device_session_absolute_secs {
             bail!("limits.device_session_idle_secs must be 1..=device_session_absolute_secs");

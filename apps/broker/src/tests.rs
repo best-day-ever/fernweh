@@ -13,7 +13,49 @@ use zeroize::Zeroizing;
 
 use crate::audit::Audit;
 use crate::broker::{ApiError, Broker, Deps};
-use crate::config::{test_config, Config};
+use crate::config::{test_config, ClientUpdatesConfig, Config};
+
+#[tokio::test]
+async fn public_client_update_feed_streams_only_the_published_release() {
+    let directory = std::env::temp_dir().join(format!("fernweh-update-test-{}", rand::random::<u64>()));
+    std::fs::create_dir(&directory).unwrap();
+    let dmg = b"signed-dmg-test-bytes";
+    std::fs::write(directory.join("1.0.139.dmg"), dmg).unwrap();
+    let digest = hex::encode(crate::util::sha256(dmg));
+    std::fs::write(
+        directory.join("current.json"),
+        serde_json::json!({
+            "version": "1.0.139", "sha256": digest, "size": dmg.len()
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let h = harness_cfg(FakeKerberos::new(&[]), |cfg| {
+        cfg.client_updates = Some(ClientUpdatesConfig { directory: directory.clone() });
+    });
+    let app = crate::api::router(h.b);
+    let manifest = app
+        .clone()
+        .oneshot(Request::builder().uri("/v1/client-updates/macos-arm64").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(manifest.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(manifest.into_body(), 4096).await.unwrap();
+    let feed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(feed["version"], "1.0.139");
+    assert_eq!(feed["sha256"], digest);
+    assert_eq!(feed["size"], dmg.len());
+    let route = feed["url"].as_str().unwrap();
+    let response = app.clone().oneshot(Request::builder().uri(route).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(axum::body::to_bytes(response.into_body(), 4096).await.unwrap().as_ref(), dmg);
+    let old = app
+        .oneshot(Request::builder().uri("/v1/client-updates/macos-arm64/1.0.138.dmg").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(old.status(), StatusCode::NOT_FOUND);
+    std::fs::remove_dir_all(directory).unwrap();
+}
 use crate::directory::FakeDirectory;
 use crate::hbac::fixtures::*;
 use crate::hbac::UserView;

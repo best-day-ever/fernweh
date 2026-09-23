@@ -24,6 +24,7 @@ pub mod ratelimit;
 pub mod relay;
 pub mod sessions;
 pub mod totp;
+pub mod updates;
 pub mod util;
 
 #[cfg(test)]

@@ -1051,6 +1051,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "toml",
  "tower",
  "tracing",
