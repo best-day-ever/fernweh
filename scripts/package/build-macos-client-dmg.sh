@@ -22,6 +22,11 @@ ditto "$build/app/plank-client.app" "$app"
 cp "$source_root/scripts/package/fernweh-install-update.sh" "$app/Contents/Resources/fernweh-install-update.sh"
 "$PLANK_QT_ROOT/bin/macdeployqt" "$app" \
     "-qmldir=$source_root/apps/client/app/gui" -always-overwrite -no-strip
+# macdeployqt needs the build target's original executable name. Rename only
+# after deployment so macOS uses the product name for its app menu and process.
+mv "$app/Contents/MacOS/plank-client" "$app/Contents/MacOS/BDE fernweh"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable BDE fernweh' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string BDE fernweh' "$app/Contents/Info.plist"
 # macdeployqt selects Cocoa only; retain the small offscreen plugin so the
 # shipped executable can also run our headless version/diagnostic checks.
 cp "$PLANK_QT_ROOT/plugins/platforms/libqoffscreen.dylib" "$app/Contents/PlugIns/platforms/"
@@ -85,7 +90,7 @@ codesign --verify --deep --strict "$app"
 # The Touch ID helper is signed by the loop above like every Mach-O: hardened
 # runtime, no entitlements (CryptoKit Secure Enclave keys need none).
 codesign --display --verbose=2 "$app/Contents/MacOS/plank-passkey" 2>&1 | grep -q 'flags=.*runtime'
-if ! app_version=$(QT_QPA_PLATFORM=offscreen "$app/Contents/MacOS/plank-client" --version); then
+if ! app_version=$(QT_QPA_PLATFORM=offscreen "$app/Contents/MacOS/BDE fernweh" --version); then
     echo 'Packaged Client failed offscreen launch; inspect ~/Library/Logs/PLANK/Client' >&2
     exit 1
 fi
