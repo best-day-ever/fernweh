@@ -11,13 +11,17 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use ldap3::{dn_escape, ldap_escape, Ldap, LdapConnAsync, LdapConnSettings, LdapError, Mod, Scope, SearchEntry};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 use tracing::{debug, error, warn};
 
 use zeroize::Zeroizing;
@@ -43,6 +47,7 @@ pub struct IpaDirectory {
     hbac_service: String,
     timeout: Duration,
     tls: Arc<rustls::ClientConfig>,
+    ca_cert: std::path::PathBuf,
 }
 
 impl IpaDirectory {
@@ -70,7 +75,47 @@ impl IpaDirectory {
             hbac_service: cfg.ldap.hbac_service.clone(),
             timeout: Duration::from_secs(cfg.ldap.timeout_secs),
             tls: Arc::new(tls),
+            ca_cert: cfg.ldap.ca_cert.clone(),
         })
+    }
+
+    /// ldap3's GSSAPI bind uses the process default credential cache. A child
+    /// ldapmodify gets this session's FILE: cache through its own environment,
+    /// so concurrent users cannot accidentally bind with each other's ticket.
+    async fn modify_as_ticket(&self, ccache: &str, ldif: &str) -> Result<(), DirError> {
+        if !ccache.starts_with("FILE:") {
+            return Err(DirError::InvalidCredentials);
+        }
+        let mut unavailable = false;
+        for uri in &self.user_uris {
+            let mut child = Command::new("/usr/bin/ldapmodify")
+                .args(["-Q", "-Y", "GSSAPI", "-H", uri])
+                .env("KRB5CCNAME", ccache)
+                .env("LDAPTLS_CACERT", &self.ca_cert)
+                .env("LDAPTLS_REQCERT", "demand")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| DirError::Unavailable(format!("ldapmodify start: {e}")))?;
+            if let Some(mut stdin) = child.stdin.take() {
+                if stdin.write_all(ldif.as_bytes()).await.is_err() {
+                    unavailable = true;
+                    continue;
+                }
+            }
+            match tokio::time::timeout(self.timeout, child.wait()).await {
+                Ok(Ok(status)) if status.success() => return Ok(()),
+                Ok(Ok(_)) => return Err(DirError::Rejected("ticket-bound LDAP modify refused".into())),
+                Ok(Err(_)) | Err(_) => unavailable = true,
+            }
+        }
+        if unavailable {
+            Err(DirError::Unavailable("ticket-bound LDAP modify unavailable".into()))
+        } else {
+            Err(DirError::Unavailable("no user LDAP URI".into()))
+        }
     }
 
     async fn connect(&self) -> Result<Ldap, DirError> {
@@ -483,5 +528,23 @@ impl Directory for IpaDirectory {
         let r = self.write_passkey(&mut ldap, &dn, mapping).await;
         let _ = ldap.unbind().await;
         r
+    }
+
+    async fn add_passkey_with_ticket(&self, uid: &str, ccache: &str, mapping: &str) -> Result<(), DirError> {
+        let dn = self.user_dn(uid);
+        let value = STANDARD.encode(mapping.as_bytes());
+        let header = format!("dn: {dn}\nchangetype: modify\n");
+        let with_class = format!(
+            "{header}add: objectClass\nobjectClass: ipapasskeyuser\n-\nadd: ipapasskey\nipapasskey:: {value}\n"
+        );
+        match self.modify_as_ticket(ccache, &with_class).await {
+            Ok(()) => Ok(()),
+            Err(DirError::Rejected(_)) => {
+                // An account with a mapping already has the object class.
+                let mapping_only = format!("{header}add: ipapasskey\nipapasskey:: {value}\n");
+                self.modify_as_ticket(ccache, &mapping_only).await
+            }
+            Err(e) => Err(e),
+        }
     }
 }

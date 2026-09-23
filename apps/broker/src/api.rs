@@ -392,6 +392,39 @@ async fn logout(State(b): State<Arc<Broker>>, uri: Uri, h: HeaderMap, body: Byte
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PasskeySetupReq {
+    mapping: String,
+}
+
+async fn passkey_setup(State(b): State<Arc<Broker>>, uri: Uri, h: HeaderMap, body: Bytes) -> Response {
+    let result = async {
+        let credential = device_bearer(&h, "POST", uri.path(), &body)?;
+        let request: PasskeySetupReq = serde_json::from_slice(&body).map_err(|_| ApiError::BadRequest)?;
+        b.setup_passkey(credential, &request.mapping).await
+    }
+    .await;
+    match result {
+        Ok(()) => Json(json!({"state": "passkey_added"})).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn passkey_setup_skip(State(b): State<Arc<Broker>>, uri: Uri, h: HeaderMap, body: Bytes) -> Response {
+    let result = async {
+        if !body.is_empty() {
+            return Err(ApiError::BadRequest);
+        }
+        b.skip_passkey_setup(device_bearer(&h, "POST", uri.path(), &body)?).await
+    }
+    .await;
+    match result {
+        Ok(()) => Json(json!({"state": "done"})).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
 async fn not_found() -> Response {
     (StatusCode::NOT_FOUND, Json(json!({"state": "not_found"}))).into_response()
 }
@@ -411,6 +444,8 @@ pub fn router(b: Arc<Broker>) -> Router {
         .route("/v1/hosts/{id}/connect", post(connect))
         .route("/v1/hosts/{id}/keepalive", post(keepalive))
         .route("/v1/logout", post(logout))
+        .route("/v1/passkeys/setup", post(passkey_setup))
+        .route("/v1/passkeys/setup/skip", post(passkey_setup_skip))
         .route("/v1/enroll/start", post(enroll_start))
         .route("/v1/enroll/respond", post(enroll_respond))
         .route("/v1/enroll/password", post(enroll_password))

@@ -54,6 +54,10 @@ pub trait Directory: Send + Sync {
     /// Bound as the user: add a passkey mapping to the user's own entry (plus the
     /// `ipapasskeyuser` object class on first use).
     async fn add_passkey(&self, uid: &str, password: &Zeroizing<String>, mapping: &str) -> Result<(), DirError>;
+
+    /// Add a mapping using the fresh OTP session's user Kerberos cache. This
+    /// remains valid after the TOTP code changes and has no broker write rights.
+    async fn add_passkey_with_ticket(&self, uid: &str, ccache: &str, mapping: &str) -> Result<(), DirError>;
 }
 
 pub struct FakeDirectory {
@@ -162,6 +166,21 @@ impl Directory for FakeDirectory {
 
     async fn add_passkey(&self, uid: &str, password: &Zeroizing<String>, mapping: &str) -> Result<(), DirError> {
         self.bind(uid, password)?;
+        if let Some(m) = self.refuse_writes.lock().unwrap().clone() {
+            return Err(DirError::Rejected(m));
+        }
+        let mut p = self.passkeys.lock().unwrap();
+        if p.iter().any(|(u, m)| u == uid && m == mapping) {
+            return Err(DirError::Rejected("type or value exists".into()));
+        }
+        p.push((uid.to_string(), mapping.to_string()));
+        Ok(())
+    }
+
+    async fn add_passkey_with_ticket(&self, uid: &str, ccache: &str, mapping: &str) -> Result<(), DirError> {
+        if ccache.is_empty() {
+            return Err(DirError::InvalidCredentials);
+        }
         if let Some(m) = self.refuse_writes.lock().unwrap().clone() {
             return Err(DirError::Rejected(m));
         }

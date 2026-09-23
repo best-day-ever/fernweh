@@ -20,6 +20,7 @@ use crate::audit::Audit;
 use crate::config::Config;
 use crate::device::{proof_message, DeviceKey, DeviceProof};
 use crate::directory::{DirError, Directory};
+use crate::enrol::valid_passkey_mapping;
 use crate::hbac::{assigned_hosts, DirectoryView, UserView};
 use crate::kerberos::{Kerberos, KrbError, LoginOptions, UserTicket};
 use crate::passkey::{Assertion, Challenge, PromptData};
@@ -86,6 +87,10 @@ pub struct AuthenticatedReply {
     /// Present (true) only for sessions bound to a device key (§14.2).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub device_bound: bool,
+    /// Only after a fresh password + OTP sign-in, for a short-lived optional
+    /// registration on this device. Absent for older clients and passkey logins.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub passkey_setup_available: bool,
 }
 
 /// A bearer credential as presented on one request: the token plus, for a
@@ -233,7 +238,22 @@ struct Session {
     persisted_last_used: u64,
     /// Every (client, port) this session ever leased: flushed from conntrack at the end.
     ports_used: Vec<(Ipv4Addr, u16)>,
+    /// Never persisted. A fresh OTP sign-in grants five minutes to add one
+    /// key using this session's user Kerberos ticket and IPA self-service ACL.
+    passkey_setup: Option<PendingPasskeySetup>,
+    /// A repeated request with this exact mapping can confirm success after a
+    /// lost HTTP reply, without retaining the password or writing IPA twice.
+    completed_passkey_setup: Option<[u8; 32]>,
 }
+
+struct PendingPasskeySetup {
+    created: Instant,
+    attempts: u8,
+    in_flight: bool,
+}
+
+const PASSKEY_SETUP_TTL: Duration = Duration::from_secs(300);
+const PASSKEY_SETUP_ATTEMPTS: u8 = 3;
 
 impl Session {
     fn record(&self, key: &[u8; 32]) -> Option<SessionRecord> {
@@ -638,17 +658,39 @@ impl Broker {
             return Err(ApiError::Denied);
         }
         self.ensure_session_room().await?;
-        let mut secret = Zeroizing::new(String::with_capacity(responses[0].len() + responses[1].len()));
-        secret.push_str(&responses[0]);
-        secret.push_str(&responses[1]);
-        drop(responses);
+        let mut responses = responses.into_iter();
+        let password = responses.next().expect("validated password response");
+        let otp = responses.next().expect("validated OTP response");
+        let mut secret = Zeroizing::new(String::with_capacity(password.len() + otp.len()));
+        secret.push_str(&password);
+        secret.push_str(&otp);
+        drop(otp);
         let krb = self.d.krb.clone();
         let u = user.clone();
         let opts = self.login_options(&device);
         let res = tokio::task::spawn_blocking(move || krb.login(&u, &secret, opts))
             .await
             .unwrap_or_else(|_| Err(KrbError::Unavailable("login task panicked".into())));
-        self.finish_login(user, ip, m, res, device)
+        let mut reply = self.finish_login(user.clone(), ip, m, res, device)?;
+        // Only a fresh OTP proof can open this short-lived enrollment window.
+        // IPA still authorizes the mapping write as the user, not the broker.
+        let allowed = self
+            .d
+            .dir
+            .enrol_facts(&user)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|f| !f.disabled && f.auth_types.iter().any(|t| t == "passkey"));
+        if allowed && reply.device_bound {
+            let key = sha256(reply.session_token.as_bytes());
+            if let Some(session) = self.st.lock().unwrap().sessions.get_mut(&key) {
+                session.passkey_setup =
+                    Some(PendingPasskeySetup { created: self.now(), attempts: 0, in_flight: false });
+                reply.passkey_setup_available = true;
+            }
+        }
+        Ok(reply)
     }
 
     /// Passkey respond; `assertion` is `None` when the client's fields failed
@@ -766,6 +808,8 @@ impl Broker {
             proofs: HashMap::new(),
             persisted_last_used: unix,
             ports_used: Vec::new(),
+            passkey_setup: None,
+            completed_passkey_setup: None,
         };
         if let Some(rec) = session.record(&key) {
             if let Err(e) = self.d.sessions.save(&rec) {
@@ -784,6 +828,7 @@ impl Broker {
             expires_in: life,
             username: user,
             device_bound: bound,
+            passkey_setup_available: false,
         })
     }
 
@@ -887,6 +932,69 @@ impl Broker {
     pub async fn logout<'a>(&self, bearer: impl Into<Bearer<'a>>) -> Result<(), ApiError> {
         let (key, _, _) = self.session(bearer, ("POST", "/v1/logout")).await?;
         self.end_session(key, "logout").await;
+        Ok(())
+    }
+
+    /// Add a Secure Enclave public key after this session's fresh OTP login.
+    /// The bearer and device proof authorize the request; IPA performs the
+    /// actual write with the user's own Kerberos ticket. The broker's
+    /// service principal never gains directory write rights.
+    pub async fn setup_passkey<'a>(&self, bearer: impl Into<Bearer<'a>>, mapping: &str) -> Result<(), ApiError> {
+        let mapping = valid_passkey_mapping(mapping).ok_or(ApiError::BadRequest)?;
+        let (key, user, ccache) = self.session(bearer, ("POST", "/v1/passkeys/setup")).await?;
+        let mapping_hash = sha256(mapping.as_bytes());
+        {
+            let mut st = self.st.lock().unwrap();
+            let session = st.sessions.get_mut(&key).ok_or(ApiError::Unauthorized)?;
+            if session.completed_passkey_setup == Some(mapping_hash) {
+                return Ok(());
+            }
+            let setup = session.passkey_setup.as_mut().ok_or(ApiError::Denied)?;
+            if self.now().duration_since(setup.created) >= PASSKEY_SETUP_TTL
+                || setup.attempts >= PASSKEY_SETUP_ATTEMPTS
+                || setup.in_flight
+            {
+                return Err(ApiError::Denied);
+            }
+            setup.attempts += 1;
+            setup.in_flight = true;
+        }
+        let result = self.d.dir.add_passkey_with_ticket(&user, &ccache, &mapping).await;
+        let mut st = self.st.lock().unwrap();
+        if let Some(session) = st.sessions.get_mut(&key) {
+            if result.is_ok() {
+                session.passkey_setup = None;
+                session.completed_passkey_setup = Some(mapping_hash);
+            } else if let Some(setup) = session.passkey_setup.as_mut() {
+                setup.in_flight = false;
+                if setup.attempts >= PASSKEY_SETUP_ATTEMPTS {
+                    session.passkey_setup = None;
+                }
+            }
+        }
+        drop(st);
+        match result {
+            Ok(()) => {
+                self.audit("passkey_setup_added", json!({"user": user}));
+                Ok(())
+            }
+            Err(DirError::Rejected(reason)) => {
+                info!(user = %user, "passkey setup refused: {reason}");
+                Err(ApiError::Denied)
+            }
+            Err(error) => {
+                error!(user = %user, "passkey setup directory error: {error}");
+                Err(ApiError::Internal("directory"))
+            }
+        }
+    }
+
+    /// Declining the optional offer discards the password immediately.
+    pub async fn skip_passkey_setup<'a>(&self, bearer: impl Into<Bearer<'a>>) -> Result<(), ApiError> {
+        let (key, _, _) = self.session(bearer, ("POST", "/v1/passkeys/setup/skip")).await?;
+        if let Some(session) = self.st.lock().unwrap().sessions.get_mut(&key) {
+            session.passkey_setup = None;
+        }
         Ok(())
     }
 
@@ -1359,6 +1467,11 @@ impl Broker {
         let (expired, lapsed, renew) = {
             let mut st = self.st.lock().unwrap();
             st.conversations.retain(|_, c| now.duration_since(c.created) < conv_ttl);
+            for session in st.sessions.values_mut() {
+                if session.passkey_setup.as_ref().is_some_and(|p| now.duration_since(p.created) >= PASSKEY_SETUP_TTL) {
+                    session.passkey_setup = None;
+                }
+            }
             let expired: Vec<([u8; 32], &'static str)> =
                 st.sessions.iter().filter_map(|(k, s)| self.session_expired(s, unix).map(|r| (*k, r))).collect();
             let renew: Vec<([u8; 32], String)> = st
@@ -1460,6 +1573,8 @@ impl Broker {
                 proofs: HashMap::new(),
                 persisted_last_used: rec.last_used_unix,
                 ports_used: Vec::new(),
+                passkey_setup: None,
+                completed_passkey_setup: None,
             };
             if self.session_expired(&session, unix).is_some() {
                 self.d.krb.destroy(&session.ccache);
