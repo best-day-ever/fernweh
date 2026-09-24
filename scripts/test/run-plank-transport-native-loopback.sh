@@ -9,7 +9,7 @@ test_tmp=$(mktemp -d /tmp/plank-native-kyproto.XXXXXX)
 trap 'rm -rf -- "$test_tmp"' EXIT
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
-  -subj '/CN=localhost' \
+  -config "$repo_root/probes/macos/loopback-cert.cnf" \
   -keyout "$test_tmp/key.pem" \
   -out "$test_tmp/cert.pem" >/dev/null 2>&1
 openssl x509 -in "$test_tmp/cert.pem" -outform DER -out "$test_tmp/cert.der"
