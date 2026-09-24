@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$BuildDir,
     [Parameter(Mandatory = $true)][string]$QtRoot,
-    [Parameter(Mandatory = $true)][string]$OutputDir
+    [Parameter(Mandatory = $true)][string]$OutputDir,
+    [switch]$ReleaseCandidate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,8 +35,7 @@ $redist = Get-ChildItem (Join-Path $vsRoot 'VC/Redist/MSVC') -Directory |
 if (-not $redist) { throw 'MSVC x64 runtime files are missing' }
 Copy-Item (Join-Path $redist.FullName 'x64/Microsoft.VC143.CRT/*.dll') $OutputDir
 
-# Keep the development bundle explicit. SDL2 and Discord from the inherited
-# archive are not used by this BDE client.
+# SDL2 and Discord from the inherited archive are not used by this BDE client.
 $libraries = @(
     'avcodec-63.dll', 'avformat-63.dll', 'avutil-61.dll', 'dav1d.dll',
     'libcrypto-3-x64.dll', 'libplacebo-371.dll', 'libssl-3-x64.dll',
@@ -45,6 +45,25 @@ foreach ($library in $libraries) {
     $path = Join-Path $runtime $library
     if (-not (Test-Path $path)) { throw "Runtime dependency is missing: $path" }
     Copy-Item $path (Join-Path $OutputDir $library)
+}
+
+Copy-Item (Join-Path $sourceRoot 'apps/client/LICENSE') (Join-Path $OutputDir 'LICENSE.txt')
+Copy-Item (Join-Path $sourceRoot 'apps/client/h264bitstream/LICENSE') (Join-Path $OutputDir 'h264bitstream-LICENSE.txt')
+
+if ($ReleaseCandidate) {
+@'
+BDE fernweh Windows x64 UNSIGNED RELEASE CANDIDATE
+
+The client source is merged and a human test on RPBS_PROTAINE confirmed
+password/TOTP sign-in, desktop streaming and interactive input. Audio, Wacom,
+colour and multiple displays have not yet been accepted on Windows.
+
+This installer has no Authenticode signature and Windows may warn on install.
+An organization code-signing identity is required for a signed release.
+Windows Hello is deferred; sign in with password and TOTP.
+'@ | Set-Content -LiteralPath (Join-Path $OutputDir 'README.txt') -Encoding UTF8
+    Write-Host "Unsigned release candidate staged at $OutputDir"
+    return
 }
 
 @'
