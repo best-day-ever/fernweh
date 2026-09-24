@@ -198,6 +198,9 @@ Acceptance includes:
 
 - left/right modifiers, system shortcuts, NumLock state, keypad input, key
   repeat, and release of every held key at disconnect;
+- first connection accepts the first click in the video region; immersive
+  keyboard mode forwards Option-Tab and other ordinary shortcuts to the Host
+  while focused, and Ctrl+Alt+Shift+Z reliably releases it;
 - absolute mouse positioning, left/middle/right buttons, dragging, and wheel
   scrolling across Native and Scaled-Span presentation;
 - correct transforms with letterboxing, unequal Host/Client resolutions,

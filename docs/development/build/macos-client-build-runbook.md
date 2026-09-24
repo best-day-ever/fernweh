@@ -145,6 +145,14 @@ the app to Trash. Host installation/permissions are separate and unchanged.
   return without an intervening click, not just the first connected shortcut.
   Ctrl+Alt+Shift+Z remains the release toggle; mouse/trackpad gestures, Fn/media
   controls and explicit menu/Dock Quit stay local. Keys are never logged.
+  Immersive keyboard mode is a separate Mac setting. It forwards Fernweh's
+  ordinary shortcut combinations while the stream window has focus and forces
+  system shortcut capture for that session. Ctrl+Alt+Shift+Z exits immersive
+  mode for the current session; the saved setting applies again on the next
+  connection. macOS protected shortcuts and local gestures remain local.
+  A first press in the video region also activates capture when initial
+  activation is still pending. If a press cannot be positioned or queued,
+  the Client logs a bounded warning without key or pointer contents.
   The `mackeyboardcapture` native suite exercises the production callback and
   bounded queue without installing an OS tap or requesting permission. It is
   not proof of live TCC, Command-Tab/Command-Space or Spaces behavior: test the
