@@ -27,8 +27,9 @@ The later request broadened this review to a coordinated `1.1.001` Client,
 Linux Host, macOS Host and transport candidate. The branch now includes the
 upstream PAM deadline, RaptorQ 2, microphone, macOS Host, trust, keyboard,
 clipboard and takeover work, with BDE's existing broker admission and display
-policy retained. This branch is still a candidate until its package, protocol,
-Rocky 9.7 and macOS Host gates pass.
+policy retained. Native Mac and Rocky package/protocol gates passed, followed
+by a brokered GSSAPI desktop stream on BDE canary. The macOS Host privileged
+cross-UID fixture and a live Mac Host target remain open acceptance items.
 
 Two upstream feature assignments conflicted with BDE's already allocated wire
 bits. Virtual primary now uses `0x10000000` because `0x2000000` belongs to
