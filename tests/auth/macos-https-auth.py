@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Loopback TLS/auth qualification. Synthetic credentials only by default."""
 import argparse
+from contextlib import contextmanager
 import getpass
 import hashlib
 import http.client
@@ -40,16 +41,59 @@ class ResponseBytes:
         return io.BytesIO(self.value)
 
 
+def read_framed_reply(process, timeout=7):
+    """Consume Content-Length like Qt, not EOF from openssl's terminal client."""
+    deadline = time.monotonic() + timeout
+    data = bytearray()
+    total = None
+    while total is None or len(data) < total:
+        remaining = deadline - time.monotonic()
+        assert remaining > 0 and select.select([process.stdout], [], [], remaining)[0], "TLS response timed out"
+        chunk = os.read(process.stdout.fileno(), 65536)
+        assert chunk, "TLS response ended before its complete Content-Length body"
+        data.extend(chunk)
+        assert len(data) <= 65536, "oversized fixture reply"
+        if total is None and b"\r\n\r\n" in data:
+            head, _ = data.split(b"\r\n\r\n", 1)
+            sizes = re.findall(rb"(?im)^Content-Length: ([0-9]+)\r?$", head)
+            assert len(sizes) == 1 and int(sizes[0]) <= 60000
+            total = len(head) + 4 + int(sizes[0])
+    assert len(data) == total, "unexpected trailing response bytes"
+    return bytes(data)
+
+
+@contextmanager
+def exchange(tls, port, message):
+    # -quiet otherwise implies -ign_eof. Keep stdin OPEN until the entire
+    # reply is read, then actively close TLS as the product HTTP client does.
+    process = subprocess.Popen(tls_command(tls, port) + ["-no_ign_eof"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+    try:
+        process.stdin.write(message)
+        process.stdin.flush()
+        yield process, read_framed_reply(process)
+    finally:
+        if process.stdin:
+            process.stdin.close()
+            process.stdin = None
+        try:
+            process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=3)
+            raise AssertionError("TLS client did not close after consuming its reply")
+
+
 def request(tls, port, body, path="/plank/auth/start", raw=None, xml=False):
     encoded = json.dumps(body).encode()
     message = raw if raw is not None else (
         f"POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"
         f"Content-Length: {len(encoded)}\r\n\r\n".encode() + encoded
     )
-    result = subprocess.run(tls_command(tls, port), input=message, capture_output=True, timeout=7)
-    if result.returncode:
-        raise AssertionError(f"TLS request failed (exit {result.returncode}): " + result.stderr.decode(errors="replace")[-1000:])
-    reply = http.client.HTTPResponse(ResponseBytes(result.stdout))
+    with exchange(tls, port, message) as (process, response):
+        pass
+    assert process.returncode == 0, f"TLS request failed (exit {process.returncode})"
+    reply = http.client.HTTPResponse(ResponseBytes(response))
     reply.begin()
     assert reply.getheader("Cache-Control") == "no-store"
     assert reply.getheader("Connection") == "close"
@@ -108,7 +152,7 @@ def authenticate(tls, port, username, password, encoding_mode="hevc-10-420-video
     raw = ("GET /plank/topology HTTP/1.1\r\nHost: localhost\r\n"
            "Authorization: Bearer " + token + "\r\n\r\n").encode()
     status, topology = request(tls, port, {}, raw=raw)
-    assert status == 200 and topology["schema_version"] == 13 and topology["feature_flags"] == 3670129
+    assert status == 200 and topology["schema_version"] == 13 and topology["feature_flags"] == 12091505
     capture = topology["capture"]
     assert 2 <= capture["width"] <= 8192 and capture["width"] % 2 == 0
     assert 2 <= capture["height"] <= 8192 and capture["height"] % 2 == 0
@@ -124,7 +168,7 @@ def authenticate(tls, port, username, password, encoding_mode="hevc-10-420-video
 
 def preview(tls, port, token, topology, receiver, media, seconds=3):
     capture = topology["capture"]
-    body = {"schema_version": 2, "capture_generation": topology["generation"], "capture_id": capture["id"],
+    body = {"schema_version": 4, "clipboard": False, "microphone": False, "capture_generation": topology["generation"], "capture_id": capture["id"],
             "width": capture["width"], "height": capture["height"], "encoding_mode": "hevc-10-420-videotoolbox",
             "frame_rate": 60, "bitrate_kbps": 50000, "max_udp_payload_size": 1200}
 
@@ -173,12 +217,57 @@ def preview(tls, port, token, topology, receiver, media, seconds=3):
             assert launch(body, token)[0] == 401
             token, _ = authenticate(tls, port, "synthetic", "test")
     status, reply = launch(body, token)
-    assert status == 200 and reply["schema_version"] == 2 and reply["state"] == "connecting"
+    assert status == 200 and reply["schema_version"] == 4 and reply["state"] == "connecting"
     assert reply["udp_port"] == port and reply["max_udp_payload_size"] == 1200
     assert reply["capture"] == capture and reply["transport_token"] != token
-    assert reply["services"] == {"audio": True, "input": True, "pen": "normalized", "cursor": "embedded"}
+    assert reply["services"] == {"audio": True, "input": True, "pen": "normalized", "cursor": "embedded", "clipboard": False, "microphone": False}
     assert launch(body, token)[0] == 401  # one-use HTTP token, before QUIC activation
     assert launch({"schema_version": 3, "width": 1920, "height": 1080, "scale": 1, "encoding_mode": "hevc-10-420-videotoolbox"}, token, "/plank/display")[0] == 401
+    if not media:
+        fingerprint = hashlib.sha256(Path(tls).with_name("cert.der").read_bytes()).hexdigest()
+        old = subprocess.Popen([str(receiver), fingerprint, "--wait-takeover"],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            old.stdin.write(json.dumps(reply).encode())
+            old.stdin.close()
+            assert select.select([old.stdout], [], [], 7)[0], "takeover receiver did not start"
+            assert old.stdout.readline() == b"takeover_receiver_ready=1\n"
+            replacement, original = authenticate(tls, port, "synthetic", "test")
+            change = dict(mode, width=1920, height=1080)
+            status, conflict = launch(change, replacement, "/plank/display")
+            assert status == 409 and conflict["error"] == "session_active"
+            session_id = conflict["session_id"]
+            assert str(uuid.UUID(session_id)) == session_id
+            # Cancel/no consent performs no mutation and does not revoke setup.
+            assert launch(change, replacement, "/plank/display") == (status, conflict)
+            assert old.poll() is None
+            status, stale = launch(dict(change, takeover_session_id=str(uuid.uuid4())), replacement, "/plank/display")
+            assert status == 409 and stale["error"] == "session_changed"
+            assert old.poll() is None
+            replacement, original = authenticate(tls, port, "synthetic", "test")
+            assert original == topology
+            status, resized = launch(dict(change, takeover_session_id=session_id), replacement, "/plank/display")
+            assert status == 200 and resized["capture"]["width"] == 1920
+            assert old.wait(timeout=7) == 0
+            assert old.stdout.read() == b"takeover_receiver_terminal=1\n"
+            # A fresh login from the displaced peer cannot invalidate the
+            # reserved setup or silently reclaim the display, even behind NAT.
+            competitor, _ = authenticate(tls, port, "synthetic", "test")
+            assert launch(change, competitor, "/plank/display")[0] == 409
+            new_body = dict(body, capture_generation=resized["generation"],
+                            width=1920, height=1080)
+            assert launch(new_body, competitor)[0] == 409
+            status, replacement_reply = launch(new_body, replacement)
+            assert status == 200
+            result = subprocess.run([str(receiver), fingerprint, "--no-media"],
+                                    input=json.dumps(replacement_reply).encode(), capture_output=True, timeout=15)
+            assert result.returncode == 0, "replacement stream failed"
+            print("macos_takeover=pass real_tls=1 real_quic=1 cancel_unchanged=1 same_peer_reservation=1 new_geometry=1")
+            return
+        finally:
+            if old.poll() is None:
+                old.terminate()
+                old.wait(timeout=5)
     fingerprint = hashlib.sha256(tls.with_name("cert.der").read_bytes()).hexdigest()
     command = [str(receiver), fingerprint] + (["--seconds", str(seconds)] if media else ["--no-media"])
     # No launch/transport credential in argv, environment, files or diagnostics.
@@ -334,6 +423,51 @@ def synthetic(executable, config, receiver=None):
             # TemporaryDirectory removes only this test's exact ephemeral fixtures.
 
 
+def machine_authority_chain(executable, config):
+    """Exercise the real Network.framework chain, without installed Host state."""
+    with tempfile.TemporaryDirectory(prefix="plank-https-chain-") as temporary:
+        stage = Path(temporary)
+        root = stage / "machine"
+        root.mkdir(mode=0o700)
+        create_identity(root, config)
+        create_identity(stage, config)  # Independent worker key, not the root key.
+        (stage / "authority.der").write_bytes((root / "cert.der").read_bytes())
+        (stage / "leaf.cnf").write_text("basicConstraints=critical,CA:FALSE\n"
+            "keyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n")
+        def crypto(arguments):
+            subprocess.run(["openssl", *arguments], cwd=stage, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        crypto(["req", "-new", "-key", "key.pem", "-subj", "/CN=PLANK worker", "-out", "worker.csr"])
+        crypto(["x509", "-req", "-in", "worker.csr", "-CA", "machine/cert.pem", "-CAkey", "machine/key.pem",
+                "-set_serial", "123", "-days", "1", "-sha256", "-extfile", "leaf.cnf", "-out", "cert.pem"])
+        crypto(["x509", "-in", "cert.pem", "-outform", "DER", "-out", "cert.der"])
+        process = subprocess.Popen([str(executable), temporary], stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+        try:
+            assert select.select([process.stdout], [], [], 10)[0], "Chain listener readiness timed out"
+            match = re.fullmatch(r"macos_https_auth_ready port=(\d+) desktop_active=1\n", process.stdout.readline())
+            assert match, "Chain listener not ready"
+            port = int(match[1])
+            command = tls_command(root / "cert.pem", port)
+            command.remove("-quiet")
+            result = subprocess.run(command + ["-showcerts", "-no_ign_eof"], input=b"",
+                                    capture_output=True, timeout=7)
+            assert result.returncode == 0, "Worker TLS chain handshake failed"
+            certificates = re.findall(rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", result.stdout, re.S)
+            expected = [(stage / "cert.pem").read_bytes().strip(), (root / "cert.pem").read_bytes().strip()]
+            assert certificates == expected, "Host did not send exactly worker leaf then machine authority"
+            discovery(root / "cert.pem", port)
+            authenticate(root / "cert.pem", port, "synthetic", "test")
+            print("macos_https_machine_chain=pass leaf_then_authority=1 authenticated_control=1")
+        finally:
+            process.terminate()
+            try:
+                process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=3)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", type=Path)
@@ -359,6 +493,7 @@ def main():
         if not args.server or not args.config:
             parser.error("Synthetic suite requires --server and --config")
         synthetic(args.server, args.config, args.preview_receiver)
+        machine_authority_chain(args.server, args.config)
 
 
 if __name__ == "__main__":

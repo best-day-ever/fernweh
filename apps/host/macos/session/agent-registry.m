@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #import "agent-registry.h"
+#import "machine-identity.h"
 #import "../auth/boot-sign-in.h"
 #import <Security/Security.h>
 #import <Security/AuthSession.h>
@@ -50,6 +51,8 @@ NSString *PLANKMacOwnSigningRequirement(void) {
 @property PLANKMacAgentLease *lease;
 @property uint64_t sequence, created;
 @property BOOL closed, retired;
+@property BOOL identityRequested;
+@property uint64_t identityDeadline;
 @end
 @implementation PLANKMacAgentLink
 @end
@@ -63,6 +66,8 @@ NSString *PLANKMacOwnSigningRequirement(void) {
     PLANKMacAgentLink *_current;
     dispatch_source_t _watch;
     BOOL _stopped;
+    BOOL _issuing;
+    dispatch_queue_t _identityQueue;
 }
 
 - (instancetype)init { return nil; }
@@ -78,6 +83,7 @@ NSString *PLANKMacOwnSigningRequirement(void) {
     if (!self) return nil;
     _queue = queue; _requirement = [requirement copy]; _scope = [scope copy]; _event = [event copy];
     _links = [NSMutableArray array];
+    _identityQueue = dispatch_queue_create("la.instinctual.PLANK.Host.identity-issuer", DISPATCH_QUEUE_SERIAL);
     __weak typeof(self) weakSelf = self;
     _watch = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
     dispatch_source_set_timer(_watch, DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC, 25 * NSEC_PER_MSEC);
@@ -86,8 +92,10 @@ NSString *PLANKMacOwnSigningRequirement(void) {
         if (!owner) return;
         [owner refresh];
         uint64_t now = clock_gettime_nsec_np(CLOCK_MONOTONIC);
-        for (PLANKMacAgentLink *link in owner->_links.copy)
-            if (!link.lease && now - link.created >= 5 * NSEC_PER_SEC) [owner close:link];
+        for (PLANKMacAgentLink *link in owner->_links.copy) {
+            if (!link.lease && (link.identityRequested ? now >= link.identityDeadline :
+                    now - link.created >= 5 * NSEC_PER_SEC)) [owner close:link];
+        }
     });
     dispatch_resume(_watch);
     return self;
@@ -123,6 +131,8 @@ static BOOL word(xpc_object_t message, const char *key, uint64_t *value) {
 
 - (void)receive:(xpc_object_t)message link:(PLANKMacAgentLink *)link {
     if (link.closed || _stopped) return;
+    // A certificate request is one-shot, never a route into a graphical lease.
+    if (link.identityRequested) { [self close:link]; return; }
     if (xpc_get_type(message) != XPC_TYPE_DICTIONARY) { [self close:link]; return; }
     // Reject one-way calls before claiming an exclusive slot or mutating it.
     xpc_object_t response = xpc_dictionary_create_reply(message);
@@ -130,6 +140,47 @@ static BOOL word(xpc_object_t message, const char *key, uint64_t *value) {
     uint64_t version = 0, operation = 0;
     if (!word(message, "version", &version) || version != 1 || !word(message, "operation", &operation)) {
         [self close:link]; return;
+    }
+    if (operation == 5) {
+        // A separate short-lived connection obtains only a certificate, not a
+        // graphical lease. The kernel and signing requirement identify its
+        // caller; a network request cannot choose a UID, key path or authority.
+        size_t length = 0;
+        const void *bytes = xpc_dictionary_get_data(message, "csr", &length);
+        PLANKMacAgentPeer peer = {xpc_connection_get_euid(link.connection),
+            xpc_connection_get_pid(link.connection), (uint32_t)xpc_connection_get_asid(link.connection)};
+        if (link.lease || link.identityRequested || _issuing || !self.issueIdentity ||
+            xpc_dictionary_get_count(message) != 3 || !bytes || !length || length > 16384 ||
+            !peer.uid || _scope(peer) != PLANKMacAgentDesktop) { [self close:link]; return; }
+        link.identityRequested = YES;
+        link.identityDeadline = clock_gettime_nsec_np(CLOCK_MONOTONIC) + PLANK_MAC_IDENTITY_LINK_NS;
+        _issuing = YES;
+        NSData *csr = [NSData dataWithBytes:bytes length:length];
+        NSDictionary<NSString *, NSData *> *(^issue)(NSData *) = self.issueIdentity;
+        dispatch_async(_identityQueue, ^{
+            NSDictionary<NSString *, NSData *> *issued = issue(csr);
+            dispatch_async(self->_queue, ^{
+                self->_issuing = NO;
+                if (link.closed || self->_stopped) return;
+                if (clock_gettime_nsec_np(CLOCK_MONOTONIC) >= link.identityDeadline) { [self close:link]; return; }
+                if (self->_scope(peer) != PLANKMacAgentDesktop || issued.count != 3) { [self close:link]; return; }
+                for (NSString *name in @[@"certificate", @"der", @"authority"]) {
+                    NSData *value = issued[name];
+                    if (![value isKindOfClass:NSData.class] || !value.length || value.length > 16384) {
+                        [self close:link]; return;
+                    }
+                    xpc_dictionary_set_data(response, name.UTF8String, value.bytes, value.length);
+                }
+                xpc_dictionary_set_uint64(response, "version", 1);
+                xpc_dictionary_set_uint64(response, "status", 0);
+                xpc_connection_send_message(link.connection, response);
+                // A send barrier drains this sender, not the receiving client's
+                // reply handler. Cancelling here can race a valid reply into an
+                // XPC error. The caller closes after consuming it; abandoned
+                // one-shot links retain their bounded issuance/reply expiry.
+            });
+        });
+        return;
     }
     if (operation == 1) { // Register: no caller-supplied UID/PID/audit session.
         uint64_t phase = 0;
@@ -213,6 +264,15 @@ static BOOL word(xpc_object_t message, const char *key, uint64_t *value) {
 - (void)refresh {
     dispatch_assert_queue(_queue);
     if (_current.lease.active && _scope(_current.lease.peer) != _current.lease.phase) [self revoke];
+}
+- (BOOL)admitsDesktopPeer:(PLANKMacAgentPeer)peer generation:(uint64_t)generation {
+    dispatch_assert_queue(_queue);
+    [self refresh];
+    PLANKMacAgentLease *lease = _current.lease;
+    return !_stopped && lease.active && lease.phase == PLANKMacAgentDesktop &&
+        generation && lease.generation == generation && peer.uid != 0 &&
+        lease.peer.uid == peer.uid && lease.peer.pid == peer.pid &&
+        lease.peer.auditSession == peer.auditSession;
 }
 - (void)revoke {
     dispatch_assert_queue(_queue);

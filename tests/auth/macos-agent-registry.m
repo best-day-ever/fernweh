@@ -3,6 +3,7 @@
 // No media, input, credentials, persistent service or discoverable Mach endpoint.
 #import "agent-registry.h"
 #import "agent-connection.h"
+#import "machine-identity.h"
 #import <Security/AuthSession.h>
 #include <unistd.h>
 
@@ -20,14 +21,17 @@ static xpc_object_t message(uint64_t operation, uint64_t generation, uint64_t se
     }
     return value;
 }
-static xpc_object_t request(xpc_connection_t peer, xpc_object_t value) {
+static xpc_object_t timedRequest(xpc_connection_t peer, xpc_object_t value, uint64_t timeout) {
     dispatch_semaphore_t ready = dispatch_semaphore_create(0);
     __block xpc_object_t response = nil;
     xpc_connection_send_message_with_reply(peer, value, dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^(xpc_object_t reply) {
         response = reply; dispatch_semaphore_signal(ready);
     });
-    if (dispatch_semaphore_wait(ready, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) return nil;
+    if (dispatch_semaphore_wait(ready, dispatch_time(DISPATCH_TIME_NOW, timeout))) return nil;
     return response;
+}
+static xpc_object_t request(xpc_connection_t peer, xpc_object_t value) {
+    return timedRequest(peer, value, 3 * NSEC_PER_SEC);
 }
 static BOOL status(xpc_object_t reply, uint64_t expected) {
     return reply && xpc_get_type(reply) == XPC_TYPE_DICTIONARY &&
@@ -123,7 +127,58 @@ static BOOL until(Fixture *f, BOOL (^predicate)(void)) {
     return NO;
 }
 
+static void identityTests(NSString *requirement) {
+    // Certificate issuance is independent of the exclusive graphical lease.
+    // Use signed anonymous XPC and synthetic scope; never create machine keys.
+    for (unsigned scenario = 0; scenario < 5; ++scenario) {
+        Fixture *fixture = [[Fixture alloc] initWithNative:NO requirement:requirement];
+        __weak Fixture *weakFixture = fixture;
+        __block unsigned issuedCount = 0;
+        dispatch_sync(fixture.queue, ^{
+            fixture.registry.issueIdentity = ^NSDictionary<NSString *, NSData *> *(NSData *csr) {
+                ++issuedCount;
+                Fixture *current = weakFixture;
+                if (scenario == 3 && current) dispatch_sync(current.queue, ^{ current.allowed = NO; });
+                return @{@"certificate": csr, @"der": csr, @"authority": csr};
+            };
+        });
+        // Match PLANKMacAuthorizeDesktopIdentity: this is a one-shot request,
+        // not a graphical lease. An interruption may race the queued reply;
+        // leave cancellation to the caller after consuming that reply.
+        xpc_connection_t peer = [fixture inactiveClient];
+        CHECK(!xpc_connection_set_peer_code_signing_requirement(peer, requirement.UTF8String));
+        xpc_connection_set_event_handler(peer, ^(xpc_object_t event) { (void)event; });
+        xpc_connection_activate(peer);
+        xpc_object_t csrRequest = xpc_dictionary_create(NULL, NULL, 0);
+        xpc_dictionary_set_uint64(csrRequest, "version", 1);
+        xpc_dictionary_set_uint64(csrRequest, "operation", 5);
+        NSData *csr = [@"synthetic-public-csr" dataUsingEncoding:NSUTF8StringEncoding];
+        xpc_dictionary_set_data(csrRequest, "csr", csr.bytes, csr.length);
+        if (scenario == 1) xpc_dictionary_set_uint64(csrRequest, "uid", getuid());
+        if (scenario == 2) xpc_dictionary_set_string(csrRequest, "csr", "wrong-type");
+        if (scenario == 4) dispatch_sync(fixture.queue, ^{ fixture.allowed = NO; });
+        xpc_object_t reply = request(peer, csrRequest);
+        if (status(reply, 0) != (scenario == 0 && getuid() != 0))
+            fprintf(stderr, "identity scenario=%u reply=%s\n", scenario,
+                !reply ? "timeout" : xpc_get_type(reply) == XPC_TYPE_ERROR ? "xpc-error" : "dictionary");
+        CHECK(status(reply, 0) == (scenario == 0 && getuid() != 0));
+        if (status(reply, 0)) {
+            CHECK(xpc_dictionary_get_count(reply) == 5);
+            CHECK(!xpc_dictionary_get_value(reply, "generation"));
+            CHECK(!xpc_dictionary_get_value(reply, "key"));
+            CHECK(!status(request(peer, message(1, 0, 0)), 0));
+        }
+        CHECK(until(fixture, ^BOOL { return fixture.attached == 0; }));
+        dispatch_sync(fixture.queue, ^{
+            CHECK(issuedCount == ((scenario == 0 || scenario == 3) && getuid() != 0 ? 1u : 0u));
+            fixture.registry.issueIdentity = nil;
+        });
+        [fixture close]; xpc_connection_cancel(peer);
+    }
+}
+
 static void connectionTests(NSString *requirement) {
+    identityTests(requirement);
     @autoreleasepool {
         Fixture *f = [[Fixture alloc] initWithNative:NO requirement:requirement];
         for (unsigned invalid = 0; invalid < 3; ++invalid) {
@@ -212,12 +267,51 @@ static void connectionTests(NSString *requirement) {
     }
 }
 
+static void delayedIdentityTests(NSString *requirement) {
+    // Exercise the actual XPC registry beyond its former five-second idle
+    // expiry. No graphical lease or production identity files are involved.
+    if (!getuid()) return;
+    for (unsigned scenario = 0; scenario < 2; ++scenario) {
+        Fixture *fixture = [[Fixture alloc] initWithNative:NO requirement:requirement];
+        __weak Fixture *weakFixture = fixture;
+        dispatch_sync(fixture.queue, ^{
+            fixture.registry.issueIdentity = ^NSDictionary<NSString *, NSData *> *(NSData *csr) {
+                usleep(6000000);
+                // Scope lost during issuance must still fail closed.
+                if (scenario == 1) {
+                    Fixture *current = weakFixture;
+                    dispatch_sync(current.queue, ^{ current.allowed = NO; });
+                }
+                return @{@"certificate": csr, @"der": csr, @"authority": csr};
+            };
+        });
+        xpc_connection_t peer = [fixture client];
+        xpc_object_t value = xpc_dictionary_create(NULL, NULL, 0);
+        xpc_dictionary_set_uint64(value, "version", 1);
+        xpc_dictionary_set_uint64(value, "operation", 5);
+        xpc_dictionary_set_data(value, "csr", "fixture", 7);
+        xpc_object_t reply = timedRequest(peer, value, PLANK_MAC_IDENTITY_REPLY_NS);
+        CHECK(status(reply, 0) == (scenario == 0));
+        CHECK(until(fixture, ^BOOL { return fixture.attached == 0; }));
+        xpc_connection_cancel(peer);
+        [fixture close];
+    }
+    puts("agent_identity_delayed_reply=pass");
+}
+
 int main(int argc, const char **argv) {
     BOOL native = argc == 1;
-    if (argc != 1 && (argc != 2 || strcmp(argv[1], "--synthetic"))) return 2;
-    alarm(60); setbuf(stdout, NULL);
+    BOOL identityOnly = argc == 2 && !strcmp(argv[1], "--identity-only");
+    if (argc != 1 && !identityOnly && (argc != 2 || strcmp(argv[1], "--synthetic"))) return 2;
+    alarm(90); setbuf(stdout, NULL);
     @autoreleasepool {
         NSString *requirement = PLANKMacOwnSigningRequirement(); CHECK(requirement.length > 0);
+        if (identityOnly) {
+            for (unsigned i = 0; i < 100; ++i) identityTests(requirement);
+            delayedIdentityTests(requirement);
+            printf("agent_identity_checks=%u result=0\n", checks);
+            return 0;
+        }
         CHECK(PLANKMacObserveAgentScope((PLANKMacAgentPeer){0}) == PLANKMacAgentUnavailable);
         CHECK(PLANKMacObserveAgentScope((PLANKMacAgentPeer){(uid_t)-1, getpid(), 1}) == PLANKMacAgentUnavailable);
         CHECK(PLANKMacObserveAgentScope((PLANKMacAgentPeer){getuid(), getpid(), UINT32_MAX}) == PLANKMacAgentUnavailable);
@@ -257,12 +351,25 @@ int main(int argc, const char **argv) {
         xpc_connection_t peer = [f client]; xpc_object_t reply = request(peer, message(1, 0, 0));
         CHECK(status(reply, 0)); uint64_t generation = xpc_dictionary_get_uint64(reply, "generation"); CHECK(generation != 0);
         CHECK(until(f, ^BOOL { return f.attached == 1; }));
+        dispatch_sync(f.queue, ^{
+            PLANKMacAgentPeer actual = f.lease.peer;
+            CHECK([f.registry admitsDesktopPeer:actual generation:generation] == (actual.uid != 0));
+            CHECK(![f.registry admitsDesktopPeer:actual generation:0]);
+            CHECK(![f.registry admitsDesktopPeer:actual generation:generation ^ 1]);
+            PLANKMacAgentPeer other = actual; other.pid++;
+            CHECK(![f.registry admitsDesktopPeer:other generation:generation]);
+            other = actual; other.auditSession++;
+            CHECK(![f.registry admitsDesktopPeer:other generation:generation]);
+            other = actual; other.uid++;
+            CHECK(![f.registry admitsDesktopPeer:other generation:generation]);
+        });
         CHECK(status(request(peer, message(2, generation, 1)), 0));
         __block BOOL completed;
         dispatch_sync(f.queue, ^{ completed = [f.registry completeRetirement:f.lease]; }); CHECK(!completed);
         xpc_connection_t contender = [f client]; CHECK(status(request(contender, message(1, 0, 0)), 1));
         dispatch_sync(f.queue, ^{ f.allowed = NO; [f.registry refresh]; f.allowed = YES; [f.registry refresh]; });
         CHECK(until(f, ^BOOL { return f.revoked == 1 && !f.lease.active; }));
+        dispatch_sync(f.queue, ^{ CHECK(![f.registry admitsDesktopPeer:f.lease.peer generation:generation]); });
         CHECK(status(request(peer, message(2, generation, 2)), 2));
         CHECK(status(request(contender, message(1, 0, 0)), 1)); // Scope recovery cannot revive or replace.
         CHECK(status(request(peer, message(3, generation, 3)), 2));

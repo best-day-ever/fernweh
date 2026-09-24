@@ -322,6 +322,11 @@ int32_t plank_transport_native_video_send(
 int32_t plank_transport_native_set_video_bitrate(
         PlankTransportNativeEndpoint *endpoint, uint32_t bitrate_kbps,
         uint32_t peak_bitrate_kbps);
+/* Native video/audio/input receives validate output storage and claim exactly
+ * one queued item atomically, then copy its payload outside the queue lock.
+ * BUFFER_TOO_SMALL reports the required size without consuming the item;
+ * metadata is written only on OK. A later video/audio overflow may still
+ * evict an unclaimed item before a caller retries with a larger buffer. */
 int32_t plank_transport_native_video_receive(
         PlankTransportNativeEndpoint *endpoint,
         PlankTransportNativeVideoFrameInfo *info,
@@ -332,11 +337,31 @@ int32_t plank_transport_native_audio_send(
         PlankTransportNativeEndpoint *endpoint,
         const PlankTransportNativeAudioPacketInfo *info,
         const uint8_t *payload, size_t payload_size);
+/* Audio hole notifications have size zero; payload may be NULL in that case. */
 int32_t plank_transport_native_audio_receive(
         PlankTransportNativeEndpoint *endpoint,
         PlankTransportNativeAudioPacketInfo *info,
         uint8_t *payload, size_t payload_capacity,
         size_t *payload_size_out, uint32_t timeout_ms);
+
+/* Optional Client -> Host mono 48 kHz/480-frame Opus lane. Enable on BOTH
+ * peers only after authenticated capability agreement; never for a Linux
+ * Host lacking microphone injection. Capture waits for Host activation ACK.
+ * State: 0 unavailable, 1 opening, 2 ready, 3 failed. Microphone lane failure
+ * does not terminate ordinary video/output-audio/input. No new socket.
+ * Activation generations increase per connection. Zero mutes and flushes;
+ * prior generations can never be reactivated. Maximum Opus packet: 1275 bytes.
+ * Send queue: 2 packets; receive queue: 8; queued packets expire after 100 ms.
+ * Receive is nonblocking; BUFFER_TOO_SMALL preserves the queued packet.
+ * Owner must still reject stale generations at its final decode/inject boundary.
+ */
+int32_t plank_transport_native_microphone_enable(PlankTransportNativeEndpoint *endpoint);
+uint32_t plank_transport_native_microphone_state(const PlankTransportNativeEndpoint *endpoint);
+int32_t plank_transport_native_microphone_activate(PlankTransportNativeEndpoint *endpoint, uint64_t generation);
+int32_t plank_transport_native_microphone_send(PlankTransportNativeEndpoint *endpoint,
+        uint64_t generation, uint64_t sample_time, const uint8_t *payload, size_t payload_size);
+int32_t plank_transport_native_microphone_receive(PlankTransportNativeEndpoint *endpoint,
+        uint64_t *generation, uint64_t *sample_time, uint8_t *payload, size_t capacity, size_t *size_out);
 
 int32_t plank_transport_native_input_send(
         PlankTransportNativeEndpoint *endpoint, uint8_t type,
@@ -346,6 +371,10 @@ int32_t plank_transport_native_input_receive(
         uint8_t *payload, size_t payload_capacity,
         size_t *payload_size_out, uint32_t timeout_ms);
 
+/* Reliable data payloads are 1..1048576 bytes. Each direction is bounded to
+ * 64 queued packets AND 8 MiB of payload. Send pressure returns TIMEOUT without
+ * enqueueing; incoming overflow fails the endpoint without evicting records.
+ * A short receive buffer leaves the pending record queued for a retry. */
 int32_t plank_transport_native_data_send(
         PlankTransportNativeEndpoint *endpoint,
         const uint8_t *payload, size_t payload_size);
@@ -378,8 +407,13 @@ int32_t plank_transport_native_file_data_receive(
 int32_t plank_transport_native_endpoint_stats(
         const PlankTransportNativeEndpoint *endpoint,
         PlankTransportNativeStats *stats);
+/* Stop cancels establishment, setup/promotion and streaming, then joins the
+ * worker. It does not wait for the handshake timeout. Hosts retain a bounded
+ * (up to one second) QUIC close drain. Repeated stop calls are safe; failure
+ * state and its original error are preserved. */
 int32_t plank_transport_native_endpoint_stop(
         PlankTransportNativeEndpoint *endpoint);
+/* Destroy includes stop. No other call may use this pointer during/after it. */
 void plank_transport_native_endpoint_destroy(
         PlankTransportNativeEndpoint *endpoint);
 size_t plank_transport_native_endpoint_last_error(

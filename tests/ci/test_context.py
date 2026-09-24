@@ -34,7 +34,9 @@ class ContextTests(unittest.TestCase):
 
     def test_worktree_and_explicit_path_contract(self):
         with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
+            # macOS exposes /var through /private/var; compare canonical paths
+            # just as the production context writer does.
+            base = Path(directory).resolve()
             source = base / 'checkout'
             source.mkdir()
             subprocess.run(['git', 'init', '-q', str(source)], check=True)
@@ -65,6 +67,14 @@ class ContextTests(unittest.TestCase):
         actions = re.findall(r'uses: ([^\s]+)', workflow)
         self.assertTrue(actions)
         for action in actions:
+            if action == './.github/actions/dependency-cache':
+                # Local code is pinned by the checked-out root commit. Its
+                # external actions must obey the same immutable-SHA policy.
+                composite = (ROOT / '.github/actions/dependency-cache/action.yml').read_text()
+                self.assertNotIn('secrets.', composite)
+                for nested in re.findall(r'uses: ([^\s]+)', composite):
+                    self.assertRegex(nested, r'@([0-9a-f]{40})$')
+                continue
             self.assertRegex(action, r'@([0-9a-f]{40})$')
         self.assertEqual(workflow.count('actions/checkout@'), workflow.count('persist-credentials: false'))
 

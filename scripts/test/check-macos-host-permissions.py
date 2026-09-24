@@ -14,13 +14,14 @@ REQUIRED_APP = {
     "Contents/_CodeSignature/CodeResources",
 }
 APP = "Applications/PLANK Host.app"
+DRIVER = "Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver"
 
 
 def expected_mode(name, directory, app_only=False):
     if directory:
         return "drwxr-xr-x"
     relative = name if app_only else name.removeprefix(APP + "/")
-    return "-rwxr-xr-x" if relative in EXECUTABLES else "-rw-r--r--"
+    return "-rwxr-xr-x" if relative in EXECUTABLES or name == DRIVER + "/Contents/MacOS/plank-microphone" else "-rw-r--r--"
 
 
 def check_records(records, app_only=False):
@@ -30,6 +31,8 @@ def check_records(records, app_only=False):
         "Library/LaunchDaemons/la.instinctual.PLANK.Host.machine.plist",
         "Library/LaunchAgents/la.instinctual.PLANK.Host.desktop.plist",
         "Library/LaunchAgents/la.instinctual.PLANK.Host.sign-in.plist",
+        DRIVER, DRIVER + "/Contents/Info.plist", DRIVER + "/Contents/MacOS/plank-microphone",
+        DRIVER + "/Contents/_CodeSignature/CodeResources",
     } | {APP + "/" + name for name in REQUIRED_APP})
     missing = required - records.keys()
     if missing:
@@ -37,6 +40,15 @@ def check_records(records, app_only=False):
     for name, mode in records.items():
         if PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts:
             raise ValueError("unsafe package entry")
+        # pkgbuild on macOS 27 may materialize extended attributes as AppleDouble
+        # companions in the BOM. They must belong to an ordinary packaged file
+        # and carry exactly its mode; never let them excuse a missing payload.
+        parent, _, basename = name.rpartition("/")
+        if basename.startswith("._"):
+            companion = f"{parent}/{basename[2:]}" if parent else basename[2:]
+            if records.get(companion) != mode:
+                raise ValueError(f"{name}: invalid AppleDouble companion")
+            continue
         expected = expected_mode(name, mode.startswith("d"), app_only)
         if mode != expected:
             raise ValueError(f"{name}: permissions {mode}, expected {expected}")

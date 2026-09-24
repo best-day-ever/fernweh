@@ -21,15 +21,21 @@ on the dedicated Mac. Read `docs/development/plans/macos-installer.plan` for unc
 The destination Mac needs neither Python nor developer tools. The package owns
 the app payload at `/Applications/PLANK Host.app` and three system launchd
 entries. Bash pre/post-install scripts create administrator configuration,
-private identity and logs. Private state is not a payload and survives uninstall.
+private identity and administrator-readable system logs. Private state is not a
+payload and survives uninstall.
 There is no compiled installer helper or persistent installation service.
 Prepare/validate persistent state and logs in preinstall, before worker shutdown.
 The .82 real install found root-owned logs changed to directory0744/files0644;
 the postinstall-only strict mode check stopped after replacing the app. The
-installer now narrows safe existing log permissions to0700/0600, preserving
-contents, and rejects foreign owners, links and objects writable by non-root before
-shutdown. Do not use recursive chmod/chown or weaken private-key checks.
-The isolated filesystem test reproduces this exact permission drift.
+installer validates existing logs before shutdown, preserves their contents,
+and sets `/Library/Logs/PLANK` to root:admin mode0750 and its machine/sign-in
+logs to root:admin mode0640. Administrators can read these logs without sudo;
+only root can write, and other users have no access. Upgrades apply the same
+policy to previously root-only logs. Foreign owners, links and objects writable
+by non-root remain rejected. Do not use recursive chmod/chown or weaken
+private-key checks. Per-user `~/Library/Logs/PLANK` remains0700/files0600.
+The isolated filesystem test covers clean creation, permission drift, upgrade
+from0700/0600, unchanged contents/private keys, and unsafe-object rejection.
 All three launchd definitions must carry `AssociatedBundleIdentifiers` pointing
 to `la.instinctual.PLANK.Host`. Otherwise Background App Activity falls back to
 the signing certificate's publisher name rather than PLANK Host. Keep the
@@ -110,6 +116,31 @@ TTY before starting; the runner uses `sudo -n launchctl asuser CONSOLE_UID`
 only for this fixture. Compilation and signing remain unprivileged. It posts
 no input and changes no TCC settings or services. Do not skip the test, change
 the console login, or rebuild dependencies to work around the session boundary.
+
+### Opt-in capture frame timing
+
+Detailed ScreenCaptureKit/VideoToolbox frame tracing is disabled by default.
+For an authorized diagnostic, set `PLANK_MACOS_FRAME_TIMING=1` in the capture
+worker's process environment before starting it, then start a new stream.
+Only the exact value `1` enables tracing; unset, empty, `0` and other values
+leave it disabled. This is a runtime diagnostic, not a build option, Client
+preference or encoder setting. An export in an SSH shell does not modify an
+already-running launchd worker; configure the actual graphical worker's launch
+environment, not the machine coordinator or account verifier. Do not interrupt
+an active session to enable it without operator approval.
+
+The setting is sampled once per capture session. Enabled traces retain at most
+8,192 numeric records from the first 120 seconds, with no frame content. They
+are dumped to the worker's existing product log only after capture callbacks
+have drained. The existing `scripts/test/analyze-macos-frame-timing.py` consumes
+that format. Remove the diagnostic environment setting and restart the worker
+afterward; do not ship it enabled in a launchd definition.
+
+Default operation allocates no detailed trace buffer, performs no trace-only
+timestamp sampling and emits no frame-timing dump. Normal error logging and
+the compact `PLANK capture summary` remain enabled. The Host build runs
+`tests/video/macos-frame-timing.c` to check default-off/invalid values, explicit
+opt-in, silent disabled output, bounded recording and unchanged dump format.
 
 ### Non-prompting permission qualification
 
@@ -451,32 +482,33 @@ The rejected .54/.55 submission-batching implementation, feature and extra
 Quinn wrapper vendor tree have been removed. Historical source commits and
 measurements remain in the sender-drain investigation; do not reuse their build
 commands for a current candidate. The qualified source-first path below retains
-ordinary single-datagram submission and the tested Mac application-pacer bypass.
+ordinary single-datagram submission. The application datagram pacer is now
+deleted, not merely bypassed.
 
-For .53 source-first FEC qualification, use `PLANK_MACOS_SOURCE_FIRST=1`.
-This includes the .51 fast-send/timing experiment and enables source-first
-packet submission only on macOS. The wire format, repair count and library's
+For source-first FEC qualification, use `PLANK_MACOS_SOURCE_FIRST=1`.
+This includes sender timing and enables source-first packet submission. The repair count and library's
 repair encoder remain unchanged. The runner additionally checks byte-identical
 source packets against the retained RaptorQ library, multi-block/sub-block
 padding, recovery at 0/5/10/20% omitted sources, and preparation timing. The
 timing test is synthetic CPU preparation, not a network/performance gate.
-Keep the .51 archive and signed app for comparison; Client .52 stays unchanged.
+RaptorQ 2 changes repair IDs and the native QUIC protocol identifier; matching
+Host and Client packages are required. See the native transport contract.
 
-For the user-authorized combined sender experiment (.51), use
-`PLANK_MACOS_FAST_SEND=1` instead. This selects `macos-fast-send`, which includes
-sender timing. On macOS only, it passes no application datagram pacer to either
-server path and floors the rate-derived Quinn window budget at 1 Gbps. This is
+All Host builds use the shared sender policy: submit directly to Quinn and
+floor the rate-derived window budget at 1 Gbps. This is
 not an encoder bitrate, a measured link capacity, or a strict wire-rate cap;
 Quinn still schedules transmission. Encoder settings, FEC and queue capacities
-are unchanged. Keep this archive separate from the baseline. The feature is
-off by default and must not become a release default without live acceptance.
+are unchanged by pacer removal. The `PLANK_MACOS_FAST_SEND` switch and
+`macos-fast-send`/`linux-fast-send` Cargo features have been removed; there is
+no alternate paced baseline. Linux and macOS use the same sender budget policy.
 Check receiver loss as well as sender drain: immediate submission can move
-drops downstream. This experiment does not qualify the Linux sender.
+drops downstream. A Linux source-first transport test does not qualify native
+macOS capture, encoding, playback or package signing.
 
 For the explicitly authorized sender-drain diagnostic only, set
 `PLANK_MACOS_SENDER_TIMING=1` before `build-macos-transport.sh`. It selects the
-compile-time `sender-timing` feature (off by default), retaining ABI12 and the
-same wire/pacing/FEC policy. Build a separate verified archive; do not overwrite
+compile-time `sender-timing` feature (off by default), retaining the current ABI
+and wire/FEC policy. Build a separate verified archive; do not overwrite
 the retained baseline archive. Numeric measurements are future-local, capped at
 8192 frames/120seconds, and flushed only after worker join into existing stderr
 product logging. No runtime preference, extra listener, Client change or live
@@ -670,7 +702,7 @@ Current expectation is 403 checks/15 scenarios. Include `apps/host/macos/session
 sources as well as the `apps/host/macos/input`
 headers/sources, `tests/input/macos-fake-input.{h,m}`, `plank_transport_input.h`,
 `plank_transport_control.h`, both media modules and
-`tests/protocol/macos-preview-launch-v2.json` in standalone staged inputs.
+`tests/protocol/macos-preview-launch-v4.json` in standalone staged inputs.
 This is not a new transport-library build. Each lifecycle test remains bounded.
 
 The four added scenarios connect real anonymous XPC admission to the actual

@@ -11,11 +11,10 @@ crate-type = ["staticlib", "rlib"]
 [features]
 default = []
 quinn-bbr = ["quinn-proto/plank-bbr-default"]
-quinn-telemetry = ["quinn-proto/plank-telemetry"]
+quinn-telemetry = ["kynet/quinn-telemetry"]
 sender-timing = ["kynet/sender-timing", "kyproto/sender-timing"]
-# Temporary combined experiment; ordinary Linux/Mac builds are unchanged.
-macos-fast-send = ["sender-timing"]
-macos-source-first = ["macos-fast-send", "kyproto/source-first-fec"]
+# Source-first FEC selection used by the macOS Host; no alternate pacing mode.
+macos-source-first = ["sender-timing", "kyproto/source-first-fec"]
 
 [dependencies]
 anyhow = "1.0"
@@ -29,6 +28,10 @@ ring = "0.17"
 rustls = { version = "0.23.31", default-features = false, features = ["logging", "std", "tls12"] }
 subtle = "2.6"
 tokio = { version = "1.47", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+socket2 = "0.6"
 
 [patch.crates-io]
 # Keep the same narrowly repaired Quinn release shared by production and the

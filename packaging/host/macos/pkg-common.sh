@@ -8,6 +8,7 @@ umask 077
 ulimit -c 0
 
 app='/Applications/PLANK Host.app'
+microphone_driver='/Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver'
 executable="$app/Contents/MacOS/plank-host"
 state='/Library/Application Support/PLANK'
 logs='/Library/Logs/PLANK'
@@ -59,6 +60,15 @@ verify_app() {
         requirement+=' or certificate leaf[field.1.2.840.113635.100.6.1.12] exists'
     fi
     /usr/bin/codesign --verify --strict --all-architectures -R "=$requirement)" "$app"
+}
+
+verify_microphone_driver() {
+    safe_directory "$microphone_driver"
+    safe_file "$microphone_driver/Contents/Info.plist" 644
+    safe_file "$microphone_driver/Contents/MacOS/plank-microphone" 755
+    /usr/bin/codesign --verify --strict --all-architectures \
+        -R "=identifier \"la.instinctual.PLANK.Microphone\" and anchor apple generic and certificate leaf[subject.OU] = \"$team\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" \
+        "$microphone_driver"
 }
 
 job_path() {
@@ -198,11 +208,12 @@ preflight() {
     safe_directory /Library/LaunchAgents
     verify_jobs
     if present "$app"; then verify_app yes; fi
+    if present "$microphone_driver"; then verify_microphone_driver; fi
     if present "$state"; then safe_directory "$state"; check_configuration; fi
 }
 
-# Validate every existing log before changing anything. Repair read/search
-# permission drift only on root-owned, non-writable-by-others product objects;
+# Validate every existing log before changing anything. Allow administrator
+# reads, with root-only writes, only on root-owned product objects;
 # never follow links, chmod recursively, or take ownership of someone else's file.
 prepare_logs() {
     local name mode
@@ -216,14 +227,18 @@ prepare_logs() {
                 (( (8#$mode & 07022) == 0 )) || fail "Unsafe log permissions: $logs/$name"
             fi
         done
-        /bin/chmod 700 "$logs"
+    else
+        ensure_directory "$logs" 700
     fi
-    ensure_directory "$logs" 700
     for name in host-machine.log host-sign-in.log; do
         if ! present "$logs/$name"; then (set -C; : > "$logs/$name"); fi
-        /bin/chmod 600 "$logs/$name"
-        safe_file "$logs/$name" 600
+        /usr/sbin/chown root:admin "$logs/$name"
+        /bin/chmod 640 "$logs/$name"
+        safe_file "$logs/$name" 640
     done
+    /usr/sbin/chown root:admin "$logs"
+    /bin/chmod 750 "$logs"
+    ensure_directory "$logs" 750
 }
 
 initialize_state() {
@@ -241,8 +256,10 @@ initialize_state() {
     fi
     if ! present "$state/SignIn"; then
         stage=$(/usr/bin/mktemp -d "$state/.identity.XXXXXX")
-        /usr/bin/openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 \
-            -subj '/CN=PLANK Host' -addext subjectAltName=DNS:plank-host \
+        /usr/bin/openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 \
+            -subj '/CN=PLANK Host Machine' -addext subjectAltName=DNS:plank-host \
+            -addext basicConstraints=critical,CA:TRUE,pathlen:0 \
+            -addext keyUsage=critical,digitalSignature,keyCertSign \
             -keyout "$stage/initial.pem" -out "$stage/cert.pem"
         /usr/bin/openssl rsa -in "$stage/initial.pem" -out "$stage/key.pem"
         /usr/bin/openssl rsa -in "$stage/key.pem" -outform DER -out "$stage/key.der"
@@ -253,4 +270,35 @@ initialize_state() {
     fi
     check_configuration
     prepare_logs
+}
+
+# Run after the old roles have stopped. Upgrade/renew the certificate, not the
+# machine key: Client trust is an SPKI fingerprint, independent of expiry,
+# certificate serial and which user currently owns the desktop.
+prepare_machine_authority() {
+    local certificate="$state/SignIn/cert.pem" key="$state/SignIn/key.pem" stage text key_public cert_public
+    check_configuration
+    # Validate the retained key even when the certificate looks current. A
+    # damaged key must never trigger silent replacement of the machine identity.
+    /usr/bin/openssl rsa -in "$key" -check -noout >/dev/null 2>&1 || fail 'Invalid machine identity key; it was not replaced'
+    key_public=$(/usr/bin/openssl rsa -in "$key" -noout -modulus 2>/dev/null)
+    cert_public=$(/usr/bin/openssl x509 -in "$certificate" -noout -modulus 2>/dev/null) || cert_public=''
+    text=$(/usr/bin/openssl x509 -in "$certificate" -noout -text 2>/dev/null) || text=''
+    if [[ $text = *'CA:TRUE, pathlen:0'* && $text = *'PLANK Host Machine'* ]] &&
+        /usr/bin/openssl x509 -in "$certificate" -noout -checkend 2592000 >/dev/null 2>&1 &&
+        /usr/bin/openssl verify -CAfile "$certificate" "$certificate" >/dev/null 2>&1 &&
+        [[ -n $key_public && $key_public = "$cert_public" ]] &&
+        /usr/bin/cmp -s <(/usr/bin/openssl x509 -in "$certificate" -outform DER) "$state/SignIn/cert.der"; then
+        return
+    fi
+    stage=$(/usr/bin/mktemp -d "$state/SignIn/.renew.XXXXXX")
+    /usr/bin/openssl req -new -x509 -key "$key" -sha256 -days 3650 \
+        -subj '/CN=PLANK Host Machine' -addext subjectAltName=DNS:plank-host \
+        -addext basicConstraints=critical,CA:TRUE,pathlen:0 \
+        -addext keyUsage=critical,digitalSignature,keyCertSign -out "$stage/cert.pem"
+    /usr/bin/openssl x509 -in "$stage/cert.pem" -outform DER -out "$stage/cert.der"
+    /bin/chmod 600 "$stage/cert.pem" "$stage/cert.der"
+    /bin/mv "$stage/cert.pem" "$certificate"
+    /bin/mv "$stage/cert.der" "$state/SignIn/cert.der"
+    /bin/rmdir "$stage"
 }

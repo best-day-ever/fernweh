@@ -18,7 +18,39 @@ int main(int argc, char** argv)
     const auto values = QJsonDocument::fromJson(input.readAll()).object();
     NvHTTP http(NvAddress(QStringLiteral("127.0.0.1"), static_cast<quint16>(port)));
     const bool busy = mode == QLatin1String("auth-busy");
-    if (!busy) http.setPlankSessionToken(values.value("token").toString());
+    const bool auth = mode.startsWith(QLatin1String("auth-"));
+    const bool unknown = mode == QLatin1String("auth-first") || mode == QLatin1String("auth-recovery-unknown");
+    // Trust only the out-of-band certificate supplied by this synthetic test
+    // fixture. No product bypass or trusting the network leaf after sending.
+    const auto identity = HostTlsGuard::identityKey({QSslCertificate(values.value("certificate").toString().toUtf8())});
+    const QString endpoint = HostTrustStore::endpoint(QUrl(QString("https://127.0.0.1:%1").arg(port)));
+    if (!unknown && HostTrustStore().check(endpoint, identity, true).status != HostTrustStore::Status::Trusted) return 2;
+    if (!auth) http.setPlankSessionToken(values.value("token").toString(), identity);
+    if (auth && !busy) {
+        int prompts = 0;
+        const bool accept = mode == QLatin1String("auth-replace-accept");
+        if (mode.startsWith(QLatin1String("auth-replace-")))
+            http.setTrustPrompt([&](const HostIdentityChangedException& change) {
+                ++prompts;
+                return accept && change.previousKey == identity && change.replacementKey.size() == 32;
+            });
+        try {
+            const auto result = http.authenticate(QStringLiteral("synthetic"), QStringLiteral("fixture-password"), nullptr,
+                mode.startsWith(QLatin1String("auth-recovery-")) ? NvHTTP::AuthenticationIntent::Recovery :
+                                                                 NvHTTP::AuthenticationIntent::ExplicitConnection);
+            if (mode != QLatin1String("auth-first") && mode != QLatin1String("auth-recovery-known") && !accept) return 1;
+            if (result != values.value("token").toString() || prompts != (accept ? 1 : 0)) return 1;
+            if (HostTrustStore().check(endpoint, http.hostIdentityKey()).status != HostTrustStore::Status::Trusted) return 1;
+        } catch (const QtNetworkReplyException& error) {
+            const auto expected = mode == QLatin1String("auth-replace-cancel") ?
+                QNetworkReply::OperationCanceledError : QNetworkReply::SslHandshakeFailedError;
+            if (mode != QLatin1String("auth-replace-cancel") && mode != QLatin1String("auth-changed") &&
+                mode != QLatin1String("auth-recovery-unknown") && mode != QLatin1String("auth-mid-change")) return 1;
+            if (error.getError() != expected || prompts != (mode == QLatin1String("auth-replace-cancel") ? 1 : 0)) return 1;
+        }
+        std::puts("client_authentication_trust=pass");
+        return 0;
+    }
     try {
         if (busy) { http.authenticate(QStringLiteral("synthetic"), QStringLiteral("test")); return 1; }
         QString pin;
@@ -53,8 +85,10 @@ int main(int argc, char** argv)
         if (error.toQString().contains(QStringLiteral("do-not-log-this-response"))) return 1;
         try { http.getOutputTopology(); return 1; }
         catch (const GfeHttpResponseException& consumed) { if (consumed.getStatusCode() != 400) return 1; }
-    } catch (const QtNetworkReplyException&) {
-        if (mode != QLatin1String("timeout")) return 1;
+    } catch (const QtNetworkReplyException& error) {
+        const bool tlsFailure = mode == QLatin1String("wrong-pin") || mode == QLatin1String("certificate-swap");
+        if (mode != QLatin1String("timeout") && !tlsFailure) return 1;
+        if (tlsFailure && error.getError() != QNetworkReply::SslHandshakeFailedError) return 1;
         try { http.getOutputTopology(); return 1; }
         catch (const GfeHttpResponseException& consumed) { if (consumed.getStatusCode() != 400) return 1; }
     }

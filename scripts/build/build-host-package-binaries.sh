@@ -88,9 +88,18 @@ done
 cargo metadata --locked --offline --no-deps \
   --format-version 1 \
   --manifest-path "${plank_transport_dir}/Cargo.toml" >/dev/null
+# The vendored Quinn tests use a separate archive and are never linked into
+# the packaged Host. They cover exact DATAGRAM boundaries and owned telemetry.
+CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offline \
+  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+  --lib connection::datagrams::plank_tests
+CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offline \
+  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+  --features plank-telemetry \
+  --lib tests::plank_telemetry_snapshot_is_owned_and_preserves_queue_counters -- --exact
 rg -q '^#define PLANK_TRANSPORT_ABI_VERSION 14u$' \
   "${plank_transport_dir}/include/plank_transport.h" || {
-  echo "host requires PLANK transport ABI 13" >&2
+  echo "host requires PLANK transport ABI 14" >&2
   exit 1
 }
 rg -Fq 'uint32_t max_udp_payload_size;' \
@@ -490,13 +499,25 @@ echo "host_auth_group_absence_gate=pass"
 
 # Exercise the actual Unix descriptor protocol before producing a package;
 # source-token checks alone cannot detect FD leaks or ancillary truncation.
+# This includes the production PAM header and must use the Host's C++23 mode.
 mkdir -p "$build_dir/plank-security-tests"
 /opt/rh/gcc-toolset-14/root/usr/bin/g++ \
-  -std=c++20 -Wall -Wextra -Wpedantic -Werror -pthread \
+  -std=c++23 -Wall -Wextra -Wpedantic -Werror -pthread \
   -I"$source_dir/src" "$repo_dir/tests/session/test-pam-broker-channel.cpp" \
   -o "$build_dir/plank-security-tests/pam-broker-channel-test"
 "$build_dir/plank-security-tests/pam-broker-channel-test"
 echo "host_pam_delegation_protocol_gate=pass"
+
+# Compile actual PAM client/manager/broker sources and exercise stalled peers,
+# concurrency, cancellation and worker cleanup without touching a real account.
+# Keep this gate active even though the shipped payload has BUILD_TESTS=OFF.
+cmake -S "$repo_dir/tests/session/pam" -B "$build_dir/cmake-build-pam-hardening" \
+  -DCMAKE_CXX_COMPILER=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
+  -DPLANK_BOOST_SOURCE_DIR="$boost_source_dir" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build "$build_dir/cmake-build-pam-hardening" --parallel "$build_jobs"
+ctest --test-dir "$build_dir/cmake-build-pam-hardening" --output-on-failure
+echo "host_pam_deadline_isolation_gate=pass"
 
 # A fatal X-server disconnect must not run NVIDIA atexit handlers from the
 # cursor/capture thread while the encoder is still alive.
@@ -1100,6 +1121,28 @@ env \
   -DPLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features"
 cmake --build "$build_dir" --parallel "$build_jobs" \
   --target sunshine plank-pam-broker plank-host-supervisor pam_plank_handoff
+
+# Exercise the exact compiled transport policy, including real FEC/UDP and
+# active/setup-promoted C ABI paths. BUILD_TESTS=OFF above is for the Host's
+# hardware-dependent C++ suite, not permission to skip transport qualification.
+(
+  export CARGO_TARGET_DIR="$build_dir/plank-transport-cargo"
+  # Qualify the shipping policy. There is no alternate application-paced mode.
+  cargo test --locked --offline --release --features "$plank_transport_cargo_features" \
+    --manifest-path "$plank_transport_dir/Cargo.toml"
+  PLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features" SC_NATIVE_CARGO_PROFILE=release \
+    bash "$repo_dir/scripts/test/run-plank-transport-native-loopback.sh"
+  PLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features" \
+    bash "$repo_dir/scripts/test/run-plank-transport-native-ffi-loopback.sh"
+)
+echo "host_transport_policy_loopback_gate=pass features=$plank_transport_cargo_features"
+
+rg -a -Fq 'PLANK sender: controller-budget-floor-bps=1000000000' \
+  "$build_dir/plank-host" || {
+  echo "host binary is missing the shared sender budget policy" >&2
+  exit 1
+}
+echo "host_send_budget_binary_gate=pass"
 
 nm -C "$build_dir/plank-host" | \
   rg ' [Tt] plank_transport_abi_version$' >/dev/null || {

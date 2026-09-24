@@ -13,10 +13,47 @@ source "$source_root/scripts/build/build-paths.sh"
 plank_build_path_flags "$source_root" "$output"
 mkdir "$output"
 cd "$source_root"
+for component in buffer driver; do
+    xcrun clang -std=c11 -O2 -mmacosx-version-min=27.0 -Wall -Wextra -Werror \
+        -Iapps/host/macos/audio-device "tests/audio/macos-microphone-$component.c" \
+        -framework CoreAudio -framework CoreFoundation -o "$output/microphone-$component-test"
+    "$output/microphone-$component-test"
+done
+xcrun clang -std=c11 -O2 -mmacosx-version-min=27.0 -Wall -Wextra -Werror \
+    -Iapps/host/macos/media tests/audio/macos-microphone-decoder.c \
+    -framework AudioToolbox -o "$output/microphone-decoder-test"
+"$output/microphone-decoder-test"
+xcrun clang -O2 -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+    tests/audio/macos-microphone-selection.m -framework Foundation -framework CoreAudio \
+    -o "$output/microphone-selection-test"
+"$output/microphone-selection-test"
+bash "$source_root/scripts/test/build-macos-agent-registry.sh" "$source_root" "$output/agent-registry-tests"
+xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+    -Iapps/host/macos/session tests/auth/macos-machine-identity.m \
+    -framework Foundation -framework Security -o "$output/machine-identity-test"
+"$output/machine-identity-test"
 bash "$source_root/scripts/test/build-macos-display-recovery.sh" "$source_root" "$output/display-recovery-tests"
 bash "$source_root/scripts/test/build-macos-input.sh" "$source_root" "$output/input-tests" "$archive"
 bash "$source_root/scripts/test/build-macos-preview.sh" "$source_root" "$output/preview-tests" "$archive" --synthetic-only
+bash "$source_root/scripts/test/build-macos-native-video.sh" "$source_root" "$output/session-tests" "$archive" --session-only
+xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+    -Iapps/host/macos/auth apps/host/macos/auth/graphical-authority.m \
+    apps/host/macos/auth/authentication-session.m tests/auth/macos-graphical-authority-lifecycle.m \
+    -framework Foundation -framework AppKit -framework CoreGraphics -framework Security \
+    -framework SystemConfiguration -o "$output/graphical-lifecycle-test"
+"$output/graphical-lifecycle-test"
+xcrun clang -std=c11 -mmacosx-version-min=27.0 -Wall -Wextra -Werror \
+    -Iapps/host/macos/media tests/auth/macos-stream-diagnostics.c -o "$output/stream-diagnostics-test"
+"$output/stream-diagnostics-test"
 python3 "$source_root/tests/packaging/test-macos-host-permissions.py"
+xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+    -DPLANK_CLIPBOARD_TEST_PASTEBOARD -Iapps/host/macos/media -Iprotocol/plank-transport/include \
+    apps/host/macos/media/clipboard-sync.m tests/input/macos-clipboard.m \
+    -framework Foundation -framework AppKit -o "$output/clipboard-test"
+"$output/clipboard-test"
+xcrun clang -std=c11 -Wall -Wextra -Werror -Iprotocol/plank-transport/include \
+    tests/protocol/clipboard-wire.c -o "$output/clipboard-wire-test"
+"$output/clipboard-wire-test"
 xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
     -Iapps/host/macos/input -Iprotocol/plank-transport/include \
     apps/host/macos/input/input-events.m tests/input/macos-pen-events.m \
@@ -47,6 +84,10 @@ xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
     -Iapps/host/macos/session tests/auth/macos-desktop-start.m apps/host/macos/session/desktop-start.m \
     -framework Foundation -framework SystemConfiguration -o "$output/desktop-start-test"
 "$output/desktop-start-test"
+xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+    -Iapps/host/macos/session tests/auth/macos-desktop-start-scheduling.m \
+    -framework Foundation -framework SystemConfiguration -o "$output/desktop-start-scheduling-test"
+"$output/desktop-start-scheduling-test"
 xcrun clang -std=c11 -mmacosx-version-min=27.0 -Wall -Wextra -Werror \
     -Iapps/host/macos/media tests/audio/macos-audio-tap-buffer.c -o "$output/audio-tap-buffer-test"
 "$output/audio-tap-buffer-test"
@@ -88,11 +129,14 @@ sources=(apps/host/macos/auth/authentication-session.m apps/host/macos/auth/grap
     apps/host/macos/auth/account-verifier.m apps/host/macos/auth/account-channel.m
     apps/host/macos/control/http-request.m apps/host/macos/control/server-information.m
     apps/host/macos/control/fixed-capture.m apps/host/macos/control/desktop-display.m apps/host/macos/control/https-auth-server.m
-    apps/host/macos/media/native-video.m apps/host/macos/media/preview-session.m apps/host/macos/media/screen-capture.m
+    apps/host/macos/media/native-video.m apps/host/macos/media/preview-session.m apps/host/macos/media/clipboard-sync.m apps/host/macos/media/screen-capture.m
     apps/host/macos/media/native-audio.m apps/host/macos/media/opus-encoder.m apps/host/macos/media/audio-tap.m
+    apps/host/macos/media/microphone-session.m
+    apps/host/macos/audio-device/microphone-broker.m apps/host/macos/audio-device/microphone-producer.m
+    apps/host/macos/audio-device/microphone-selection.m
     apps/host/macos/input/input-events.m apps/host/macos/input/native-input.m apps/host/macos/input/quartz-input.m
     apps/host/macos/session/agent-registry.m apps/host/macos/session/agent-connection.m
-    apps/host/macos/session/desktop-provisioning.m apps/host/macos/session/desktop-start.m
+    apps/host/macos/session/desktop-provisioning.m apps/host/macos/session/machine-identity.m apps/host/macos/session/desktop-start.m
     apps/host/macos/session/host-runtime.m apps/host/macos/session/host-main.m)
 xcrun clang "${common[@]}" "-DPLANK_MACOS_HOST_VERSION=\"$PLANK_MACOS_HOST_VERSION\"" \
     "${sources[@]}" "$archive" -lpthread -lm -o "$output/plank-host"
@@ -146,6 +190,20 @@ shasum -a 256 "$archive" "$output/plank-host"
     codesign --force --sign "$signing_identity" "${signing_flags[@]}" \
         --identifier la.instinctual.PLANK.Host "$app"
     codesign --verify --strict "$app"
+    driver="$output/PLANK Microphone.driver"
+    mkdir -p "$driver/Contents/MacOS"
+    install -m 0644 packaging/host/macos/microphone-info.plist "$driver/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${PLANK_MACOS_HOST_VERSION%%-*}" "$driver/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${PLANK_MACOS_HOST_VERSION%%-*}" "$driver/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :AudioServerPlugIn_MachServices array' "$driver/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :AudioServerPlugIn_MachServices:0 string la.instinctual.PLANK.Host.microphone-driver' "$driver/Contents/Info.plist"
+    xcrun clang "${PLANK_FILE_FLAGS[@]}" -std=c11 -O2 -mmacosx-version-min=27.0 \
+        -Wall -Wextra -Werror -fblocks -fvisibility=hidden -DPLANK_MICROPHONE_IPC -bundle \
+        apps/host/macos/audio-device/microphone-driver.c -framework CoreAudio -framework CoreFoundation \
+        -o "$driver/Contents/MacOS/plank-microphone"
+    strip -S "$driver/Contents/MacOS/plank-microphone"
+    codesign --force --sign "$signing_identity" "${signing_flags[@]}" "$driver"
+    codesign --verify --strict "$driver"
     python3 "$source_root/scripts/test/check-macos-host-permissions.py" --app "$app"
     shasum -a 256 "$app/Contents/MacOS/plank-host"
 )

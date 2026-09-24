@@ -39,6 +39,7 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x2000000` — NvFBC 8-bit source into direct NVENC 4:2:0 (`h264-8-420-nvenc`, `hevc-10-420-nvenc`), BT.709 limited range (Linux Host)
 - `0x4000000` — notch-safe Apple laptop virtual modes (`3024x1890`); see the allowlist below (Linux Host)
 - `0x8000000` — display arrangements: up to four desktop outputs of any size in client positions, with host-resolved physical/virtual backing; see "Display arrangement extension" (Linux Host)
+- `0x10000000` — negotiated virtual primary connector order (Linux Host)
 
 ### Expected desktop handoff status
 
@@ -134,7 +135,7 @@ The document contains a monotonically changing `generation`, the bounding
 desktop rectangle, a `layout` object, and an `outputs` array. `layout.kind` is
 `physical`, `single`, or `dual-horizontal`; `layout.virtual_modes` is empty for
 a physical layout, contains one administrator-qualified mode for `single`, and
-contains the independently ordered primary/secondary modes for
+contains the independently ordered left/right modes for
 `dual-horizontal`. `layout.startup_kind` reports the concrete boot topology:
 `physical`, or `single` for the safe 1920x1080 baseline created by the
 administrator's `virtual` policy. `layout.allowed_kinds` explicitly lists the
@@ -235,6 +236,28 @@ replacement display and media state. The displaced client disables automatic
 reconnect and reports that its session was transferred. No Host OS logout
 occurs, so the user's desktop and applications remain running.
 
+### Virtual connector order (optional `0x10000000`)
+
+On a virtual-startup Host, a Client negotiating `0x10000000` may send
+`plankPrimaryOutput=0` or `1` for a dual-horizontal layout. The index refers
+to the requested left/right mode order. The Host places its first virtual
+connector (`DP-0`, shown as PLK Display 1) on that side and marks it primary.
+This lets applications that choose the first connector, including Flame,
+open on the same screen as the Mac primary display. The Client only sends the
+hint when its local displays map one-to-one to the requested horizontal virtual
+outputs. Manual bookmarks omit it for mismatched display counts or ambiguous
+layouts; they do not reject the connection or clamp an unrelated display index.
+This hint does not change client presentation scaling. Omitting the index keeps
+the earlier DP-0-left behavior. A single-output request accepts only `0`;
+unnegotiated or out-of-range values are rejected.
+
+GDM preparation and live XRandR transitions use the same assignment. The Host
+reports virtual modes in desktop left/right order, regardless of connector
+enumeration. Manual two-output bookmarks retain their selected mode sizes;
+the optional index changes connector placement only. Host worker and supervisor
+use private `SC-DISPLAY-4` messages and must be updated together. The
+right-primary topology vector is `output-topology-v13-virtual-primary.json`.
+
 ## Launch and Input Rules
 
 The host rejects an unsupported protocol version, unnegotiated feature bits,
@@ -260,9 +283,10 @@ schema.
 The `macos-host` work adds `FixedCaptureFeature = 0x80000` within schema 13.
 This is a distinct fixed-capture description, **not** permission to relax the
 existing Linux topology requirements. Its exact current feature mask is
-`3670129` (`0x380071`): fixed capture, Mac desktop preparation, Mac encoding-profile
+`12091505` (`0xb88071`): fixed capture, Mac desktop preparation, Mac encoding-profile
 selection (`0x200000`), output topology, topology generation,
-layout metadata and composite source geometry. All other bits are rejected
+layout metadata, composite source geometry, clipboard and explicit session
+takeover (`0x8000`). All other bits are rejected
 for this preview. It is deliberately excluded from the Client's Linux
 `SupportedFeatureFlags` launch mask.
 
@@ -284,7 +308,7 @@ no virtual modes; Linux bookmark layout changes are not allowed for it.
 
 `MacDesktopPreparationFeature = 0x100000` additionally requires authenticated
 `POST /plank/display` before constructing a streaming session. The exact JSON
-request is `{ "schema_version": 2, "width": 3840, "height": 2160,
+request is `{ "schema_version": 3, "width": 3840, "height": 2160, "scale": 1,
 "encoding_mode": "hevc-10-444-videotoolbox" }`; numeric values
 are integral, never booleans, and must identify a qualified bookmark mode.
 The Client first fetches authenticated topology to pin the certificate, then
@@ -296,7 +320,22 @@ the profile changes the topology generation even at unchanged dimensions.
 The Client rejects mismatched dimensions or profile and
 uses the returned geometry before video/window/input initialization. Preparing
 a display does not consume the authentication bearer; stream launch still does.
-An active stream rejects preparation (409); authority loss rejects it (401), and
+An active stream rejects preparation with HTTP409 and
+`{"state":"conflict","error":"session_active","session_id":"<UUID>"}`.
+The opaque non-secret stream identity binds consent to this exact stream.
+The peer-bound setup token remains valid without renewing its expiry. Cancel
+does not change the active stream. After explicit confirmation the Client may
+repeat the request with `takeover_session_id` equal to that identity. A stale
+identity returns409/`session_changed`; a different account cannot take over,
+including at LoginWindow. Both verified UID and account UUID must match.
+The Host drains normal input/capture/encoder/QUIC teardown before changing
+geometry. An approved setup has a 15-second reservation through launch, so a
+displaced peer cannot race the replacement, including behind a shared NAT.
+The displaced Client receives the existing terminal session-transfer notice;
+automatic reconnect also treats an active-stream conflict as terminal and
+never requests takeover. Interactive confirmation runs outside the GUI thread
+and expires after two minutes; CLI connections never implicitly take over.
+Authority loss rejects preparation (401), and
 an unavailable/failed mode returns 503 without starting a differently sized stream.
 
 The desktop agent owns one virtual display for its whole process lifetime and

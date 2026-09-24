@@ -2,6 +2,7 @@
 // Experimental native Host entry point. No fixture verifier, expiry alarm or
 // loopback-only replacement server. Installation/signing remains a release gate.
 #import "host-runtime.h"
+#import "../audio-device/microphone-broker.h"
 #import "agent-connection.h"
 #import "graphical-authority.h"
 #import "fixed-capture.h"
@@ -9,6 +10,7 @@
 #import "screen-capture.h"
 #include "permission-status.h"
 #import "desktop-provisioning.h"
+#import "machine-identity.h"
 #import "desktop-start.h"
 #import <AppKit/AppKit.h>
 #include <fcntl.h>
@@ -111,6 +113,7 @@ static int machine(const char *service) {
     NSString *requirement = PLANKMacOwnSigningRequirement();
     __block __weak PLANKMacAgentRegistry *weakRegistry;
     __block dispatch_source_t exitWatch = nil;
+    PLANKMacDesktopStart *desktopStart = [PLANKMacDesktopStart new];
     PLANKMacAgentRegistry *registry = [[PLANKMacAgentRegistry alloc]
         initWithQueue:dispatch_get_main_queue() requirement:requirement
         scope:^PLANKMacAgentPhase(PLANKMacAgentPeer peer) { return PLANKMacObserveAgentScope(peer); }
@@ -127,24 +130,34 @@ static int machine(const char *service) {
                 BOOL removed = [weakRegistry completeRetirement:lease];
                 dispatch_source_cancel(exitWatch); exitWatch = nil;
                 NSLog(@"PLANK Host graphical process exited; ownership released=%d", removed);
+                if (removed && lease.phase == PLANKMacAgentDesktop)
+                    [desktopStart desktopProcessExitedForUID:lease.peer.uid audit:lease.peer.auditSession];
             });
             dispatch_resume(exitWatch);
         }];
     if (!registry) return 2;
+    registry.issueIdentity = ^NSDictionary<NSString *, NSData *> *(NSData *csr) {
+        return PLANKMacIssueWorkerIdentity(csr, @"/Library/Application Support/PLANK/SignIn");
+    };
     weakRegistry = registry;
+    PLANKMacMicrophoneBroker *microphone = [[PLANKMacMicrophoneBroker alloc]
+        initWithQueue:dispatch_get_main_queue() requirement:requirement
+        authorize:^BOOL(PLANKMacAgentPeer peer, uint64_t generation) {
+            return [weakRegistry admitsDesktopPeer:peer generation:generation];
+        }];
+    if (![microphone start]) { [registry stop]; return startupFailure("microphone-broker"); }
     xpc_connection_t listener = xpc_connection_create_mach_service(service, dispatch_get_main_queue(),
         XPC_CONNECTION_MACH_SERVICE_LISTENER);
-    if (!listener) return 2;
+    if (!listener) { [microphone stop]; [registry stop]; return 2; }
     xpc_connection_set_event_handler(listener, ^(xpc_object_t peer) {
         if (xpc_get_type(peer) == XPC_TYPE_CONNECTION) [registry accept:peer];
     });
     xpc_connection_activate(listener);
-    PLANKMacDesktopStart *desktopStart = [PLANKMacDesktopStart new];
     if (![desktopStart start]) {
-        [registry stop]; xpc_connection_cancel(listener);
+        [microphone stop]; [registry stop]; xpc_connection_cancel(listener);
         return startupFailure("desktop-start-observer");
     }
-    signals(^{ [desktopStart stop]; [registry stop]; xpc_connection_cancel(listener); exit(0); });
+    signals(^{ [microphone stop]; [desktopStart stop]; [registry stop]; xpc_connection_cancel(listener); exit(0); });
     NSLog(@"PLANK Host machine coordinator started");
     [[NSRunLoop mainRunLoop] run]; return 0;
 }
@@ -158,9 +171,12 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
     PLANKMacGraphicalIdentity initial = [authority snapshot];
     if (!plank_macos_graphical_identity_valid(initial)) return startupFailure("graphical-scope");
     NSDictionary *publicConfiguration = nil;
+    NSData *authorityDER = nil;
     if (systemProvisioning) {
         if (phase == PLANKMacScopeDesktop) {
             if (!PLANKMacPrepareDesktop(&directory, &publicConfiguration)) return startupFailure("desktop-provisioning");
+            authorityDER = PLANKMacAuthorizeDesktopIdentity(directory, service, PLANKMacOwnSigningRequirement());
+            if (!authorityDER) return startupFailure("machine-identity");
         } else {
             publicConfiguration = PLANKMacReadPublicConfiguration(@"/Library/Application Support/PLANK", 0);
             if (!publicConfiguration) return startupFailure("machine-configuration");
@@ -250,7 +266,7 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
             } else if (state == PLANKMacAgentRetiring || state == PLANKMacAgentDisconnected || state == PLANKMacAgentFinished) stop();
         }];
     weakAgent = agent;
-    runtime = [[PLANKMacHostRuntime alloc] initWithIdentity:identity information:information
+    runtime = [[PLANKMacHostRuntime alloc] initWithIdentity:identity authority:authorityDER information:information
         snapshot:^{ return [weakAgent bindGraphicalScope:[authority snapshot]]; }
         topology:^{ return [capture snapshot]; } address:config[@"Address"]
         certificate:[directory stringByAppendingPathComponent:@"cert.pem"]

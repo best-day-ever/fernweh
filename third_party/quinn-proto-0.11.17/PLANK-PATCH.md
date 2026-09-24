@@ -1,13 +1,13 @@
 # Vendored Quinn backport
 
-This directory contains the unmodified crates.io source for
-`quinn-proto 0.11.17`, except for the narrow PLANK DATAGRAM
-send-buffer accounting backport in `src/connection/datagrams.rs`.
+This directory contains crates.io `quinn-proto 0.11.17` with PLANK's narrow
+DATAGRAM accounting, MTU-boundary and telemetry repairs described below, plus
+the opt-in controller feature described later.
 
 The source crate is pinned by `Cargo.lock`. Its original MIT and Apache-2.0
 licenses and crates.io VCS provenance are retained in the vendored directory.
 
-The backport corrects both defects present in the released 0.11.17 code:
+The send-buffer backport corrects two defects present in the released code:
 
 - send-buffer pruning now includes the memory needed by the new DATAGRAM;
 - pruning relies on `DatagramBuffer::pop_front()` as the sole payload-byte

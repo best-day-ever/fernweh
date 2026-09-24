@@ -20,3 +20,25 @@ The selected changes do not alter broker APIs, Host admission, media profiles,
 version numbers or deployed package pins. A production release still needs the
 normal BDE Mac package gates and, for any future Host port, Rocky hardware
 qualification.
+
+## Follow-up integration candidate
+
+The later request broadened this review to a coordinated `1.1.001` Client,
+Linux Host, macOS Host and transport candidate. The branch now includes the
+upstream PAM deadline, RaptorQ 2, microphone, macOS Host, trust, keyboard,
+clipboard and takeover work, with BDE's existing broker admission and display
+policy retained. Native Mac and Rocky package/protocol gates passed, followed
+by a brokered GSSAPI desktop stream on BDE canary. The macOS Host privileged
+cross-UID fixture and a live Mac Host target remain open acceptance items.
+
+Two upstream feature assignments conflicted with BDE's already allocated wire
+bits. Virtual primary now uses `0x10000000` because `0x2000000` belongs to
+NVENC 4:2:0. The macOS Host advertises clipboard on BDE's `0x800000` because
+`0x400000` belongs to desktop sign-out. Client and Host must be upgraded
+together across the RaptorQ 2 transport change.
+
+The upstream `metalpresentation` probe assumes a single renderer-owned target
+array and an upstream secondary-fullscreen helper. BDE's per-monitor Metal
+renderer has a different target lifecycle, so this probe is not a build gate;
+the existing presentation geometry and Metal overlay suites remain in the
+Client gate. A physical dual-display stream still needs acceptance.

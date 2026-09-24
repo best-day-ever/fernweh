@@ -13,12 +13,13 @@ use crate::rate_control::{PlankRateControllerFactory, TransportRatePolicy};
 use anyhow::{Context, Result, anyhow};
 use bytes::{BufMut, Bytes, BytesMut};
 use kymux_types::{
-    AVPacket, CodecPacket, CodecPacketHeader, DataPacket, InputPacket, MediaPacket,
-    MediaPacketHeader,
+    AVPacket, CodecPacket, CodecPacketHeader, DataPacket, InputPacket, MAX_DATA_PACKET_SIZE,
+    MediaPacket, MediaPacketHeader,
 };
 use kynet::Server;
 use std::collections::VecDeque;
 use std::ffi::c_char;
+use std::future::Future;
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -36,8 +37,8 @@ const AUDIO_SEND_CAPACITY: usize = 16;
 const AUDIO_RECEIVE_CAPACITY: usize = 64;
 const INPUT_SEND_CAPACITY: usize = 128;
 const INPUT_RECEIVE_CAPACITY: usize = 128;
-const DATA_SEND_CAPACITY: usize = 64;
-const DATA_RECEIVE_CAPACITY: usize = 64;
+const DATA_QUEUE_PACKET_CAPACITY: usize = 64;
+const DATA_QUEUE_BYTE_CAPACITY: usize = 8 * 1024 * 1024;
 const FILE_CONTROL_SEND_CAPACITY: usize = 64;
 const FILE_CONTROL_RECEIVE_CAPACITY: usize = 64;
 const FILE_DATA_SEND_CAPACITY: usize = 32;
@@ -45,7 +46,6 @@ const FILE_DATA_RECEIVE_CAPACITY: usize = 32;
 const MAX_VIDEO_FRAME_SIZE: usize = 64 * 1024 * 1024;
 const MAX_AUDIO_PACKET_SIZE: usize = 64 * 1024;
 const MAX_INPUT_PACKET_SIZE: usize = u16::MAX as usize;
-const MAX_DATA_PACKET_SIZE: usize = 1024 * 1024;
 const MAX_FILE_CONTROL_PACKET_SIZE: usize = 64 * 1024 + 56;
 const MAX_FILE_DATA_PACKET_SIZE: usize = 256 * 1024 + 56 + 32;
 const VIDEO_METADATA_SIZE: usize = 16;
@@ -53,8 +53,23 @@ const VIDEO_FLAG_KEY: u32 = 1;
 const VIDEO_CODEC_H264: u32 = u32::from_be_bytes(*b"H264");
 const VIDEO_CODEC_HEVC: u32 = u32::from_be_bytes(*b"HEVC");
 const AUDIO_CODEC_OPUS: u32 = u32::from_be_bytes(*b"OPUS");
+const CONNECTION_CLOSE_DRAIN: Duration = Duration::from_secs(1);
 
-#[derive(Clone)]
+#[cfg(test)]
+#[path = "native_data_tests.rs"]
+mod data_tests;
+
+#[cfg(test)]
+#[path = "native_receive_tests.rs"]
+mod receive_tests;
+
+#[cfg(test)]
+#[path = "native_cancellation_tests.rs"]
+mod cancellation_tests;
+
+#[path = "native_microphone.rs"]
+mod microphone_lane;
+
 struct NativeVideoFrame {
     #[cfg(feature = "sender-timing")]
     enqueued_at: Instant,
@@ -66,7 +81,6 @@ struct NativeVideoFrame {
     payload: Bytes,
 }
 
-#[derive(Clone)]
 struct NativeAudioPacket {
     pts: u64,
     frame_samples: u16,
@@ -74,10 +88,46 @@ struct NativeAudioPacket {
     payload: Bytes,
 }
 
-#[derive(Clone)]
 struct NativeInputPacket {
     type_: u8,
     payload: Bytes,
+}
+
+#[derive(Default)]
+struct NativeDataQueue {
+    packets: VecDeque<Bytes>,
+    bytes: usize,
+}
+
+impl NativeDataQueue {
+    fn is_empty(&self) -> bool {
+        self.packets.is_empty()
+    }
+
+    fn can_push(&self, size: usize) -> bool {
+        (1..=MAX_DATA_PACKET_SIZE).contains(&size)
+            && self.packets.len() < DATA_QUEUE_PACKET_CAPACITY
+            && size <= DATA_QUEUE_BYTE_CAPACITY - self.bytes
+    }
+
+    fn push_back(&mut self, payload: Bytes) -> bool {
+        if !self.can_push(payload.len()) {
+            return false;
+        }
+        self.bytes += payload.len();
+        self.packets.push_back(payload);
+        true
+    }
+
+    fn front(&self) -> Option<&Bytes> {
+        self.packets.front()
+    }
+
+    fn pop_front(&mut self) -> Option<Bytes> {
+        let payload = self.packets.pop_front()?;
+        self.bytes -= payload.len();
+        Some(payload)
+    }
 }
 
 #[derive(Default)]
@@ -88,8 +138,8 @@ struct NativeQueues {
     audio_receive: VecDeque<NativeAudioPacket>,
     input_send: VecDeque<NativeInputPacket>,
     input_receive: VecDeque<NativeInputPacket>,
-    data_send: VecDeque<Bytes>,
-    data_receive: VecDeque<Bytes>,
+    data_send: NativeDataQueue,
+    data_receive: NativeDataQueue,
     file_control_send: VecDeque<Bytes>,
     file_control_receive: VecDeque<Bytes>,
     file_data_send: VecDeque<Bytes>,
@@ -162,6 +212,7 @@ struct NativeShared {
     file_clipboard_enabled: bool,
     stats: NativeStats,
     rate_policy: Arc<TransportRatePolicy>,
+    microphone: microphone_lane::Microphone,
 }
 
 impl NativeShared {
@@ -204,6 +255,7 @@ impl NativeShared {
             file_clipboard_enabled,
             stats: NativeStats::default(),
             rate_policy: TransportRatePolicy::new(initial_video_bitrate_bps),
+            microphone: microphone_lane::Microphone::default(),
         }
     }
 
@@ -212,8 +264,43 @@ impl NativeShared {
     }
 
     fn set_state(&self, state: EndpointState) {
-        self.status.lock().unwrap().state = state;
+        let mut status = self.status.lock().unwrap();
+        // A simultaneously finishing setup step must not advertise Ready
+        // again after a stop/failure has already been published.
+        if matches!(status.state, EndpointState::Stopped | EndpointState::Failed)
+            || (status.state == EndpointState::Stopping && state != EndpointState::Stopped)
+        {
+            return;
+        }
+        status.state = state;
+        drop(status);
         self.state_changed.notify_all();
+    }
+
+    async fn shutdown_requested(&self) {
+        loop {
+            // Register before checking the durable predicate. notify_all()
+            // is also used for failures/spurious wakes, and notify_waiters()
+            // alone does not retain a permit for a future setup phase.
+            let notified = self.stop_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.stop.load(Ordering::Acquire) || self.state() == EndpointState::Failed {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    async fn until_shutdown<T>(
+        &self,
+        operation: impl Future<Output = Result<T>>,
+    ) -> Result<Option<T>> {
+        tokio::select! {
+            biased;
+            _ = self.shutdown_requested() => Ok(None),
+            result = operation => result.map(Some),
+        }
     }
 
     fn fail(&self, error: impl ToString) {
@@ -710,10 +797,11 @@ async fn receive_data(
     while let Some(packet) = recv.recv().await? {
         {
             let mut queues = shared.queues.lock().unwrap();
-            if queues.data_receive.len() == DATA_RECEIVE_CAPACITY {
-                return Err(anyhow!("native reliable data receive queue exhausted"));
+            if !queues.data_receive.push_back(packet.payload) {
+                return Err(anyhow!(
+                    "native reliable data receive queue size limit exceeded"
+                ));
             }
-            queues.data_receive.push_back(packet.payload);
         }
         shared
             .stats
@@ -931,9 +1019,10 @@ async fn hold_server(shared: Arc<NativeShared>, protocols: NativeServerProtocols
     let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
+    let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, false));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
-        _ = shared.stop_notify.notified() => Ok(()),
+        _ = &mut microphone => unreachable!("microphone lane remains isolated"),
         result = &mut video => active_lane_result(result, "native video sender"),
         result = &mut audio => active_lane_result(result, "native audio sender"),
         result = &mut input => active_lane_result(result, "native input receiver"),
@@ -958,7 +1047,6 @@ async fn hold_client(shared: Arc<NativeShared>, protocols: NativeClientProtocols
             }
             tokio::select! {
                 _ = shared.peer_certificate_approved_notify.notified() => {},
-                _ = shared.stop_notify.notified() => return Ok(()),
                 result = connection.closed() => {
                     return result.context("native KyProto connection closed during certificate validation");
                 }
@@ -972,9 +1060,10 @@ async fn hold_client(shared: Arc<NativeShared>, protocols: NativeClientProtocols
     let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
+    let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, true));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
-        _ = shared.stop_notify.notified() => Ok(()),
+        _ = &mut microphone => unreachable!("microphone lane remains isolated"),
         result = &mut video => active_lane_result(result, "native video receiver"),
         result = &mut audio => active_lane_result(result, "native audio receiver"),
         result = &mut input => active_lane_result(result, "native input sender"),
@@ -1004,7 +1093,6 @@ async fn hold_setup_server(
         }
         tokio::select! {
             _ = shared.session_authorized_notify.notified() => {},
-            _ = shared.stop_notify.notified() => return Ok(()),
             result = &mut data_send => return result.context("setup data sender failed"),
             result = &mut data_receive => return result.context("setup data receiver failed"),
             result = &mut stats => return result.context("setup stats sampler failed"),
@@ -1020,9 +1108,10 @@ async fn hold_setup_server(
     let mut audio = Box::pin(send_audio(shared.clone(), audio));
     let mut input = Box::pin(receive_input(shared.clone(), input.recv));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
+    let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, false));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
-        _ = shared.stop_notify.notified() => Ok(()),
+        _ = &mut microphone => unreachable!("microphone lane remains isolated"),
         result = &mut video => result.context("native video sender failed"),
         result = &mut audio => result.context("native audio sender failed"),
         result = &mut input => result.context("native input receiver failed"),
@@ -1049,7 +1138,6 @@ async fn hold_setup_client(
         }
         tokio::select! {
             _ = shared.peer_certificate_approved_notify.notified() => {},
-            _ = shared.stop_notify.notified() => return Ok(()),
             result = connection.closed() => {
                 return result.context("setup KyProto connection closed during certificate validation");
             }
@@ -1066,7 +1154,6 @@ async fn hold_setup_client(
         }
         tokio::select! {
             _ = shared.session_authorized_notify.notified() => {},
-            _ = shared.stop_notify.notified() => return Ok(()),
             result = &mut data_send => return result.context("setup data sender failed"),
             result = &mut data_receive => return result.context("setup data receiver failed"),
             result = &mut stats => return result.context("setup stats sampler failed"),
@@ -1082,9 +1169,10 @@ async fn hold_setup_client(
     let mut audio = Box::pin(receive_audio(shared.clone(), audio));
     let mut input = Box::pin(send_input(shared.clone(), input.send));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
+    let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, true));
     shared.set_state(EndpointState::Ready);
     tokio::select! {
-        _ = shared.stop_notify.notified() => Ok(()),
+        _ = &mut microphone => unreachable!("microphone lane remains isolated"),
         result = &mut video => result.context("native video receiver failed"),
         result = &mut audio => result.context("native audio receiver failed"),
         result = &mut input => result.context("native input sender failed"),
@@ -1104,8 +1192,17 @@ async fn run_server(
     session_token: &str,
     options: super::RuntimeOptions,
 ) -> Result<()> {
-    let certificate = kynet::cert::load_cert_from_pem_file(certificate_path).await?;
-    let private_key = kynet::cert::load_private_key_from_pem_file(private_key_path).await?;
+    let Some((certificate, private_key)) = shared
+        .until_shutdown(async {
+            Ok((
+                kynet::cert::load_cert_from_pem_file(certificate_path).await?,
+                kynet::cert::load_private_key_from_pem_file(private_key_path).await?,
+            ))
+        })
+        .await?
+    else {
+        return Ok(());
+    };
     let server_options = kynet::common::CommonServerOptions {
         max_idle_timeout: Some(options.idle_timeout),
         keep_alive_interval: Some(options.keep_alive_interval),
@@ -1113,7 +1210,6 @@ async fn run_server(
         congestion_controller_factory: Some(PlankRateControllerFactory::new(
             shared.rate_policy.clone(),
         )),
-        datagram_pacer: shared.rate_policy.outgoing_pacer(),
     };
     let server = kynet::Connection::start_server_on_addr(
         bind_address,
@@ -1121,15 +1217,26 @@ async fn run_server(
         private_key,
         &server_options,
     )?;
-    let protocols = native::accept_server(&server, session_token, native_options(options)).await?;
-    let result = hold_server(shared, protocols).await;
+    let result = shared
+        .until_shutdown(async {
+            let protocols =
+                native::accept_server(&server, session_token, native_options(options)).await?;
+            hold_server(shared.clone(), protocols).await
+        })
+        .await;
     server.close(0, "PLANK native endpoint stopping");
     // close() only queues CONNECTION_CLOSE. Keep the runtime alive while
     // Quinn transmits it; dropping the runtime immediately leaves the peer
     // waiting for idle expiry during a graphical-session handoff. Bound this
     // drain so an unreachable peer cannot hold Host ownership indefinitely.
-    let _ = tokio::time::timeout(Duration::from_secs(1), server.wait_idle()).await;
-    result
+    drain_server(&server).await;
+    result.map(|_| ())
+}
+
+async fn drain_server(server: &impl kynet::Server) {
+    // Deliberately outside the cancellable operation. Cancellation and early
+    // handshake failures must still allow the queued close packet to leave.
+    let _ = tokio::time::timeout(CONNECTION_CLOSE_DRAIN, server.wait_idle()).await;
 }
 
 async fn run_client(
@@ -1140,15 +1247,20 @@ async fn run_client(
     session_token: &str,
     options: super::RuntimeOptions,
 ) -> Result<()> {
-    let protocols = native::connect_client(
-        remote_address,
-        server_name,
-        certificate_sha256,
-        session_token,
-        native_options(options),
-    )
-    .await?;
-    hold_client(shared, protocols).await
+    shared
+        .until_shutdown(async {
+            let protocols = native::connect_client(
+                remote_address,
+                server_name,
+                certificate_sha256,
+                session_token,
+                native_options(options),
+            )
+            .await?;
+            hold_client(shared.clone(), protocols).await
+        })
+        .await
+        .map(|_| ())
 }
 
 async fn run_setup_server(
@@ -1159,8 +1271,17 @@ async fn run_setup_server(
     setup_marker: &str,
     options: super::RuntimeOptions,
 ) -> Result<()> {
-    let certificate = kynet::cert::load_cert_from_pem_file(certificate_path).await?;
-    let private_key = kynet::cert::load_private_key_from_pem_file(private_key_path).await?;
+    let Some((certificate, private_key)) = shared
+        .until_shutdown(async {
+            Ok((
+                kynet::cert::load_cert_from_pem_file(certificate_path).await?,
+                kynet::cert::load_private_key_from_pem_file(private_key_path).await?,
+            ))
+        })
+        .await?
+    else {
+        return Ok(());
+    };
     let server_options = kynet::common::CommonServerOptions {
         max_idle_timeout: Some(options.idle_timeout),
         keep_alive_interval: Some(options.keep_alive_interval),
@@ -1168,7 +1289,6 @@ async fn run_setup_server(
         congestion_controller_factory: Some(PlankRateControllerFactory::new(
             shared.rate_policy.clone(),
         )),
-        datagram_pacer: shared.rate_policy.outgoing_pacer(),
     };
     let server = kynet::Connection::start_server_on_addr(
         bind_address,
@@ -1176,11 +1296,16 @@ async fn run_setup_server(
         private_key,
         &server_options,
     )?;
-    let setup = native::accept_setup_server(&server, setup_marker, native_options(options)).await?;
-    let result = hold_setup_server(shared, setup, options).await;
+    let result = shared
+        .until_shutdown(async {
+            let setup =
+                native::accept_setup_server(&server, setup_marker, native_options(options)).await?;
+            hold_setup_server(shared.clone(), setup, options).await
+        })
+        .await;
     server.close(0, "PLANK setup endpoint stopping");
-    let _ = tokio::time::timeout(Duration::from_secs(1), server.wait_idle()).await;
-    result
+    drain_server(&server).await;
+    result.map(|_| ())
 }
 
 async fn run_setup_client(
@@ -1190,14 +1315,19 @@ async fn run_setup_client(
     setup_marker: &str,
     options: super::RuntimeOptions,
 ) -> Result<()> {
-    let setup = native::connect_setup_client(
-        remote_address,
-        server_name,
-        setup_marker,
-        native_options(options),
-    )
-    .await?;
-    hold_setup_client(shared, setup, options).await
+    shared
+        .until_shutdown(async {
+            let setup = native::connect_setup_client(
+                remote_address,
+                server_name,
+                setup_marker,
+                native_options(options),
+            )
+            .await?;
+            hold_setup_client(shared.clone(), setup, options).await
+        })
+        .await
+        .map(|_| ())
 }
 
 fn worker(config: EndpointConfig, shared: Arc<NativeShared>) {
@@ -1281,6 +1411,11 @@ fn worker(config: EndpointConfig, shared: Arc<NativeShared>) {
 }
 
 fn finish_worker(shared: &NativeShared, result: Result<()>) {
+    if shared.state() == EndpointState::Failed {
+        // A queue/API failure also cancels the lifecycle; do not replace its
+        // original diagnosis with the generic peer-close result.
+        return;
+    }
     if shared.stop.load(Ordering::Acquire) {
         shared.set_state(EndpointState::Stopped);
     } else if let Err(error) = result {
@@ -1397,8 +1532,8 @@ fn wait_for_state(shared: &NativeShared, timeout: Duration) -> EndpointState {
     status.state
 }
 
-fn copy_bytes_out(
-    payload: &Bytes,
+fn validate_bytes_out(
+    size: usize,
     destination: *mut u8,
     capacity: usize,
     size_out: *mut usize,
@@ -1406,14 +1541,50 @@ fn copy_bytes_out(
     if size_out.is_null() {
         return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
     }
-    unsafe { *size_out = payload.len() };
-    if payload.len() > capacity {
+    unsafe { *size_out = size };
+    if size > capacity {
         return PLANK_TRANSPORT_ERROR_BUFFER_TOO_SMALL;
     }
+    if size != 0 && destination.is_null() {
+        return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+    }
+    PLANK_TRANSPORT_OK
+}
+
+// Called under the queue mutex by wait_pop(). Validate before removing so a
+// rejected output buffer cannot consume an item. Move (never clone) the item
+// out of the queue before unlocking: overflow may then evict only other items.
+fn claim_receive_front<T>(
+    queue: &mut VecDeque<T>,
+    payload_len: impl FnOnce(&T) -> usize,
+    destination: *mut u8,
+    capacity: usize,
+    size_out: *mut usize,
+) -> Option<Result<T, i32>> {
+    let result = validate_bytes_out(payload_len(queue.front()?), destination, capacity, size_out);
+    Some(if result == PLANK_TRANSPORT_OK {
+        Ok(queue
+            .pop_front()
+            .expect("validated front remains under queue lock"))
+    } else {
+        Err(result)
+    })
+}
+
+fn copy_bytes_out(
+    payload: &Bytes,
+    destination: *mut u8,
+    capacity: usize,
+    size_out: *mut usize,
+) -> i32 {
+    let result = validate_bytes_out(payload.len(), destination, capacity, size_out);
+    if result != PLANK_TRANSPORT_OK {
+        return result;
+    }
+    // Test-only interleaving at the real C ABI copy boundary; no runtime hook.
+    #[cfg(test)]
+    receive_tests::before_copy();
     if !payload.is_empty() {
-        if destination.is_null() {
-            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
-        }
         unsafe { ptr::copy_nonoverlapping(payload.as_ptr(), destination, payload.len()) };
     }
     PLANK_TRANSPORT_OK
@@ -1511,6 +1682,8 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_start(
         let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
             return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
         };
+        // Publish the join handle before a concurrent stop can finish.
+        let mut worker_slot = endpoint.worker.lock().unwrap();
         if endpoint.shared.state() != EndpointState::Idle {
             return PLANK_TRANSPORT_ERROR_INVALID_STATE;
         }
@@ -1522,7 +1695,7 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_start(
             .spawn(move || worker(config, shared));
         match worker {
             Ok(worker) => {
-                *endpoint.worker.lock().unwrap() = Some(worker);
+                *worker_slot = Some(worker);
                 PLANK_TRANSPORT_OK
             }
             Err(error) => {
@@ -1775,7 +1948,15 @@ pub unsafe extern "C" fn plank_transport_native_video_receive(
             &endpoint.shared,
             &endpoint.shared.video_receive_changed,
             Duration::from_millis(timeout_ms.into()),
-            |queues| queues.video_receive.front().cloned(),
+            |queues| {
+                claim_receive_front(
+                    &mut queues.video_receive,
+                    |frame| frame.payload.len(),
+                    payload,
+                    payload_capacity,
+                    payload_size_out,
+                )
+            },
         ) else {
             return if endpoint.shared.state() == EndpointState::Failed {
                 PLANK_TRANSPORT_ERROR_RUNTIME
@@ -1783,17 +1964,14 @@ pub unsafe extern "C" fn plank_transport_native_video_receive(
                 PLANK_TRANSPORT_TIMEOUT
             };
         };
+        let frame = match frame {
+            Ok(frame) => frame,
+            Err(error) => return error,
+        };
         let result = copy_bytes_out(&frame.payload, payload, payload_capacity, payload_size_out);
         if result != PLANK_TRANSPORT_OK {
             return result;
         }
-        endpoint
-            .shared
-            .queues
-            .lock()
-            .unwrap()
-            .video_receive
-            .pop_front();
         unsafe {
             *info = PlankTransportNativeVideoFrameInfo {
                 struct_size: std::mem::size_of::<PlankTransportNativeVideoFrameInfo>() as u32,
@@ -1889,7 +2067,15 @@ pub unsafe extern "C" fn plank_transport_native_audio_receive(
             &endpoint.shared,
             &endpoint.shared.audio_receive_changed,
             Duration::from_millis(timeout_ms.into()),
-            |queues| queues.audio_receive.front().cloned(),
+            |queues| {
+                claim_receive_front(
+                    &mut queues.audio_receive,
+                    |packet| packet.payload.len(),
+                    payload,
+                    payload_capacity,
+                    payload_size_out,
+                )
+            },
         ) else {
             return if endpoint.shared.state() == EndpointState::Failed {
                 PLANK_TRANSPORT_ERROR_RUNTIME
@@ -1897,17 +2083,14 @@ pub unsafe extern "C" fn plank_transport_native_audio_receive(
                 PLANK_TRANSPORT_TIMEOUT
             };
         };
+        let packet = match packet {
+            Ok(packet) => packet,
+            Err(error) => return error,
+        };
         let result = copy_bytes_out(&packet.payload, payload, payload_capacity, payload_size_out);
         if result != PLANK_TRANSPORT_OK {
             return result;
         }
-        endpoint
-            .shared
-            .queues
-            .lock()
-            .unwrap()
-            .audio_receive
-            .pop_front();
         unsafe {
             *info = PlankTransportNativeAudioPacketInfo {
                 struct_size: std::mem::size_of::<PlankTransportNativeAudioPacketInfo>() as u32,
@@ -1979,7 +2162,15 @@ pub unsafe extern "C" fn plank_transport_native_input_receive(
             &endpoint.shared,
             &endpoint.shared.input_receive_changed,
             Duration::from_millis(timeout_ms.into()),
-            |queues| queues.input_receive.front().cloned(),
+            |queues| {
+                claim_receive_front(
+                    &mut queues.input_receive,
+                    |packet| packet.payload.len(),
+                    payload,
+                    payload_capacity,
+                    payload_size_out,
+                )
+            },
         ) else {
             return if endpoint.shared.state() == EndpointState::Failed {
                 PLANK_TRANSPORT_ERROR_RUNTIME
@@ -1987,17 +2178,14 @@ pub unsafe extern "C" fn plank_transport_native_input_receive(
                 PLANK_TRANSPORT_TIMEOUT
             };
         };
+        let packet = match packet {
+            Ok(packet) => packet,
+            Err(error) => return error,
+        };
         let result = copy_bytes_out(&packet.payload, payload, payload_capacity, payload_size_out);
         if result != PLANK_TRANSPORT_OK {
             return result;
         }
-        endpoint
-            .shared
-            .queues
-            .lock()
-            .unwrap()
-            .input_receive
-            .pop_front();
         unsafe { *type_out = packet.type_ };
         PLANK_TRANSPORT_OK
     })
@@ -2025,12 +2213,15 @@ pub unsafe extern "C" fn plank_transport_native_data_send(
             return PLANK_TRANSPORT_ERROR_INVALID_STATE;
         }
         let mut queues = endpoint.shared.queues.lock().unwrap();
-        if queues.data_send.len() == DATA_SEND_CAPACITY {
+        // Check before copying: queue pressure must not allocate and discard
+        // another payload. TIMEOUT retains the caller's existing retry contract.
+        if !queues.data_send.can_push(payload_size) {
             return PLANK_TRANSPORT_TIMEOUT;
         }
-        queues.data_send.push_back(Bytes::copy_from_slice(unsafe {
+        let inserted = queues.data_send.push_back(Bytes::copy_from_slice(unsafe {
             std::slice::from_raw_parts(payload, payload_size)
         }));
+        debug_assert!(inserted);
         drop(queues);
         endpoint.shared.data_send_notify.notify_one();
         PLANK_TRANSPORT_OK
@@ -2054,11 +2245,20 @@ pub unsafe extern "C" fn plank_transport_native_data_receive(
         if payload_size_out.is_null() {
             return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
         }
-        let Some(packet) = wait_pop(
+        let Some(result) = wait_pop(
             &endpoint.shared,
             &endpoint.shared.data_receive_changed,
             Duration::from_millis(timeout_ms.into()),
-            |queues| queues.data_receive.front().cloned(),
+            |queues| {
+                let packet = queues.data_receive.front()?;
+                let result = copy_bytes_out(packet, payload, payload_capacity, payload_size_out);
+                if result == PLANK_TRANSPORT_OK {
+                    queues.data_receive.pop_front();
+                }
+                // Peeking, copying and removing share the queue lock. A short
+                // output buffer leaves both the packet and its byte charge intact.
+                Some(result)
+            },
         ) else {
             return if endpoint.shared.state() == EndpointState::Failed {
                 PLANK_TRANSPORT_ERROR_RUNTIME
@@ -2066,18 +2266,7 @@ pub unsafe extern "C" fn plank_transport_native_data_receive(
                 PLANK_TRANSPORT_TIMEOUT
             };
         };
-        let result = copy_bytes_out(&packet, payload, payload_capacity, payload_size_out);
-        if result != PLANK_TRANSPORT_OK {
-            return result;
-        }
-        endpoint
-            .shared
-            .queues
-            .lock()
-            .unwrap()
-            .data_receive
-            .pop_front();
-        PLANK_TRANSPORT_OK
+        result
     })
 }
 
@@ -2306,6 +2495,7 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_stats(
 }
 
 fn stop_endpoint(endpoint: &PlankTransportNativeEndpoint) -> i32 {
+    let mut worker_slot = endpoint.worker.lock().unwrap();
     let state = endpoint.shared.state();
     if state == EndpointState::Idle {
         endpoint.shared.set_state(EndpointState::Stopped);
@@ -2314,7 +2504,7 @@ fn stop_endpoint(endpoint: &PlankTransportNativeEndpoint) -> i32 {
         endpoint.shared.stop.store(true, Ordering::Release);
         endpoint.shared.notify_all();
     }
-    if let Some(worker) = endpoint.worker.lock().unwrap().take()
+    if let Some(worker) = worker_slot.take()
         && worker.join().is_err()
     {
         endpoint.shared.fail("native KyProto worker panicked");

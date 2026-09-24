@@ -5,12 +5,18 @@ It runs on pushes, pull requests and manual dispatch. No self-hosted machine,
 deployment credential, private repository or signing secret is available to
 these jobs. Actions are pinned to commit IDs and receive read-only permissions.
 
+When reviewing an Actions dependency update, update the exact reviewed hashes
+in `tests/ci/test_context.py` and `tests/ci/test_dependency_cache.py` alongside
+the workflow pins and version comments. Verify upstream runtime/input changes
+and run all four platform jobs. Do not remove pin assertions or weaken
+credential/cache restrictions just to accept a Dependabot update.
+
 | Product | Environment | Result |
 | --- | --- | --- |
 | Linux Host | Pinned Rocky 9.7 container on Ubuntu runner | RPM and provenance catalog |
 | Linux Client | Ubuntu 26.04, Qt 6.10.2 | DEB and provenance catalog |
 | macOS Host | `xcode-27`, arm64, SDK/OS 27+ | Unsigned compile and portable tests |
-| macOS Client | `xcode-27`, arm64, SDK/OS 27+ | Unsigned developer build |
+| macOS Client | `xcode-27`, arm64, SDK/OS 27+; deployment minimum15.0 | One unsigned developer build for macOS15+ |
 
 Runner labels are not substitutes for version checks. Unsupported OS, Qt or
 SDK versions stop the build. The Rocky repositories are fixed to the 9.7 vault;
@@ -19,7 +25,27 @@ drivers are not installed. `scripts/ci/` creates the path contract, bootstraps
 pinned dependencies, then invokes the normal build/package scripts. Existing
 patch, payload, version and clean-source gates remain mandatory.
 
+The Mac Client uses one package on macOS15 and macOS27. Its lower deployment
+floor does not lower the builder SDK requirement or change the Host's27.0
+minimum. Exact cache keys include the Client deployment policy; old
+27-minimum dependencies are not reused. Native target-validation fixtures run
+in the Client build, and DMG packaging checks every bundled binary and the app
+plist. Live acceptance of the identical package on both OS versions is a
+separate gate; newer APIs require runtime availability checks.
+
+The initial policy job has a root-only checkout, with no initialized submodules.
+Keep its assertions limited to tracked root files. Dependency-source checks
+belong after product bootstrap: `build.sh` requires the Kynet datagram-sender
+check for all four products and fails if the pinned dependency is absent.
+
 Linux package artifacts expire after seven days and do not publish releases.
+The Linux Host job also builds the fake-backend input tests after packaging and
+runs the input/raw-HID suites 25 times in shuffled order. Tests use the exact
+candidate sources and prepared dependencies. The RPM remains the production
+`BUILD_TESTS=OFF` payload; missing `/dev/uhid` cases are explicit skips, not live
+tablet acceptance. Keep real mouse/Wacom disconnect/reconnect qualification as
+a separate hardware gate.
+
 Feature builds retain their branch-qualified visible and package versions.
 These jobs do not install products or perform live display, audio, input,
 network-loss or hardware-decoder qualification. Existing hardware gates and
@@ -41,10 +67,9 @@ product. The job requires manual dispatch and directly names the protected
 `macos-signing` environment. At the operator's request, this environment has no
 required reviewers or wait timer: an explicitly dispatched signed build on an
 allowed branch proceeds automatically. Keep custom deployment branch policies
-enabled (currently `main`, `macos-display-recovery` and
-`macos-media-recovery`, `macos-auth-recovery`, `reconnect-lifecycle` and
-`macos-fullscreen`, `macos-command-q`, `macos-quit-lifecycle`); do not replace them with
-an all-branches wildcard. Review source, workflow and dependency changes before
+enabled (currently `main` only after merged-branch cleanup); do not replace them
+with an all-branches wildcard. Remove a temporary branch's signing permission
+when retiring that branch. Review source, workflow and dependency changes before
 dispatching or adding a candidate branch. Public push/PR jobs have no signing
 authority. This removes the approval gate itself, not through a bot/token that
 approves each run; it does not enable signing on every push.
@@ -65,9 +90,9 @@ Keep Developer ID distinct from Apple Development and Mac App Store identities.
 After a clean committed/pushed source is qualified, request signing with
 `bash scripts/ci/dispatch.sh macos-host true` (or `macos-client true`). The job
 starts without a separate approval prompt on an allowed branch. Only its
-signing step receives secrets. The helper
-checks presence before bootstrap and removes them from child environments. It
-bootstraps dependencies without credentials, then imports into a temporary 0700 runner
+signing step receives secrets. Separate credential-free steps bootstrap and
+save verified dependencies first. The signing helper checks secret presence and
+removes secrets from child environments, then imports into a temporary 0700 runner
 directory/keychain with narrowly allowed Apple signing tools, and stores
 notarization credentials in that keychain. It restores the prior search list
 and deletes temporary material on completion/failure; an always-run cleanup step
@@ -110,37 +135,70 @@ standard runner is insufficient; record the resource limitation first.
 ### Exact-input dependency caches
 
 All four products support dependency caching (including unsigned and signed
-Mac jobs). Cold-save/warm-restore qualification is recorded below; local policy
-tests alone do not prove a hosted speedup.
+Mac jobs). Version 2 uses independent exact keys, receipts, restore and save
+operations for each dependency group. A Cargo lockfile change must not rebuild
+FFmpeg or Boost, and a Mac FFmpeg patch must not redownload Qt.
 
-| Product | Cached inputs |
+| Product | Independent cache groups |
 | --- | --- |
-| Linux Host | Prepared FFmpeg, its dependency-only build/source tree for independent patch verification, Boost sources, Rust toolchain and Cargo downloads |
-| Ubuntu Client | Prepared FFmpeg, patched source and pristine archive for the source audit, Rust toolchain and Cargo downloads |
-| macOS Host | Rust toolchain and Cargo downloads; capture/encoding/audio use Apple frameworks |
-| macOS Client | Prepared libraries, patched sources, downloads and Qt (existing qualified cache) |
+| Linux Host | Rust toolchain; Cargo downloads (including vendor-test dependencies); FFmpeg/codec build tree; Boost sources |
+| Ubuntu Client | Rust toolchain; Cargo downloads; FFmpeg libraries, patched source and pristine archive |
+| macOS Host | Rust toolchain; Cargo downloads (capture/encoding/audio use Apple frameworks) |
+| macOS Client | Rust toolchain; Cargo downloads; native-library install/source/download tree; Qt |
 
-Rust caches contain only toolchains, Cargo tool binaries and downloaded registry/
-Git sources. They exclude Cargo credentials/configuration and target objects.
-Linux keys include exact installed package versions and compiler/build-tool
-versions after prerequisite installation. The Host build-deps Git pin and its
-tracked files cover all dependency source pins, flags and patches. Client keys
-include the FFmpeg build script and all FFmpeg patches. Every new key also
-includes bootstrap scripts, Rust pins/lockfile, architecture and absolute
-source/dependency paths. Source updates that do not affect dependencies reuse
-the cache; dependency changes produce a cold build. OS packages are still
-installed by the package manager on each disposable runner, not restored from
-a copied system root. CUDA architecture coverage is unchanged.
+The Linux Host FFmpeg/x264/x265 build tree is one coupled cache. Mac FFmpeg,
+OpenSSL, SDL, FreeType, Opus and pkgconf also remain a coupled group because
+their current bootstrap shares one installation prefix. Never restore
+overlapping directories from independent keys. Qt is outside that prefix.
+
+`scripts/ci/dependencies/` contains the existing build recipes, split so each
+fingerprint hashes only its own preparation commands, versions, flags and
+required patches. Keep such inputs in the relevant recipe, not in the shared
+`bootstrap.sh` orchestration wrapper. The Host FFmpeg group additionally hashes
+the build-deps Git pin, tracked files and source gitlinks. Both Client library
+groups retain all FFmpeg patch inputs and build-path/sanitization helpers.
+
+Rust toolchain changes invalidate Rust and Cargo downloads; transport and
+vendor-test manifests/locks invalidate only their Cargo group. Native library
+keys still include exact installed Linux packages or Mac SDK/compiler/build
+tools. Downloads/source-only groups do not depend on those C/C++ build tools.
+All keys remain product/platform/path-specific; Mac Client native/Qt keys
+retain the explicit deployment-target policy. Changes to the shared cache
+implementation itself invalidate all groups conservatively. Application-only
+changes do not invalidate dependency keys. OS packages are still installed by
+the package manager on each disposable runner; CUDA architecture coverage and
+all dependency versions/build flags are unchanged.
+
+The composite action `.github/actions/dependency-cache` handles the same
+restore/verify and seal/save sequence for all four products. Each group can hit
+or miss independently. Save skips exact hits, and job-local hit bookkeeping is
+not cached. The narrow Rust/Cargo allowlist excludes credentials/configuration
+and compiled target objects. There are no application, package or signing caches.
 
 Mac Host's cache avoids Rust installation/downloads, not application or
 transport compilation. Do not promise the same improvement as caching FFmpeg.
 Cache selection is exact, with no fallback restore keys. A receipt must match
 the selected key, required outputs must exist, and Linux FFmpeg patches are
-checked independently before bootstrap. Existing package/source gates still
+checked independently before bootstrap (including Mac FFmpeg). Existing package/source gates still
 run. A mismatched/incomplete cache fails closed rather than silently using
 unverified dependencies. Use a clean-bootstrap build to diagnose such a failure.
 
-#### Four-product qualification
+The new `plank-<product>-<dependency>-v2-<digest>` keys intentionally cannot
+restore the old monolithic v1 caches. The first build needs to populate them
+once; subsequent changes invalidate only affected groups. Local isolation,
+mixed-hit, receipt and workflow-policy tests pass. Hosted v2 cold population
+passed for all four products at
+`ad1a4a40e429e7712a4c01dd1aa4d74e68e5c3bb` in
+[run 35654558827](https://github.com/instinctual/plank/actions/runs/35654558827).
+The Ubuntu package passed but artifact finalization returned HTTP 403. Its
+same-source [recovery run 35655809810](https://github.com/instinctual/plank/actions/runs/35655809810)
+restored and verified all three groups in 24 seconds, bootstrapped in two
+seconds and passed application/package checks and artifact upload. This proves
+Ubuntu warm reuse, not partial-hit or all-platform warm qualification. Linux
+Host passed packaging and all six strengthened loss matrices on its first
+hosted attempt; Mac results are unsigned, not distribution installers.
+
+#### Historical v1 four-product qualification
 
 All listed runs passed full application build/tests after dependency bootstrap;
 Linux jobs also passed package gates. Mac runs here were unsigned, not deployment
@@ -170,16 +228,12 @@ source audit: patched sources and libraries alone are insufficient. Always
 retain the original checksum-verified FFmpeg archive, which packaging extracts
 for its full-source comparison. Do not disable that audit to accept a cache hit.
 
-#### Existing Mac Client qualification
+#### Historical v1 Mac Client qualification
 
-After successful cold-build qualification, Mac Client jobs may reuse prepared
-libraries, their sources (needed for licenses and patch verification), downloads,
-and Qt. The exact key includes dependency bootstrap scripts and all Client FFmpeg
-patches, source/dependency paths, architecture, runner image, OS, SDK, compiler,
-and build-tool versions. Application-only changes do not invalidate it.
-There are no fallback restore keys. A restored receipt must match the exact key;
-the mandatory FFmpeg patch is independently verified before use. Normal build
-and package dependency checks still run. Missing or mismatched inputs fail.
+The original Mac Client cache bundled native libraries and Qt under one key.
+The historical runs below qualified that layout, not the new split groups.
+Sources needed for licenses and independent patch verification are still
+retained by v2; normal build and package checks remain mandatory.
 
 GitHub also scopes cache access by branch. A cache saved only on one feature
 branch is not available to a sibling feature branch, even with an identical
@@ -190,9 +244,14 @@ or change dependency pins to work around a normal scope miss.
 PLANK and its tests build fresh. Application build trees, packages, Cargo objects,
 signing material and credentials are not cached. Public pull requests may read
 dependency caches but cannot save them through this workflow. Trusted jobs save
-only after a successful build; signed jobs first clean their temporary keychain.
-All product jobs save only successful dependency state; cold-bootstrap bypass
-applies to every product. The standalone fullscreen probe has no dependency cache.
+immediately after successful dependency bootstrap and independent cache sealing,
+before application compilation, tests or packaging. A later product/test/notary
+failure must not discard already verified dependencies. A failed bootstrap or
+failed dependency verification still prevents saving; this is not an always-run
+failure cache. Signed jobs bootstrap and save before injecting signing secrets
+or creating a keychain, then retain their always-run signing cleanup. The signing
+helper does not repeat product bootstrap. Cold-bootstrap bypass applies to every
+product. The standalone fullscreen probe has no dependency cache.
 
 To prove a fresh bootstrap, dispatch with `clean_bootstrap=true`, or use:
 

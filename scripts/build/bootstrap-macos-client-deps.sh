@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 # Private, pinned Apple Silicon inputs; never installs into /usr or /Applications.
 set -euo pipefail
-[[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || exit 2
 : "${PLANK_MAC_CLIENT_DEPS:?Set the private dependency root}"
 : "${PLANK_SOURCE_ROOT:?Set the source checkout}"
-# Oldest macOS the Client runs on (Qt 6.10 floor: 13). Build with the current SDK.
-export MACOSX_DEPLOYMENT_TARGET=${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}
-export SDKROOT
-SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-[[ $(xcrun --sdk macosx --show-sdk-version) == 27* ]] || exit 2
+source "$PLANK_SOURCE_ROOT/scripts/build/macos-client-target.sh"
+plank_macos_client_target
 prefix="$PLANK_MAC_CLIENT_DEPS/install"
 mkdir -p "$PLANK_MAC_CLIENT_DEPS/downloads" "$PLANK_MAC_CLIENT_DEPS/src" "$prefix"
 export PATH="$prefix/bin:/Applications/CMake.app/Contents/bin:$PATH"
@@ -99,3 +95,5 @@ mkdir -p "$PLANK_MAC_CLIENT_DEPS/build-ffmpeg"
     make install
 )
 pkg-config --modversion sdl3 sdl3-ttf openssl opus libavcodec libavutil
+python3 "$PLANK_SOURCE_ROOT/scripts/test/check-macos-client-target.py" \
+    "$prefix/lib" --target "$PLANK_MAC_CLIENT_MIN_MACOS"
