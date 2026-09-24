@@ -20,6 +20,12 @@ adapted from upstream Quinn commits
 `c50f83bc4f5df16aa71d05e2d20e8f2b04ae4f62`. The double-decrement correction
 is specific to the `DatagramBuffer` refactor shipped in 0.11.17.
 
+PLANK also retains the upstream `instinctual/plank` MTU recovery fix
+(`9afebe0`): a queued DATAGRAM whose size equals the recovered payload limit
+remains valid. Larger packets are dropped and counted separately from
+send-buffer evictions. The vendored Quinn tests cover an unchanged MTU and a
+reduced MTU at the exact size boundary.
+
 The additional `plank-bbr-default` feature makes Quinn's experimental BBR
 controller the default only when PLANK explicitly enables it. Without that
 feature, the vendored crate retains upstream's CUBIC default. This narrow hook
