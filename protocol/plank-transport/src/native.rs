@@ -28,6 +28,10 @@ pub const SETUP_VIDEO_ENDPOINT_ID: u16 = 2;
 pub const SETUP_AUDIO_ENDPOINT_ID: u16 = 4;
 pub const SETUP_INPUT_ENDPOINT_ID: u16 = 6;
 
+#[cfg(test)]
+#[path = "native_version_tests.rs"]
+mod version_tests;
+
 #[derive(Clone, Copy)]
 pub struct NativeOptions {
     pub handshake_timeout: Duration,
@@ -539,7 +543,20 @@ pub async fn promote_setup_client(
 }
 
 #[cfg(test)]
+#[path = "test_loss_proxy.rs"]
+mod loss_proxy;
+
+#[cfg(test)]
+#[path = "test_loss_performance.rs"]
+mod loss_performance;
+
+#[cfg(test)]
 mod tests {
+    use super::loss_performance::{
+        FRAME_DEADLINE, FRAMES_PER_PHASE, LOSS_BASIS_POINTS, PAYLOAD_BYTES, PhasePerformance,
+        TOTAL_FRAMES, frame_offset,
+    };
+    use super::loss_proxy::LossProxy;
     use super::*;
     use crate::rate_control::{PlankRateControllerFactory, TransportRatePolicy};
     use bytes::Bytes;
@@ -548,7 +565,7 @@ mod tests {
         MediaPacketHeader,
     };
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::Ordering;
 
     fn test_certificate_paths() -> (PathBuf, PathBuf, String) {
         let certificate = std::env::var_os("SC_NATIVE_TEST_CERTIFICATE")
@@ -570,51 +587,6 @@ mod tests {
             .expect("loopback UDP socket has no address");
         drop(socket);
         address
-    }
-
-    async fn run_loss_proxy(
-        socket: tokio::net::UdpSocket,
-        server_address: SocketAddr,
-        drop_every_server_packet: Arc<AtomicU64>,
-        forwarded_server_packets: Arc<AtomicU64>,
-        dropped_server_packets: Arc<AtomicU64>,
-    ) {
-        let mut client_address = None;
-        let mut server_sequence = 0_u64;
-        let mut buffer = vec![0_u8; 65_535];
-        loop {
-            let Ok((size, source)) = socket.recv_from(&mut buffer).await else {
-                return;
-            };
-            if source == server_address {
-                let Some(client_address) = client_address else {
-                    continue;
-                };
-                server_sequence = server_sequence.wrapping_add(1);
-                let drop_every = drop_every_server_packet.load(Ordering::Acquire);
-                if drop_every != 0 && server_sequence.is_multiple_of(drop_every) {
-                    dropped_server_packets.fetch_add(1, Ordering::Relaxed);
-                    continue;
-                }
-                if socket
-                    .send_to(&buffer[..size], client_address)
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-                forwarded_server_packets.fetch_add(1, Ordering::Relaxed);
-            } else {
-                client_address = Some(source);
-                if socket
-                    .send_to(&buffer[..size], server_address)
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        }
     }
 
     #[test]
@@ -654,7 +626,6 @@ mod tests {
             congestion_controller_factory: Some(PlankRateControllerFactory::new(
                 rate_policy.clone(),
             )),
-            datagram_pacer: Some(rate_policy.pacer()),
         };
         let server = kynet::Connection::start_server_on_addr(
             address,
@@ -695,7 +666,77 @@ mod tests {
         let mut server_files = server_files.expect("server file endpoints were not negotiated");
         let mut client_files = client_files.expect("client file endpoints were not negotiated");
 
-        let video_send_started = tokio::time::Instant::now();
+        // A Client-created audio source works over the same authenticated QUIC
+        // connection alongside the ordinary Host-created media/input lanes.
+        let (microphone_source, microphone_sink) = tokio::join!(
+            crate::microphone::open_source(&client_connection, options.handshake_timeout),
+            crate::microphone::open_sink(&server_connection, options.handshake_timeout),
+        );
+        let mut microphone_source = microphone_source.expect("reverse audio source");
+        let mut microphone_sink = microphone_sink.expect("reverse audio sink");
+        let microphone_packet = crate::microphone::Packet {
+            generation: 42,
+            sample_time: 0,
+            opus: Bytes::from_static(&[0xF0, 0xFF, 0xFE]),
+        };
+        let microphone_payload = microphone_packet.encode().unwrap();
+        microphone_source
+            .send
+            .send(AVPacket::Codec(CodecPacket {
+                header: CodecPacketHeader {
+                    codec: u32::from_be_bytes(*b"OPUS"),
+                    rotation: 0,
+                    frame_size: 480,
+                },
+            }))
+            .await
+            .unwrap();
+        microphone_source
+            .send
+            .send(AVPacket::Media(MediaPacket {
+                header: MediaPacketHeader {
+                    is_config: true,
+                    is_key: true,
+                    pts: 0,
+                    size: 0,
+                },
+                payload: Bytes::new(),
+            }))
+            .await
+            .unwrap();
+        microphone_source
+            .send
+            .send(AVPacket::Media(MediaPacket {
+                header: MediaPacketHeader {
+                    is_config: false,
+                    is_key: false,
+                    pts: 0,
+                    size: microphone_payload.len() as u32,
+                },
+                payload: microphone_payload,
+            }))
+            .await
+            .unwrap();
+        tokio::time::timeout(options.handshake_timeout, async {
+            assert!(matches!(
+                microphone_sink.recv.recv().await.unwrap(),
+                Some(AVPacket::Codec(_))
+            ));
+            assert!(matches!(
+                microphone_sink.recv.recv().await.unwrap(),
+                Some(AVPacket::Media(packet)) if packet.header.is_config
+            ));
+            let Some(AVPacket::Media(packet)) = microphone_sink.recv.recv().await.unwrap() else {
+                panic!("missing reverse audio packet");
+            };
+            assert_eq!(
+                crate::microphone::Packet::decode(packet.payload).unwrap(),
+                microphone_packet
+            );
+        })
+        .await
+        .expect("reverse audio delivery timeout");
+
         server_video
             .send
             .send(AVPacket::Codec(CodecPacket {
@@ -739,10 +780,6 @@ mod tests {
             }))
             .await
             .expect("failed to send native RaptorQ video frame");
-        assert!(
-            video_send_started.elapsed() >= Duration::from_millis(5),
-            "native RaptorQ symbols bypassed the pre-Quinn pacer"
-        );
 
         let received_video_codec =
             tokio::time::timeout(Duration::from_secs(5), client_video.recv.recv())
@@ -970,22 +1007,7 @@ mod tests {
             .await
             .expect("failed to load loopback private key");
         let server_address = unused_loopback_address();
-        let proxy_socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("failed to bind deterministic loss proxy");
-        let proxy_address = proxy_socket
-            .local_addr()
-            .expect("loss proxy has no local address");
-        let drop_every_server_packet = Arc::new(AtomicU64::new(0));
-        let forwarded_server_packets = Arc::new(AtomicU64::new(0));
-        let dropped_server_packets = Arc::new(AtomicU64::new(0));
-        let proxy_task = tokio::spawn(run_loss_proxy(
-            proxy_socket,
-            server_address,
-            drop_every_server_packet.clone(),
-            forwarded_server_packets.clone(),
-            dropped_server_packets.clone(),
-        ));
+        let mut proxy = LossProxy::start(server_address).expect("failed to start loss proxy");
 
         let options = NativeOptions {
             handshake_timeout: Duration::from_secs(5),
@@ -1002,7 +1024,6 @@ mod tests {
             congestion_controller_factory: Some(PlankRateControllerFactory::new(
                 rate_policy.clone(),
             )),
-            datagram_pacer: Some(rate_policy.pacer()),
         };
         let server = kynet::Connection::start_server_on_addr(
             server_address,
@@ -1015,7 +1036,7 @@ mod tests {
         let (server_protocols, client_protocols) = tokio::join!(
             accept_server(&server, token, options),
             connect_client(
-                proxy_address,
+                proxy.address,
                 "localhost",
                 Some(&certificate_sha256),
                 token,
@@ -1065,63 +1086,120 @@ mod tests {
             .await
             .expect("failed to send loss-test config packet");
 
-        let receiver = tokio::spawn(async move {
-            let mut frames = 0_u64;
-            while frames < 240 {
-                let packet = client_video
-                    .recv
-                    .recv()
-                    .await
-                    .expect("loss-test video endpoint closed")
-                    .expect("loss-test video receive failed");
-                if matches!(packet, AVPacket::Media(ref media) if !media.header.is_config) {
-                    frames += 1;
-                }
-            }
-            frames
-        });
-
         let payload = Bytes::from(
-            (0..312_000)
+            (0..PAYLOAD_BYTES)
                 .map(|index| ((index * 29 + 7) & 0xff) as u8)
                 .collect::<Vec<_>>(),
         );
-        let mut frame_number = 0_u64;
+        let expected_payload = payload.clone();
+        // A single epoch across every phase prevents delayed sends from
+        // silently lowering the offered load or resetting accumulated latency.
+        let matrix_start = tokio::time::Instant::now();
+        let mut receiver = tokio::spawn(async move {
+            let mut received = Vec::with_capacity(TOTAL_FRAMES);
+            while received.len() < TOTAL_FRAMES {
+                let frame = received.len();
+                let deadline = matrix_start + frame_offset(frame) + FRAME_DEADLINE;
+                let packet = tokio::time::timeout_at(deadline, client_video.recv.recv())
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("loss-test receiver missed 100 ms scheduled deadline for frame {frame}")
+                    })
+                    .expect("loss-test video endpoint closed")
+                    .expect("loss-test video receive failed");
+                let received_at = matrix_start.elapsed();
+                if let AVPacket::Media(media) = packet {
+                    if !media.header.is_config {
+                        assert_eq!(media.header.pts, frame as u64 * 1_500);
+                        assert_eq!(media.payload, expected_payload);
+                        received.push(received_at);
+                    }
+                }
+            }
+            received
+        });
+
+        let mut submitted = Vec::with_capacity(TOTAL_FRAMES);
         let mut dropped_after_phase = 0_u64;
-        for drop_every in [200_u64, 100, 50, 20] {
-            drop_every_server_packet.store(drop_every, Ordering::Release);
-            let phase_start = tokio::time::Instant::now();
-            for phase_frame in 0..60_u64 {
-                server_video
-                    .send
-                    .send(AVPacket::Media(MediaPacket {
+        for loss in LOSS_BASIS_POINTS {
+            proxy.loss_basis_points.store(loss, Ordering::Release);
+            let phase_start = matrix_start + frame_offset(submitted.len());
+            for _ in 0..FRAMES_PER_PHASE {
+                let frame_number = submitted.len();
+                let due = matrix_start + frame_offset(frame_number);
+                tokio::time::sleep_until(due).await;
+                tokio::time::timeout_at(
+                    due + FRAME_DEADLINE,
+                    server_video.send.send(AVPacket::Media(MediaPacket {
                         header: MediaPacketHeader {
                             is_config: false,
                             is_key: frame_number == 0,
-                            pts: frame_number * 1_500,
+                            pts: frame_number as u64 * 1_500,
                             size: payload.len() as u32,
                         },
                         payload: payload.clone(),
-                    }))
-                    .await
-                    .expect("failed to send paced loss-test frame");
-                frame_number += 1;
-                tokio::time::sleep_until(
-                    phase_start + Duration::from_nanos((phase_frame + 1) * 1_000_000_000 / 60),
+                    })),
                 )
-                .await;
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("loss-test sender missed 100 ms scheduled deadline for frame {frame_number}")
+                })
+                .expect("failed to send paced loss-test frame");
+                submitted.push(matrix_start.elapsed());
             }
-            let dropped = dropped_server_packets.load(Ordering::Relaxed);
-            assert!(dropped > dropped_after_phase);
+            tokio::time::sleep_until(matrix_start + frame_offset(submitted.len())).await;
+            let dropped = proxy.dropped.load(Ordering::Relaxed);
+            if loss == 0 {
+                assert_eq!(dropped, dropped_after_phase);
+            } else {
+                assert!(dropped > dropped_after_phase);
+            }
+            eprintln!(
+                "fec_loss_phase_basis_points={loss} frames={FRAMES_PER_PHASE} elapsed_ms={} dropped_datagrams={}",
+                phase_start.elapsed().as_millis(), dropped - dropped_after_phase
+            );
             dropped_after_phase = dropped;
         }
-        let received_frames = tokio::time::timeout(Duration::from_secs(5), receiver)
-            .await
+        let received = tokio::time::timeout_at(
+            matrix_start + frame_offset(TOTAL_FRAMES) + FRAME_DEADLINE,
+            &mut receiver,
+        )
+        .await;
+        if received.is_err() {
+            receiver.abort();
+        }
+        // Report/validate the proxy even when the frame-order assertion failed.
+        proxy.finish();
+        let received = received
             .expect("loss-test receiver timed out")
             .expect("loss-test receiver task failed");
-        assert_eq!(received_frames, 240);
-        assert!(forwarded_server_packets.load(Ordering::Relaxed) > 20_000);
-        assert!(dropped_server_packets.load(Ordering::Relaxed) > 500);
+        assert_eq!(received.len(), TOTAL_FRAMES);
+        let mut performance_failures = Vec::new();
+        for (phase, loss) in LOSS_BASIS_POINTS.into_iter().enumerate() {
+            let first = phase * FRAMES_PER_PHASE;
+            let end = first + FRAMES_PER_PHASE;
+            let metrics = PhasePerformance::measure(
+                first,
+                &submitted[first..end],
+                &received[first..end],
+                first.checked_sub(1).map(|index| received[index]),
+            )
+            .expect("invalid loss-test timing samples");
+            let violations = metrics.violations();
+            eprintln!(
+                "fec_loss_performance_basis_points={loss} frames={FRAMES_PER_PHASE} payload_bytes={PAYLOAD_BYTES} submitted_bps={} received_bps={} received_millifps={} submission_max_us={} delivery_p95_us={} delivery_max_us={} receive_gap_max_us={} completion_us={} pass={}",
+                metrics.submitted_bps, metrics.received_bps, metrics.received_millifps,
+                metrics.submission_max.as_micros(),
+                metrics.delivery_p95.as_micros(), metrics.delivery_max.as_micros(),
+                metrics.receive_gap_max.as_micros(), metrics.completion.as_micros(),
+                violations.is_empty(),
+            );
+            if !violations.is_empty() {
+                performance_failures.push((loss, violations));
+            }
+        }
+        assert!(proxy.forwarded.load(Ordering::Relaxed) > 20_000);
+        assert!(proxy.dropped.load(Ordering::Relaxed) > 500);
         let fec = client_connection.protocol_stats();
         let source = fec
             .video_fec_source_symbols
@@ -1131,11 +1209,14 @@ mod tests {
             .expect("missing pre-FEC counter");
         assert!(source > 0 && missing > 0 && missing <= source);
         assert_eq!(fec.video_fec_source_symbols_unrecovered, Some(0));
-        eprintln!("fec_loss_matrix_frames=240 source={source} missing={missing} unrecovered=0");
+        eprintln!("fec_loss_matrix_frames={TOTAL_FRAMES} source={source} missing={missing} unrecovered=0");
 
         server_connection.close();
         client_connection.close();
         server.close(0, "loss test complete");
-        proxy_task.abort();
+        assert!(
+            performance_failures.is_empty(),
+            "loss-test performance gate failed: {performance_failures:?}"
+        );
     }
 }

@@ -22,7 +22,7 @@ case ${PLANK_CLIENT_FRAME_FLOW_TRACE:-0} in
   *) echo "PLANK_CLIENT_FRAME_FLOW_TRACE must be 0 or 1" >&2; exit 2 ;;
 esac
 
-for command_name in c++ cargo cmp diff find git make mktemp nm patch pkg-config qmake6 readelf realpath rg rustc sha256sum stat tar timeout; do
+for command_name in cc c++ cargo cmp diff find git make mktemp nm patch pkg-config qmake6 readelf realpath rg rustc sha256sum stat tar timeout; do
   command -v "$command_name" >/dev/null || {
     echo "required command is unavailable: ${command_name}" >&2
     exit 1
@@ -764,7 +764,10 @@ for required_loss_ui_token in \
   '(clampedLoss - 5.0) / 5.0' \
   'QString("%1%").arg(m_PacketLossPercent' \
   'QRect(174, 16, 52, 17)' \
-  'return toolbarLeft() + 229'; do
+  'return toolbarLeft() + PlankToolbarStats::EncoderTargetLeft' \
+  'Network RTT: %s' \
+  'PlankToolbarStats::networkRttText(stats.lastRtt)' \
+  'PlankToolbarStats::networkRttText(m_NetworkRttMs)'; do
   rg -Fq "$required_loss_ui_token" \
     "$source_dir/app/streaming/session.cpp" \
     "$source_dir/app/streaming/session.h" \
@@ -1485,9 +1488,10 @@ echo "client_relay_wake_gate=pass"
 
 # Native KyProto owns media packetization. Keep the retired GameStream packet
 # size preference and its misleading UI out of the Client.
+# Bundled release notes describe historical changes, not executable policy.
 if rg -n 'packet-size|SER_PACKETSIZE|\bpacketSize MEMBER|networkMtu|plank-network-mtu|videoPacketSizeForMtu|Determine network MTU|Physical path MTU|plankpacketsize' \
   "$source_dir/app" \
-  --glob '!**/languages/**'; then
+  --glob '!**/languages/**' --glob '!*.md'; then
   echo "legacy packet-size configuration is present in PLANK client" >&2
   exit 1
 fi
@@ -1717,7 +1721,7 @@ cleanup_bookmark_test() {
   fi
 }
 trap cleanup_bookmark_test EXIT
-for bookmark_test in outputtopology hostchoices; do
+for bookmark_test in outputtopology hostchoices planktoolbarlogic changelog authenticationtakeover hosttruststore hosttlsguard; do
   mkdir "$bookmark_test_build/$bookmark_test"
   qmake6 "$source_dir/tests/$bookmark_test/$bookmark_test.pro" \
     -o "$bookmark_test_build/$bookmark_test/Makefile"
@@ -1734,6 +1738,16 @@ qmake6 "$repo_dir/tests/protocol/macos-client-discovery.pro" \
 make -C "$bookmark_test_build/persistence" -j"$(nproc)"
 "$bookmark_test_build/persistence/macos-client-discovery" \
   "$repo_dir/tests/protocol/macos-server-information.xml"
+mkdir "$bookmark_test_build/tls-launch"
+qmake6 "$repo_dir/tests/protocol/macos-client-launch.pro" \
+  "PLANK_CLIENT_SOURCE=$source_dir" \
+  "PLANK_COMMON_SOURCE=$source_dir/moonlight-common-c/moonlight-common-c" \
+  -o "$bookmark_test_build/tls-launch/Makefile"
+make -C "$bookmark_test_build/tls-launch" -j"$(nproc)"
+python3 "$repo_dir/tests/auth/macos-client-launch.py" \
+  --client "$bookmark_test_build/tls-launch/macos-client-launch" \
+  --topology "$repo_dir/tests/protocol/macos-output-topology-v13.json" \
+  --certificate-config "$repo_dir/probes/macos/https-cert.cnf"
 cleanup_bookmark_test
 trap - EXIT
 echo "client_host_aware_bookmark_test=pass"
@@ -1744,6 +1758,23 @@ export LD_LIBRARY_PATH="${ffmpeg_prefix}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PAT
   echo "FFmpeg 9 libavcodec pkg-config metadata was not selected" >&2
   exit 1
 }
+
+mkdir -p "$build_dir/tests/pacershutdown"
+(
+  cd "$build_dir/tests/pacershutdown"
+  qmake6 "$source_dir/tests/pacershutdown/pacershutdown.pro" CONFIG+=release
+  make -j"$(nproc)"
+  QT_QPA_PLATFORM=offscreen timeout 60 ./pacershutdown
+)
+echo "client_render_shutdown_gate=pass"
+
+mkdir -p "$build_dir/tests/client-microphone"
+(
+  cd "$build_dir/tests/client-microphone"
+  qmake6 "$repo_dir/tests/audio/client-microphone.pro" "PLANK_CLIENT_SOURCE=$source_dir" CONFIG+=release
+  make -j2
+  timeout 30 ./client-microphone
+)
 
 mkdir -p "$build_dir"
 (
@@ -1761,6 +1792,16 @@ client_binary="${build_dir}/app/plank-client"
   echo "PLANK client package binary was not produced" >&2
   exit 1
 }
+# Validate inclusive coordinates and ordered edge drags through the exact
+# queued input library linked into this candidate, without a desktop or host.
+mkdir -p "$build_dir/tests"
+cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -DNDEBUG \
+  -I"$source_dir/moonlight-common-c/moonlight-common-c/src" \
+  -I"$plank_transport_dir/include" \
+  "$source_dir/moonlight-common-c/moonlight-common-c/tests/native-input-bounds.c" \
+  "$build_dir/moonlight-common-c/libmoonlight-common-c.a" \
+  -lcrypto -lpthread -lm -o "$build_dir/tests/native-input-bounds"
+"$build_dir/tests/native-input-bounds"
 rg -a -Fq 'Packed 4:4:4 requires composed VAAPI layers' \
   "$client_binary" || {
   echo "client binary is missing the exact VAAPI EGL identity frontend" >&2

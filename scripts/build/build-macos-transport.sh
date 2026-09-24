@@ -28,7 +28,10 @@ plank_build_path_flags "$source_root" "$transport_build"
 plank_native_dependency_flags
 export SDKROOT
 SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-export CARGO_TARGET_DIR="$transport_build"
+# Keep Cargo artifacts in the machine-wide shared target directory. Stage only
+# the resulting archive in this build's output for the Host assembly scripts.
+shared_target_dir="${HOME:?}/.cargo/shared-target"
+mkdir -p "$transport_build/release"
 cd "$source_root"
 test "$(rustc +1.89.0 --version | awk '{print $2}')" = 1.89.0
 test -f protocol/plank-transport/Cargo.lock
@@ -44,29 +47,25 @@ if [[ ${PLANK_MACOS_SENDER_TIMING:-0} == 1 ]]; then
 elif [[ ${PLANK_MACOS_SENDER_TIMING:-0} != 0 ]]; then
     echo 'PLANK_MACOS_SENDER_TIMING must be 0 or 1' >&2; exit 2
 fi
-if [[ ${PLANK_MACOS_FAST_SEND:-0} == 1 ]]; then
-    features=(--features macos-fast-send)
-elif [[ ${PLANK_MACOS_FAST_SEND:-0} != 0 ]]; then
-    echo 'PLANK_MACOS_FAST_SEND must be 0 or 1' >&2; exit 2
-fi
 if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
     features=(--features macos-source-first)
 elif [[ ${PLANK_MACOS_SOURCE_FIRST:-0} != 0 ]]; then
     echo 'PLANK_MACOS_SOURCE_FIRST must be 0 or 1' >&2; exit 2
 fi
 # macOS ships Bash3.2, where an empty array is unbound under nounset.
-cargo +1.89.0 build --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
-cargo +1.89.0 test --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
+cargo +1.89.0 build --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
+cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
 if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
     # Dependency unit tests are not run by the root Cargo test command.
     # Compile the production helper/tests against this exact archive's rlib.
-    fec_rlibs=("$transport_build"/release/deps/libraptorq-*.rlib)
+    fec_rlibs=("$shared_target_dir"/release/deps/libraptorq-*.rlib)
     test ${#fec_rlibs[@]} -eq 1 && test -f "${fec_rlibs[0]}"
     rustc +1.89.0 --edition=2024 --test -O tests/protocol/source-first-fec.rs \
-        -L "dependency=$transport_build/release/deps" --extern "raptorq=${fec_rlibs[0]}" \
+        -L "dependency=$shared_target_dir/release/deps" --extern "raptorq=${fec_rlibs[0]}" \
         -o "$transport_build/source-first-test"
     "$transport_build/source-first-test" --nocapture --test-threads=1
 fi
+install -m 0644 "$shared_target_dir/release/libplank_transport.a" "$transport_build/release/libplank_transport.a"
 shasum -a 256 "$transport_build/release/libplank_transport.a"
 
 # Exercise the same real C ABI as Linux, with Apple platform link libraries.

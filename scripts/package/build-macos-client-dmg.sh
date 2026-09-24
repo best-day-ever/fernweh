@@ -4,6 +4,8 @@ set -euo pipefail
 [[ $# == 2 && $1 == /* && $2 == /* ]] || { echo 'usage: build-macos-client-dmg.sh CLEAN_SOURCE NEW_OUTPUT' >&2; exit 2; }
 source_root=$1
 output=$2
+source "$source_root/scripts/build/macos-client-target.sh"
+plank_macos_client_target
 : "${PLANK_MACOS_SIGNING_IDENTITY:?Developer ID Application SHA1 required}"
 : "${PLANK_NOTARY_PROFILE:?Keychain profile required}"
 : "${PLANK_QT_ROOT:?}"
@@ -85,7 +87,10 @@ done < <(find "$app" -type f -print0)
 while IFS= read -r -d '' framework; do
     codesign --force --options runtime --timestamp --sign "$PLANK_MACOS_SIGNING_IDENTITY" "$framework"
 done < <(find "$app" -depth -type d -name '*.framework' -print0)
-codesign --force --options runtime --timestamp --sign "$PLANK_MACOS_SIGNING_IDENTITY" "$app"
+python3 "$source_root/scripts/test/check-macos-client-target.py" \
+    "$app" --target "$PLANK_MAC_CLIENT_MIN_MACOS" > "$output/client-targets.json"
+codesign --force --options runtime --timestamp --sign "$PLANK_MACOS_SIGNING_IDENTITY" \
+    --entitlements "$source_root/packaging/client/macos/entitlements.plist" "$app"
 codesign --verify --deep --strict "$app"
 # The Touch ID helper is signed by the loop above like every Mach-O: hardened
 # runtime, no entitlements (CryptoKit Secure Enclave keys need none).

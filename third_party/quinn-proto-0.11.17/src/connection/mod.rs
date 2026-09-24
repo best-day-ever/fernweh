@@ -76,6 +76,8 @@ use spaces::{PacketNumberFilter, PacketSpace, SendableFrames, SentPacket, ThinRe
 
 mod stats;
 pub use stats::{ConnectionStats, FrameStats, PathStats, UdpStats};
+#[cfg(feature = "plank-telemetry")]
+pub use stats::PlankTelemetry;
 
 mod streams;
 #[cfg(fuzzing)]
@@ -1270,17 +1272,6 @@ impl Connection {
         {
             let controller_metrics = self.path.congestion.metrics();
             let queue = self.datagrams.outgoing.telemetry();
-            let rtt_nanos = stats.path.rtt.as_nanos();
-            let effective_pacing_bps = if rtt_nanos == 0 {
-                0
-            } else {
-                let bits_per_second = u128::from(stats.path.cwnd)
-                    .saturating_mul(8)
-                    .saturating_mul(1_000_000_000)
-                    .saturating_mul(5)
-                    / rtt_nanos.saturating_mul(4);
-                bits_per_second.min(u128::from(u64::MAX)) as u64
-            };
             let controller = if cfg!(feature = "plank-bbr-default") {
                 "bbr"
             } else if controller_metrics.pacing_rate.is_some() {

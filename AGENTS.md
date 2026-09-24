@@ -100,7 +100,7 @@ macOS compatibility paths. Beta results require revalidation against the final
 OS release. This work does not change the supported Linux release gates below.
 
 Experimental macOS Client builds use the same authorized dedicated development
-Mac, Apple Silicon, SDK27 and deployment target27.0. See
+Mac, Apple Silicon, SDK27 or newer and deployment target15.0. See
 `docs/development/plans/macos-client.plan` and `docs/development/build/macos-client-build-runbook.md`. This is not
 permission to compile Linux packages on the Mac or restore inherited prebuilts.
 

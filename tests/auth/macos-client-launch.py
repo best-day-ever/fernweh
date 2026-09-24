@@ -4,9 +4,11 @@ import argparse
 import base64
 import http.server
 import json
+import os
 from pathlib import Path
 import secrets
 import ssl
+import sys
 import subprocess
 import tempfile
 import threading
@@ -21,7 +23,9 @@ def main():
     args = parser.parse_args()
     topology = json.loads(Path(args.topology).read_text())
     modes = ("success", "wrong-pin", "certificate-swap", "redirect", "denied", "permissions",
-             "oversized", "malformed", "wrong-port", "audio", "timeout", "auth-busy")
+             "oversized", "malformed", "wrong-port", "audio", "timeout", "auth-busy",
+             "auth-first", "auth-recovery-known", "auth-recovery-unknown", "auth-changed",
+             "auth-mid-change", "auth-replace-cancel", "auth-replace-accept")
     with tempfile.TemporaryDirectory(prefix="plank-client-launch-") as directory:
         root = Path(directory)
         for number in (1, 2):
@@ -59,6 +63,12 @@ def main():
                     self.close_connection = True
 
                 def do_GET(self):
+                    if mode.startswith("auth-") and self.path.startswith("/serverinfo"):
+                        if self.headers.get("Authorization"):
+                            faults.append("credentials in trust preflight")
+                        requests.append("discovery")
+                        self.respond(200, b'<root status_code="200"/>')
+                        return
                     if (self.path != "/plank/topology" or
                             self.headers.get("Authorization") != "Bearer " + token):
                         faults.append("unexpected topology request")
@@ -70,6 +80,26 @@ def main():
                     self.respond(200, json.dumps(topology).encode())
 
                 def do_POST(self):
+                    if mode.startswith("auth-") and mode != "auth-busy":
+                        if self.headers.get("Authorization"):
+                            faults.append("bearer in new authentication")
+                        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                        if self.path == "/plank/auth/start":
+                            requests.append("auth")
+                            if body != {"username": "synthetic"}:
+                                faults.append("invalid authentication start")
+                            if mode == "auth-mid-change":
+                                context.load_cert_chain(root / "cert2.pem", root / "key2.pem")
+                            self.respond(200, b'{"state":"challenge","conversation_id":"fixture","messages":[{"style":1}]}')
+                        elif self.path == "/plank/auth/respond":
+                            requests.append("password")
+                            if body != {"conversation_id": "fixture", "responses": ["fixture-password"]}:
+                                faults.append("invalid authentication response")
+                            self.respond(200, json.dumps({"state": "authenticated", "session_token": token}).encode())
+                        else:
+                            faults.append("unexpected authentication path")
+                            self.respond(403, b"{}")
+                        return
                     if mode == "auth-busy":
                         requests.append("auth")
                         if self.path != "/plank/auth/start" or self.headers.get("Authorization"):
@@ -81,10 +111,11 @@ def main():
                     if self.path != "/plank/launch" or self.headers.get("Authorization") != "Bearer " + token:
                         faults.append("unexpected launch target or authorization")
                     body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-                    expected = {"schema_version": 2, "capture_generation": topology["generation"],
+                    expected = {"schema_version": 4, "capture_generation": topology["generation"],
                                 "capture_id": topology["capture"]["id"], "width": topology["capture"]["width"],
                                 "height": topology["capture"]["height"], "encoding_mode": "hevc-10-420-videotoolbox",
-                                "frame_rate": 60, "bitrate_kbps": 50000, "max_udp_payload_size": 1200}
+                                "frame_rate": 60, "bitrate_kbps": 50000, "max_udp_payload_size": 1200,
+                                "clipboard": sys.platform == "darwin", "microphone": True}
                     if body != expected:
                         faults.append("launch tuple mismatch")
                     if mode == "redirect":
@@ -101,11 +132,11 @@ def main():
                     if mode in ("oversized", "malformed"):
                         self.respond(200, b"x" * (40000 if mode == "oversized" else 1))
                         return
-                    response = {"schema_version": 2, "state": "connecting",
+                    response = {"schema_version": 4, "state": "connecting",
                                 "udp_port": self.server.server_port,
                                 "max_udp_payload_size": 1200, "capture": topology["capture"],
                                 "transport_token": base64.b64encode(b"x" * 32).decode(),
-                                "services": {"audio": True, "input": True, "pen": "normalized", "cursor": "embedded"}}
+                                "services": {"audio": True, "input": True, "pen": "normalized", "cursor": "embedded", "clipboard": False, "microphone": False}}
                     if mode == "wrong-port":
                         response["udp_port"] = 1
                     if mode == "audio":
@@ -117,14 +148,22 @@ def main():
             worker = threading.Thread(target=server.serve_forever)
             worker.start()
             try:
+                prior = "cert2.pem" if mode in ("auth-changed", "auth-replace-cancel", "auth-replace-accept") else "cert1.pem"
                 result = subprocess.run([args.client, mode, str(server.server_port)],
-                                        input=json.dumps({"token": token}), text=True,
+                                        input=json.dumps({"token": token, "certificate": (root / prior).read_text()}), text=True,
+                                        env={**os.environ, "XDG_DATA_HOME": str(root / mode)},
                                         capture_output=True, timeout=12)
-                if token in result.stdout + result.stderr or "do-not-log-this-response" in result.stdout + result.stderr:
+                if any(secret in result.stdout + result.stderr for secret in (token, "fixture-password", "do-not-log-this-response")):
                     raise RuntimeError(f"{mode}: sensitive response reached diagnostics")
                 if result.returncode:
                     raise RuntimeError(f"{mode}: Client qualification failed ({result.returncode}): {result.stderr}")
-                expected_requests = ["auth"] if mode == "auth-busy" else ["topology"] if mode in ("wrong-pin", "certificate-swap") else ["topology", "launch"]
+                expected_requests = ["discovery", "auth"] if mode == "auth-busy" else ["topology"] if mode in ("wrong-pin", "certificate-swap") else ["topology", "launch"]
+                if mode in ("auth-first", "auth-recovery-known", "auth-replace-accept"):
+                    expected_requests = ["discovery", "auth", "password"]
+                elif mode in ("auth-recovery-unknown", "auth-changed", "auth-replace-cancel"):
+                    expected_requests = []
+                elif mode == "auth-mid-change":
+                    expected_requests = ["discovery", "auth"]
                 if requests != expected_requests or faults:
                     raise RuntimeError(f"{mode}: incorrect HTTP request sequence")
                 print(f"{mode}: pass", flush=True)

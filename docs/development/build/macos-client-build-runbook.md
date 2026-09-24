@@ -93,6 +93,15 @@ bash "$PLANK_SOURCE_ROOT/scripts/build/build-macos-client.sh" \
   "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/client-build"
 ```
 
+For repeated local Wacom tests, `stage-macos-client-dev.sh` can use a stable
+code-signing identity from the local keychain. Set
+`PLANK_MACOS_DEV_SIGNING_IDENTITY` to its 40-character SHA-1 identifier before
+staging. The default remains ad hoc signing. Every changed ad hoc build has a
+new `cdhash` requirement, so macOS may reject its prior Input Monitoring grant;
+the operator must approve any new grant through System Settings. A signed
+development app remains unnotarized and is not a distributable release. Do not
+put signing-key passwords in scripts or environment variables.
+
 For a self-contained drag-to-Applications DMG, in the signing SSH session:
 
 ```bash
@@ -113,6 +122,43 @@ the app to Trash. Host installation/permissions are separate and unchanged.
 
 ## Known failure signatures
 
+- macOS system shortcuts require the Client's Accessibility authorization when
+  Capture system keyboard shortcuts is enabled. The session-scoped public
+  Core Graphics modifying tap queues keyboard input for the existing input
+  handler; it does not post synthetic OS input or change global preferences.
+  Native stream focus, the fullscreen/always policy, and capture release gate
+  activation. Missing permission prompts once per process in the ordinary
+  launcher at startup (only if shortcut capture is enabled), or when enabled
+  later in Settings. CLI autoconnect never prompts; open the ordinary launcher
+  first to authorize it. Session creation, focus changes and permission
+  revocation never display permission UI. A silent one-second main-run-loop
+  check detects authorization changes. Revocation, tap timeout,
+  focus loss, queue failure and teardown discard pending input and release
+  remote keys. Capture is retried only after rechecking permission and focus.
+  The authorized tap stays registered during ordinary focus loss; background
+  keys pass through untouched before their key data is inspected. Returning to
+  the stream re-arms forwarding on the first key using native AppKit focus and
+  active-Space state, not cached SDL focus or a later timer tick. Do not disable
+  the tap on every focus loss: that prevents first-key recovery after a Spaces
+  swipe. Explicit capture release and revoked permission still block re-arm;
+  teardown/revocation remove the tap. Test repeated three-finger swipe-away and
+  return without an intervening click, not just the first connected shortcut.
+  Ctrl+Alt+Shift+Z remains the release toggle; mouse/trackpad gestures, Fn/media
+  controls and explicit menu/Dock Quit stay local. Keys are never logged.
+  The `mackeyboardcapture` native suite exercises the production callback and
+  bounded queue without installing an OS tap or requesting permission. It is
+  not proof of live TCC, Command-Tab/Command-Space or Spaces behavior: test the
+  signed app with permission granted/denied/revoked and focus changes on both
+  supported Mac OS versions. Do not enable SDL's optional private CGS grab
+  path or restore global hotkey suppression as an alternative.
+- A visible toolbar flashing during a stats update can be a Metal overlay
+  publication race. Build/upload the replacement before exchanging the texture
+  under the overlay lock, and preserve the old image on allocation failure.
+  Do not publish an empty slot except for an explicit hide. Every Mac Client
+  build runs `macmetaloverlay` against the production updater with deterministic
+  allocation/upload stalls, allocation failure, concurrent readers and lifetime
+  checks. The test uses Metal resource doubles without a desktop/GPU; it does
+  not replace the native GPU presentation probe or live flicker acceptance.
 - Command-Q reaching the Host and also quitting PLANK is duplicate native
   shortcut handling, not a transport disconnect. SDL queues the key before
   AppKit can activate the local Quit menu. The shortcut guard prevents local
@@ -159,7 +205,10 @@ the app to Trash. Host installation/permissions are separate and unchanged.
   `tests/video/macos-client-tls.cpp` probe distinguishes backend availability
   from Host reachability without sending credentials. It must run from an app
   bundle when testing bundled OpenSSL lookup (a bare CLI has no Frameworks
-  directory for Qt to discover). See the pinned [Qt6.10.2 loader source](https://github.com/qt/qtbase/blob/v6.10.2/src/plugins/tls/openssl/qsslsocket_openssl_symbols.cpp).
+  directory for Qt to discover). Bare build-time TLS tests instead receive
+  `DYLD_LIBRARY_PATH="$PLANK_MAC_CLIENT_DEPS/install/lib"` for those same pinned
+  libraries; this is not a packaged runtime setting or a substitute for the
+  bundled gate. See the pinned [Qt6.10.2 loader source](https://github.com/qt/qtbase/blob/v6.10.2/src/plugins/tls/openssl/qsslsocket_openssl_symbols.cpp).
 - macOS Local Network privacy can block an otherwise valid packaged Client
   with network error99 while loopback and a separately launched curl work.
   Inspect `/usr/bin/log show --info --debug` for Local Network blocked events

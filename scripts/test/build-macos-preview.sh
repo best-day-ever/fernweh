@@ -26,10 +26,12 @@ common=(-mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror
     -framework CoreVideo -framework ScreenCaptureKit -framework VideoToolbox -framework AudioToolbox -framework CoreAudio
     -framework Carbon -framework ApplicationServices -framework IOKit -Wl,-sectcreate,__CGPreLoginApp,__cgpreloginapp,/dev/null)
 sources=(apps/host/macos/auth/authentication-session.m apps/host/macos/auth/graphical-authority.m
+    apps/host/macos/session/agent-registry.m apps/host/macos/session/agent-connection.m
     apps/host/macos/session/host-runtime.m
     apps/host/macos/control/http-request.m apps/host/macos/control/server-information.m
     apps/host/macos/control/fixed-capture.m apps/host/macos/control/https-auth-server.m
-    apps/host/macos/media/native-video.m apps/host/macos/media/preview-session.m apps/host/macos/media/screen-capture.m
+    apps/host/macos/media/native-video.m apps/host/macos/media/preview-session.m apps/host/macos/media/clipboard-sync.m apps/host/macos/media/screen-capture.m
+    apps/host/macos/media/microphone-session.m apps/host/macos/audio-device/microphone-producer.m
     apps/host/macos/media/native-audio.m apps/host/macos/media/opus-encoder.m apps/host/macos/media/audio-tap.m
     apps/host/macos/input/input-events.m apps/host/macos/input/native-input.m apps/host/macos/input/quartz-input.m
     probes/macos/https-auth.m)
@@ -38,6 +40,28 @@ xcrun clang "${common[@]}" -DPLANK_MAC_PREVIEW_TEST -DPLANK_SYNTHETIC_AUTH_TEST 
 xcrun clang "${common[@]}" probes/macos/preview-receive.m "$archive" -lpthread -lm \
     -o "$preview_build/preview-receive"
 if [[ ${4:-} = --synthetic-only ]]; then
+    # Root is confined to synthetic loopback children and ephemeral identities;
+    # no installation, real authentication, display or input is exercised.
+    sudo -n "$(command -v python3)" tests/auth/macos-https-handoff.py \
+        --server "$preview_build/preview-synthetic" --config probes/macos/https-cert.cnf \
+        --uid "$(id -u)" --gid "$(id -g)"
+    # Fault injection: the same real server with graceful TCP cancellation
+    # restored MUST fail cross-UID rebind specifically with EADDRINUSE.
+    # This test-only binary and synthetic TLS identity are never packaged.
+    graceful_sources=()
+    for source_file in "${sources[@]}"; do
+        if [[ $source_file = apps/host/macos/control/https-auth-server.m ]]; then
+            graceful_sources+=(tests/auth/macos-https-graceful-close.m)
+        else
+            graceful_sources+=("$source_file")
+        fi
+    done
+    xcrun clang "${common[@]}" -DPLANK_MAC_PREVIEW_TEST -DPLANK_SYNTHETIC_AUTH_TEST \
+        "${graceful_sources[@]}" tests/input/macos-fake-input.m "$archive" -lpthread -lm \
+        -o "$preview_build/preview-graceful-close"
+    sudo -n "$(command -v python3)" tests/auth/macos-https-handoff.py \
+        --server "$preview_build/preview-graceful-close" --config probes/macos/https-cert.cnf \
+        --uid "$(id -u)" --gid "$(id -g)" --expect-lingering-close
     python3 tests/auth/macos-https-auth.py --server "$preview_build/preview-synthetic" \
         --config probes/macos/https-cert.cnf --preview-receiver "$preview_build/preview-receive"
     python3 tests/auth/macos-permission-admission.py --server "$preview_build/preview-synthetic"

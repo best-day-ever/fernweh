@@ -175,6 +175,15 @@ CARGO_TARGET_DIR="$PLANK_WORK_ROOT/cargo-bootstrap-check" \
 The bootstrap intentionally uses the network. Candidate builds use the pinned
 lockfile and `--offline`.
 
+On the Linux Host builder only, also fetch the separately pinned test dependencies
+for the vendored Quinn boundary/accounting gate. They are never product link
+inputs:
+
+```bash
+cargo fetch --locked --target x86_64-unknown-linux-gnu \
+  --manifest-path "$PLANK_CANONICAL_ROOT/third_party/quinn-proto-0.11.17/Cargo.toml"
+```
+
 ## linux-client-builder inputs
 
 ```bash
@@ -182,7 +191,7 @@ sudo apt-get update
 sudo apt-get install -y \
   build-essential cmake curl gh git make nasm ninja-build nodejs openssl patch \
   pkg-config python3 python3-venv ripgrep xz-utils \
-  qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-wayland \
+  qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-svg-plugins qt6-wayland \
   libsdl3-dev libsdl3-ttf-dev libdecor-0-dev libdrm-dev libinput-dev \
   libopus-dev libplacebo-dev libssl-dev libudev-dev libva-dev \
   libvdpau-dev libwayland-dev libx11-dev zlib1g-dev

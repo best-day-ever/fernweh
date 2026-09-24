@@ -21,11 +21,12 @@ done
     stop_roles() { calls="$calls|stop"; }
     present() { return 0; }
     verify_app() { [[ $1 = yes ]]; calls="$calls|verify"; }
+    verify_microphone_driver() { calls="$calls|verify-microphone"; }
     remove_cmd() { calls="$calls|remove:$*"; }
     receipt_cmd() { calls="$calls|receipt:$*"; }
     reject uninstall_host unexpected-argument
     uninstall_host >/dev/null
-    [[ $calls = "|preflight|stop|remove:/Library/LaunchDaemons/$machine.plist|remove:/Library/LaunchAgents/$desktop.plist|remove:/Library/LaunchAgents/$signin.plist|verify|remove:-rf /Applications/PLANK Host.app|receipt:--pkg-info la.instinctual.PLANK.Host|receipt:--forget la.instinctual.PLANK.Host" ]]
+    [[ $calls = "|preflight|stop|verify-microphone|remove:-rf /Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver|remove:/Library/LaunchDaemons/$machine.plist|remove:/Library/LaunchAgents/$desktop.plist|remove:/Library/LaunchAgents/$signin.plist|verify|remove:-rf /Applications/PLANK Host.app|receipt:--pkg-info la.instinctual.PLANK.Host|receipt:--forget la.instinctual.PLANK.Host" ]]
     # Never remove anything when preflight or bounded shutdown fails.
     remove_cmd() { echo 'unexpected removal'; exit 90; }
     preflight() { fail 'fixture unsafe metadata'; }
@@ -142,14 +143,24 @@ if [[ $(uname -s) = Darwin ]]; then
 fi
 
 if [[ ${1:-} = --filesystem ]]; then
-    [[ $(uname -s) = Darwin && $(id -u) = 0 ]] || fail 'Filesystem fixture requires root on the development Mac'
+    [[ $(uname -s) = Darwin && $(id -u) = 0 ]] || fail 'Filesystem fixture requires root on an authorized Mac builder'
     fixture=$(/usr/bin/mktemp -d '/Library/Application Support/PLANKPackageTest.XXXXXX')
     cleanup() {
         case $fixture in '/Library/Application Support/PLANKPackageTest.'*) /bin/rm -rf "$fixture";; esac
     }
     trap cleanup EXIT
+    /bin/chmod 755 "$fixture"
+    /usr/bin/cc -std=gnu11 -Wall -Wextra -Werror \
+        "$root/tests/packaging/macos-log-access.c" -o "$fixture/log-access"
     state="$fixture/state"; logs="$fixture/logs"
     initialize_state
+    prepare_machine_authority
+    [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs") = root:admin:750 ]]; ok
+    for name in host-machine.log host-sign-in.log; do
+        [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs/$name") = root:admin:640 ]]; ok
+        "$fixture/log-access" "$logs" "$logs/$name" "$state/SignIn/key.pem" admin; ok
+        "$fixture/log-access" "$logs" "$logs/$name" "$state/SignIn/key.pem" wheel; ok
+    done
     [[ $(/usr/libexec/PlistBuddy -c 'Print :Address' "$state/host.plist") = 0.0.0.0 ]]; ok
     [[ $(/usr/libexec/PlistBuddy -c 'Print :Port' "$state/host.plist") = 28989 ]]; ok
     /usr/bin/plutil -replace Port -integer 29999 "$state/host.plist"
@@ -157,14 +168,48 @@ if [[ ${1:-} = --filesystem ]]; then
     initialize_state
     after=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
     [[ $before = "$after" ]]; ok
+    # Renewal and the CA-profile upgrade retain the machine private key. No
+    # root key is copied to desktop users, and a second install is idempotent.
+    machine_key_before=$(/usr/bin/shasum -a 256 "$state/SignIn/key.pem" "$state/SignIn/key.der")
+    /usr/bin/openssl req -new -x509 -key "$state/SignIn/key.pem" -days 1 \
+        -subj '/CN=PLANK Host' -addext subjectAltName=DNS:plank-host -out "$state/SignIn/cert.pem"
+    prepare_machine_authority
+    /usr/bin/openssl x509 -in "$state/SignIn/cert.pem" -noout -checkend 2592000; ok
+    [[ $machine_key_before = "$(/usr/bin/shasum -a 256 "$state/SignIn/key.pem" "$state/SignIn/key.der")" ]]; ok
+    before=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
+    prepare_machine_authority
+    [[ $before = "$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
+    # An interrupted certificate-pair update must be repaired on reinstall.
+    printf 'damaged DER fixture' > "$state/SignIn/cert.der"
+    prepare_machine_authority
+    /usr/bin/cmp -s <(/usr/bin/openssl x509 -in "$state/SignIn/cert.pem" -outform DER) "$state/SignIn/cert.der"; ok
+    [[ $machine_key_before = "$(/usr/bin/shasum -a 256 "$state/SignIn/key.pem" "$state/SignIn/key.der")" ]]; ok
+    before=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
     # Reproduce the real .82 failure without changing product paths/services.
     /bin/chmod 744 "$logs"
     /bin/chmod 644 "$logs/host-machine.log" "$logs/host-sign-in.log"
     initialize_state
-    [[ $(/usr/bin/stat -f %Lp "$logs") = 700 ]]; ok
-    safe_file "$logs/host-machine.log" 600; ok
-    safe_file "$logs/host-sign-in.log" 600; ok
+    [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs") = root:admin:750 ]]; ok
+    safe_file "$logs/host-machine.log" 640; ok
+    safe_file "$logs/host-sign-in.log" 640; ok
     [[ $before = "$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
+    # Upgrade the previous root-only policy without changing contents or keys.
+    /usr/sbin/chown root:wheel "$logs" "$logs/host-machine.log" "$logs/host-sign-in.log"
+    /bin/chmod 700 "$logs"
+    /bin/chmod 600 "$logs/host-machine.log" "$logs/host-sign-in.log"
+    initialize_state
+    [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs") = root:admin:750 ]]; ok
+    for name in host-machine.log host-sign-in.log; do
+        [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs/$name") = root:admin:640 ]]; ok
+    done
+    check_configuration; ok
+    [[ $before = "$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
+    /bin/chmod 660 "$logs/host-sign-in.log"
+    reject prepare_logs
+    /bin/chmod 640 "$logs/host-sign-in.log"
+    /bin/chmod 770 "$logs"
+    reject prepare_logs
+    /bin/chmod 750 "$logs"
     /bin/ln "$logs/host-machine.log" "$fixture/log-hardlink"
     reject prepare_logs
     /bin/rm "$fixture/log-hardlink"

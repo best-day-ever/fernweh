@@ -9,12 +9,8 @@ build=$2
 : "${PLANK_RUSTUP_ROOT:?}"
 : "${PLANK_CARGO_ROOT:?}"
 : "${PLANK_BUILD_BRANCH:?Detached builds require an explicit branch}"
-[[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || exit 2
-# Oldest macOS the Client runs on (Qt 6.10 floor: 13); must match the deps' target.
-export MACOSX_DEPLOYMENT_TARGET=${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}
-export SDKROOT
-SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-[[ $(xcrun --sdk macosx --show-sdk-version) == 27* ]] || exit 2
+source "$source_root/scripts/build/macos-client-target.sh"
+plank_macos_client_target
 export CARGO_HOME="$PLANK_CARGO_ROOT" RUSTUP_HOME="$PLANK_RUSTUP_ROOT"
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C strip=none" # SDK27 proc-macro guard.
 source "$source_root/scripts/build/build-paths.sh"
@@ -31,14 +27,23 @@ version=$PLANK_PACKAGE_VERSION
 client="$source_root/apps/client"
 test "$(qmake -query QT_VERSION)" = 6.10.2
 test "$(rustc --version | awk '{print $2}')" = 1.89.0
+python3 "$source_root/tests/packaging/test-macos-client-target.py"
 python3 "$source_root/tests/packaging/test-macos-fullscreen.py" "$source_root"
 python3 "$source_root/tests/packaging/test-macos-quit-lifecycle.py" "$source_root"
+python3 "$source_root/tests/packaging/test-macos-metal-overlay.py"
+python3 "$source_root/tests/packaging/test-macos-keyboard-capture.py"
 patch_file="$client/app/deploy/linux/ffmpeg-patches/0001-hevc-enable-hwaccel-for-identity-gbr.patch"
 printf '%s  %s\n' 059cc9c0d585d71e292cd7421a43f239b1e7ce94e8598d0a7427dfe48e55847e "$patch_file" | shasum -a 256 -c -
 patch --batch --reverse --dry-run -d "$PLANK_MAC_CLIENT_DEPS/src/ffmpeg-9.0.1" -p1 < "$patch_file"
 pkg-config --modversion sdl3 sdl3-ttf openssl opus libavcodec libavutil
 mkdir -p "$build"
+python3 "$source_root/scripts/test/check-macos-client-target.py" \
+    "$PLANK_MAC_CLIENT_DEPS/install/lib" --target "$PLANK_MAC_CLIENT_MIN_MACOS" \
+    > "$build/dependency-targets.json"
 cd "$build"
+# qmake preserves an existing bundle plist. Regenerate it from the current
+# source and deployment target before restoring the visible package version.
+rm -f "$build/app/plank-client.app/Contents/Info.plist"
 # Recursive generation is mandatory when retaining a build: otherwise existing
 # subproject Makefiles may silently retain the previous source/version/flags.
 qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
@@ -54,7 +59,7 @@ passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
 test -x "$passkey_helper"
 bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in outputtopology plankdisplaymode planktoolbarlogic plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown; do
+for suite in outputtopology plankdisplaymode planktoolbarlogic plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom metalpresentation; do
 mkdir -p "$build/tests/$suite"
 (
     cd "$build/tests/$suite"
@@ -65,6 +70,33 @@ mkdir -p "$build/tests/$suite"
     PLANK_REPO_ROOT="$source_root" PLANK_PASSKEY_HELPER="$passkey_helper" QT_QPA_PLATFORM=offscreen "./$suite"
 )
 done
+# Dummy input only: no microphone permission or physical recording on builders.
+mkdir -p "$build/tests/client-microphone"
+(
+    cd "$build/tests/client-microphone"
+    qmake "$source_root/tests/audio/client-microphone.pro" "PLANK_CLIENT_SOURCE=$client" \
+        "QMAKE_CXXFLAGS+=-include arm_acle.h" \
+        CONFIG+=release QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64
+    make -j2
+    ./client-microphone
+)
+# Exercise the actual input worker with a queued drag, without a host or UI.
+cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -DNDEBUG \
+    -arch arm64 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -I"$client/moonlight-common-c/moonlight-common-c/src" \
+    -I"$source_root/protocol/plank-transport/include" \
+    "$source_root/tests/session/native-input-wire.c" \
+    "$build/moonlight-common-c/libmoonlight-common-c.a" \
+    -o "$build/tests/native-input-wire"
+"$build/tests/native-input-wire"
+cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -DNDEBUG \
+    -arch arm64 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -I"$client/moonlight-common-c/moonlight-common-c/src" \
+    -I"$source_root/protocol/plank-transport/include" \
+    "$client/moonlight-common-c/moonlight-common-c/tests/native-input-bounds.c" \
+    "$build/moonlight-common-c/libmoonlight-common-c.a" \
+    -o "$build/tests/native-input-bounds"
+"$build/tests/native-input-bounds"
 plist="$build/app/plank-client.app/Contents/Info.plist"
 test "$(/usr/libexec/PlistBuddy -c 'Print :NSPrefersDisplaySafeAreaCompatibilityMode' "$plist")" = false
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $PLANK_BASE_VERSION" "$plist"
@@ -74,3 +106,6 @@ if /usr/libexec/PlistBuddy -c 'Print :PLANKVersion' "$plist" >/dev/null 2>&1; th
 else
     /usr/libexec/PlistBuddy -c "Add :PLANKVersion string $version" "$plist"
 fi
+python3 "$source_root/scripts/test/check-macos-client-target.py" \
+    "$build/app/plank-client.app" --target "$PLANK_MAC_CLIENT_MIN_MACOS" \
+    > "$build/client-targets.json"

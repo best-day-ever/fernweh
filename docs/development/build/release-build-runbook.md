@@ -144,6 +144,47 @@ Distinguish `/usr/bin/plank-host` (launcher script) from
 
 ## Native transport lifecycle qualification
 
+The Linux Host build runs the vendored Quinn DATAGRAM boundary/accounting tests
+before compilation. Prepare its test-only dependencies with
+`cargo fetch --locked --target x86_64-unknown-linux-gnu --manifest-path third_party/quinn-proto-0.11.17/Cargo.toml`
+alongside the production transport fetch. Hosted bootstrap does this
+automatically. These use the vendor's separate lockfile and test archive, never
+the production link inputs.
+
+The native loss matrix requires three consecutive release-mode passes for the
+selected shipping rate policy, with no retry after failure. The loopback runner defaults to release;
+an explicitly requested debug run is diagnostic, not performance qualification.
+Each pass sends exactly 150 Mbps of payload at 60 fps: 312,500 bytes per frame,
+180 frames (three seconds) at each of 0/0.5/1/3/5% induced loss. Every pass
+requires all 900 payloads byte-for-byte in order and zero unrecovered source
+symbols, plus these fixed performance gates **at every loss level**:
+
+- Submitted and received payload throughput at least 142.5 Mbps (95% of nominal).
+- p95 scheduled-frame-to-complete-frame delivery at most 50 ms.
+- Maximum scheduled submission and delivery at most 100 ms.
+- Maximum receive gap at most 100 ms, including across loss-phase boundaries.
+
+One continuous 60 Hz schedule supplies the timing origin: a delayed send must
+not reset its deadline, lower the offered load, or disguise accumulated latency.
+Send/receive waits use absolute 100 ms deadlines; measured completion times also
+catch synchronous work that an async timeout cannot preempt. Per-phase output
+includes submitted/received payload rates, received frame rate, worst submission,
+p95/worst delivery, worst receive gap, completion duration and pass/fail. These
+are loopback regression bounds, not WAN or glass-to-glass latency guarantees;
+payload rates exclude FEC, QUIC and IP overhead. Deterministic unit tests prove
+that slow senders, catch-up stalls and delayed phases fail even when all frames
+eventually arrive. The matrix's fixed-size frames and evenly spaced proxy drops
+do not replace hardware, variable-keyframe, burst-loss or WAN soak testing.
+
+Its dedicated test-only proxy reports
+the effective socket receive buffer and Linux per-socket kernel drops separately
+from deliberately injected loss. `controlled_loss_only=false` means extra local
+drops occurred (or the counter is unavailable on that OS); do not describe that
+run as an exact-loss measurement. A complete recovery pass still exercises at
+least the deliberate loss. Any frame failure remains a failure, regardless of
+proxy drops. Do not loosen assertions, add retries, tune machine-wide sysctls,
+or change product pacing/FEC/latency to hide a fixture limitation.
+
 For native transport lifecycle changes, run the Rust completion tests and the
 real C ABI stress runner on Linux and the dedicated Mac:
 `bash scripts/test/run-peer-close-stress.sh ABSOLUTE_ARCHIVE NEW_OUTPUT 50`.
@@ -245,7 +286,12 @@ assumed the bundle advertises `HEAD`; use the exact ref printed by
 ## Client DEB — linux-client-builder only
 
 The Host/Client base version is packaging/VERSION. Increment it for new package
-bytes. Set PLANK_BUILD_BRANCH explicitly on detached snapshots: main produces
+bytes. Starting with **1.1.001**, retain a three-digit, zero-padded patch component
+(1.1.002, 1.1.003, and so on) in the product version and package filenames.
+This is the operator-facing product numbering convention, not strict SemVer;
+do not parse the padded component as octal or strip its leading zeroes.
+Internal dependency/crate versions and protocol negotiation are separate.
+Set PLANK_BUILD_BRANCH explicitly on detached snapshots: main produces
 an unqualified version; a feature branch adds its lowercase kebab-case name to
 package filenames and visible application versions. Never relabel a candidate
 after merging; rebuild from main. RPM feature Release values sort below the
@@ -597,6 +643,29 @@ decode/import and live playback acceptance; see
 
 ## Host RPM — linux-host-builder only
 
+Host packaging selects `PLANK_TRANSPORT_CARGO_FEATURES=quinn-telemetry` by
+default. The application datagram pacer and platform-specific fast-send switches
+have been removed. All builds use the same 1 Gbps floor for the Host's
+RTT-bounded Quinn window budget; encoder target, FEC, queues and MTU remain
+independent. Quinn still schedules packets. There is no paced comparison build
+to select, and the package always verifies its sender-budget marker.
+The historical experiment is retained in `docs/development/plans/linux-fast-send.plan`;
+do not reuse its removed feature flags. The simultaneous RaptorQ 2 upgrade
+requires matching Host/Client builds; do not apply the old host-only deployment
+assumption to that wire change.
+
+Host packaging runs Rust unit tests and the real native/C ABI loopbacks against
+its selected Cargo features in the same `plank-transport-cargo` target directory.
+Packaging requires Rust unit tests, all three
+native loss matrices with unchanged recovery/performance limits, and the C ABI
+checks. A failure in the shipping policy stops packaging. No retired pacer
+implementation or comparison selection remains.
+Standalone loopback runners also accept `PLANK_TRANSPORT_CARGO_FEATURES`; an
+unset value exercises default Cargo features with the same sender policy,
+without the optional telemetry/source-first instrumentation.
+The loss fixture uses controlled receiver-side omissions, not a real WAN.
+Do not report its results as ten-minute or interactive hardware qualification.
+
 `209/STDOUT` with `Failed to set up standard output: No such file or directory`
 can mean `/var/log/plank` is missing, even when the unit has `LogsDirectory=plank`.
 systemd 252 opens `StandardOutput=append:` before creating managed directories.
@@ -651,6 +720,11 @@ implicit library directory ahead of GCC 14, and make `-static-libstdc++` select
 the incompatible GCC 11 archive at final link. Missing
 `std::__cxx11::basic_string::_M_replace_cold` or `_Float128` `std::to_chars`
 symbols are this compiler/library mismatch, not a source-code failure.
+
+Standalone PAM descriptor tests must also use the Host's **C++23** language
+mode. A `std::byteswap` error with GCC 14 can mean the test command still uses
+`-std=c++20`; changing compiler versions or removing the test is not the fix.
+The root CI policy checks this command against the PAM CMake suite's standard.
 
 Do not validate a changed Host branch by directly rebuilding a canonical Host
 build directory after switching branches. CMake's glob check can reconfigure
@@ -764,7 +838,7 @@ host commit is already published, a host-only submodule update of
 `apps/host/linux` may replace the bundle clone; still initialize recursive
 dependencies from inside the host rather than from the root.
 
-The Host application and RPM `Version` retain the exact shared semantic
+The Host application and RPM `Version` retain the exact shared product
 version. RPM requires a separate `Release` value, so the first package of a
 PLANK version uses release `1` (for example,
 `plank-host-1.0.0-1.el9.x86_64.rpm`). Increment the RPM release only to
@@ -930,6 +1004,11 @@ credentials or a production broker. A reported root-probe skip is not a passed
 privilege-drop test. PAM descriptor delegation is only the first stage; do not
 describe the Host worker as unprivileged until runtime UID/capability and all
 remaining resource gates pass.
+
+Validate the PAM CMake suite with `RelWithDebInfo`, matching the package gate,
+not only Debug or sanitizer builds. GCC 14's optimized bounds/uninitialized
+diagnostics can expose issues that Debug does not compile-diagnose; keep
+`-Werror` enabled and fix the source/test rather than weakening the gate.
 
 The `host_x11_worker_exit_gate=pass` preflight exercises the fatal Xlib I/O
 callback in a child thread, verifying immediate worker exit without C++/NVIDIA
@@ -1143,6 +1222,15 @@ Never remove the canonical clone, prepared dependencies, accepted packages, or
 retained qualification reports during candidate cleanup.
 
 ## Release recording
+
+Keep the Client's bundled `apps/client/app/res/changelog.md` current. Use short,
+plain-language bullets under separate Client and Host headings for each version;
+omit empty sections. The current candidate's notes may use "This build" until
+the release version is final. When releasing, name that section with the final
+version and preserve prior release summaries. These are user-facing highlights,
+not a Git log or a validation report. Do not list unmerged fixes or promise
+unqualified hardware support. The version-button dialog uses this bundled file
+offline; both Client build gates exercise its modal, keyboard and scrolling UI.
 
 For macOS PKG signing, keep the authenticated interactive SSH session open
 from `security unlock-keychain` through `build-macos-host-pkg.sh`; enter the
