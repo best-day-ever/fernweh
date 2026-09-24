@@ -53,15 +53,31 @@ elif [[ ${PLANK_MACOS_SOURCE_FIRST:-0} != 0 ]]; then
     echo 'PLANK_MACOS_SOURCE_FIRST must be 0 or 1' >&2; exit 2
 fi
 # macOS ships Bash3.2, where an empty array is unbound under nounset.
-cargo +1.89.0 build --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
+cargo +1.89.0 build --target-dir "$shared_target_dir" --locked --release --message-format=json ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml > "$transport_build/cargo-build.jsonl"
 cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
 if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
     # Dependency unit tests are not run by the root Cargo test command.
     # Compile the production helper/tests against this exact archive's rlib.
-    fec_rlibs=("$shared_target_dir"/release/deps/libraptorq-*.rlib)
-    test ${#fec_rlibs[@]} -eq 1 && test -f "${fec_rlibs[0]}"
+    # The shared target may contain rlibs from other Rust toolchains. Cargo's
+    # artifact record identifies the rlib built with this pinned toolchain.
+    fec_rlib=$(python3 - "$transport_build/cargo-build.jsonl" <<'PY'
+import json
+import sys
+
+matches = []
+with open(sys.argv[1], encoding="utf-8") as records:
+    for line in records:
+        record = json.loads(line)
+        if record.get("reason") == "compiler-artifact" and record["target"]["name"] == "raptorq":
+            matches.extend(path for path in record["filenames"] if path.endswith(".rlib"))
+if len(matches) != 1:
+    raise SystemExit("Expected one raptorq rlib from this Cargo build")
+print(matches[0])
+PY
+)
+    test -f "$fec_rlib"
     rustc +1.89.0 --edition=2024 --test -O tests/protocol/source-first-fec.rs \
-        -L "dependency=$shared_target_dir/release/deps" --extern "raptorq=${fec_rlibs[0]}" \
+        -L "dependency=$shared_target_dir/release/deps" --extern "raptorq=$fec_rlib" \
         -o "$transport_build/source-first-test"
     "$transport_build/source-first-test" --nocapture --test-threads=1
 fi
