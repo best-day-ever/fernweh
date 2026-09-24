@@ -1,33 +1,41 @@
-"""Workflow wiring and cache lifecycle regression tests."""
-import importlib.util
-import io
-import json
+"""Audit the non-importable GitHub cache workflow contract."""
 from pathlib import Path
-import re
-import tempfile
 import unittest
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location('cache_lifecycle', ROOT / 'scripts/ci/cache-dependencies.py')
-cache = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(cache)
 
 
 class DependencyCacheTests(unittest.TestCase):
-    def test_workflow_has_exact_restore_and_trusted_save_for_every_product(self):
+    def test_workflow_uses_exact_component_cache_for_each_product(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
-        self.assertEqual(workflow.count('actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9'), 4)
-        self.assertEqual(workflow.count('actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9'), 4)
-        self.assertNotIn('restore-keys:', workflow)
-        self.assertEqual(workflow.count('test "$MATCHED_KEY" = "$CACHE_KEY"'), 4)
-        unsigned = workflow.split('  macos-signed:')[0]
-        for save in unsigned.split('- name: Save dependencies')[1:]:
-            save = save.split('- name:')[0]
-            self.assertIn("github.event_name != 'pull_request'", save)
-            self.assertIn('!inputs.clean_bootstrap', save)
-        signed = workflow.split('  macos-signed:')[1]
-        self.assertLess(signed.index('Remove temporary signing material'), signed.index('Save dependencies'))
+        for job, next_job in (('linux-host', 'linux-client'),
+                              ('linux-client', 'macos'),
+                              ('macos', 'macos-signed')):
+            section = workflow.split(f'  {job}:\n', 1)[1].split(f'  {next_job}:\n', 1)[0]
+            self.assertEqual(section.count('uses: ./.github/actions/dependency-cache'), 2, job)
+            self.assertIn('operation: restore', section, job)
+            self.assertIn('operation: save', section, job)
+            self.assertIn("github.event_name != 'pull_request'", section, job)
+            self.assertLess(section.index('operation: restore'), section.index('bash scripts/ci/bootstrap.sh'), job)
+            self.assertLess(section.index('bash scripts/ci/bootstrap.sh'), section.index('operation: save'), job)
+            self.assertLess(section.index('operation: save'), section.index('bash scripts/ci/build.sh'), job)
+        signed = workflow.split('  macos-signed:\n', 1)[1]
+        self.assertEqual(signed.count('uses: ./.github/actions/dependency-cache'), 2)
+        self.assertLess(signed.index('operation: restore'), signed.index('operation: save'))
+        self.assertLess(signed.index('operation: save'), signed.index('Build, sign, notarize and verify'))
+
+    def test_composite_cache_rejects_partial_or_untrusted_restores(self):
+        action = (ROOT / '.github/actions/dependency-cache/action.yml').read_text()
+        for component in ('rust', 'cargo', 'ffmpeg', 'boost', 'native', 'qt'):
+            self.assertIn(f'outputs.{component}-key', action)
+            self.assertIn(f'CACHE_MATCHED_{component.upper()}', action)
+            self.assertIn(f'outputs.{component}-hit', action)
+        self.assertEqual(action.count('actions/cache/restore@'), 6)
+        self.assertEqual(action.count('actions/cache/save@'), 6)
+        self.assertNotIn('restore-keys:', action)
+        self.assertIn('cache-dependencies.py verify', action)
+        self.assertIn('cache-dependencies.py seal', action)
+        self.assertIn('Pull requests cannot save dependency caches', action)
 
 
 if __name__ == '__main__':
