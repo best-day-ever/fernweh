@@ -105,6 +105,7 @@ fn harness_cfg(krb: FakeKerberos, tweak: impl FnOnce(&mut Config)) -> H {
     let relay = Arc::new(FakeRelay::default());
     let prober = Arc::new(FakeProber {
         certs: Mutex::new(HashMap::from([(WS1.to_string(), Some([1u8; 32])), (WS2.to_string(), Some([2u8; 32]))])),
+        busy: Mutex::new(HashMap::new()),
     });
     let pins = Arc::new(PinStore::memory());
     let audit = Arc::new(Audit::memory());
@@ -341,8 +342,8 @@ async fn auth_flow_and_reply_shapes() {
     assert_eq!(
         j,
         serde_json::json!({"hosts":[
-            {"id":WS1,"name":"ws1","online":true,"in_use_by":null,"connectable":true,"reason":null},
-            {"id":WS2,"name":"ws2","online":true,"in_use_by":null,"connectable":true,"reason":null}
+            {"id":WS1,"name":"ws1","online":true,"busy":null,"in_use_by":null,"connectable":true,"reason":null},
+            {"id":WS2,"name":"ws2","online":true,"busy":null,"in_use_by":null,"connectable":true,"reason":null}
         ]})
     );
 
@@ -591,6 +592,25 @@ async fn pin_tofu_mismatch_and_reset() {
     h.b.probe_all().await;
     let cr = h.b.connect(IP, &t, WS1, "e").await.unwrap();
     assert_eq!(cr.host_cert_sha256, hex::encode([9u8; 32]));
+}
+
+#[tokio::test]
+async fn host_occupancy_is_advisory_and_never_bypasses_pinning() {
+    let h = harness();
+    let t = h.login().await;
+    h.prober.busy.lock().unwrap().insert(WS1.into(), Some(true));
+    let hosts = h.b.list_hosts(IP, &t).await.unwrap().hosts;
+    let ws1 = hosts.iter().find(|host| host.id == WS1).unwrap();
+    assert_eq!(ws1.busy, Some(true));
+    assert!(ws1.connectable, "occupancy must not change desktop handoff admission");
+    assert_eq!(ws1.in_use_by, None, "the host list must not reveal an owner");
+
+    h.prober.certs.lock().unwrap().insert(WS1.into(), Some([9u8; 32]));
+    h.clock.advance(Duration::from_secs(40));
+    let hosts = h.b.list_hosts(IP, &t).await.unwrap().hosts;
+    let ws1 = hosts.iter().find(|host| host.id == WS1).unwrap();
+    assert_eq!(ws1.busy, None);
+    assert!(!ws1.connectable);
 }
 
 #[tokio::test]

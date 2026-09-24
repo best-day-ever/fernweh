@@ -141,8 +141,11 @@ directory --user <u>` prints the gate facts the broker can read.
 ### Host list
 
 `reason` values are `null`, `"offline"`, `"certificate changed"`, `"no address"`.
-`in_use_by` is always `null`: the host's unauthenticated `/serverinfo` does not
-reveal a session owner.
+`busy` is `true` when the pinned Host reports an active seat0 user desktop or
+stream, `false` for an idle greeter, and `null` if the Host is offline, its pin
+changed, or it does not support the status field. The broker polls it with the
+normal Host probe; this is advisory and does not change `connectable` or Host
+admission. `in_use_by` remains `null`: occupancy does not reveal the account.
 
 ## Behaviour summary
 

@@ -42,3 +42,20 @@ array and an upstream secondary-fullscreen helper. BDE's per-monitor Metal
 renderer has a different target lifecycle, so this probe is not a build gate;
 the existing presentation geometry and Metal overlay suites remain in the
 Client gate. A physical dual-display stream still needs acceptance.
+
+## Follow-up merge check and workstation occupancy
+
+The upstream PLANK, Client and Linux Host `main` refs still point to the commits
+reviewed above (`acb2988`, `cc511584`, `5829bf7c`) on 2026-09-24. Their recent
+merged display changes are already included in BDE's display layout work. No
+new upstream commit needs to be merged into the current BDE release.
+
+BDE's broker has always returned `in_use_by: null` because a Host's public
+serverinfo must not disclose a person's name. The proposed occupancy contract
+adds `PlankWorkstationBusy` as a coarse Host flag and `busy: true|false|null`
+to the broker's assigned-host response. The Host uses the active seat0 desktop
+or stream as the source of truth. The broker reads the flag only after Host
+certificate pinning; missing or failed reads are unknown. Busy remains an
+advisory label: the existing broker route and Host PAM/handoff admission stay
+authoritative, including a user's own reconnect and confirmed idle-owner
+sign-out. Release requires native Rocky Host, Mac Client and live canary gates.
