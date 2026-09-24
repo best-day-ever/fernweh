@@ -42,9 +42,14 @@ xcrun clang "${common[@]}" probes/macos/preview-receive.m "$archive" -lpthread -
 if [[ ${4:-} = --synthetic-only ]]; then
     # Root is confined to synthetic loopback children and ephemeral identities;
     # no installation, real authentication, display or input is exercised.
-    sudo -n "$(command -v python3)" tests/auth/macos-https-handoff.py \
-        --server "$preview_build/preview-synthetic" --config probes/macos/https-cert.cnf \
-        --uid "$(id -u)" --gid "$(id -g)"
+    if [[ ${PLANK_MACOS_SKIP_ROOT_HANDOFF_TESTS:-0} = 0 ]]; then
+        sudo -n "$(command -v python3)" tests/auth/macos-https-handoff.py \
+            --server "$preview_build/preview-synthetic" --config probes/macos/https-cert.cnf \
+            --uid "$(id -u)" --gid "$(id -g)"
+    else
+        [[ $PLANK_MACOS_SKIP_ROOT_HANDOFF_TESTS = 1 ]]
+        echo 'macos_https_handoff=not-run requires-root'
+    fi
     # Fault injection: the same real server with graceful TCP cancellation
     # restored MUST fail cross-UID rebind specifically with EADDRINUSE.
     # This test-only binary and synthetic TLS identity are never packaged.
@@ -59,9 +64,13 @@ if [[ ${4:-} = --synthetic-only ]]; then
     xcrun clang "${common[@]}" -DPLANK_MAC_PREVIEW_TEST -DPLANK_SYNTHETIC_AUTH_TEST \
         "${graceful_sources[@]}" tests/input/macos-fake-input.m "$archive" -lpthread -lm \
         -o "$preview_build/preview-graceful-close"
-    sudo -n "$(command -v python3)" tests/auth/macos-https-handoff.py \
-        --server "$preview_build/preview-graceful-close" --config probes/macos/https-cert.cnf \
-        --uid "$(id -u)" --gid "$(id -g)" --expect-lingering-close
+    if [[ ${PLANK_MACOS_SKIP_ROOT_HANDOFF_TESTS:-0} = 0 ]]; then
+        sudo -n "$(command -v python3)" tests/auth/macos-https-handoff.py \
+            --server "$preview_build/preview-graceful-close" --config probes/macos/https-cert.cnf \
+            --uid "$(id -u)" --gid "$(id -g)" --expect-lingering-close
+    else
+        echo 'macos_https_graceful_close=not-run requires-root'
+    fi
     python3 tests/auth/macos-https-auth.py --server "$preview_build/preview-synthetic" \
         --config probes/macos/https-cert.cnf --preview-receiver "$preview_build/preview-receive"
     python3 tests/auth/macos-permission-admission.py --server "$preview_build/preview-synthetic"
