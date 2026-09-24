@@ -18,8 +18,8 @@ class ProductDependencyCacheTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name) / 'source'
-        self.deps = Path(self.tmp.name) / 'deps'
+        self.root = (Path(self.tmp.name) / 'source').resolve()
+        self.deps = (Path(self.tmp.name) / 'deps').resolve()
         self.tools = {'platform': {'architecture': 'fixture', 'os': 'fixture'},
                       'compiled': {'sdk': 'fixture', 'packages': ['lib=1']}}
         inputs = (
@@ -138,10 +138,10 @@ class ProductDependencyCacheTests(unittest.TestCase):
         for component in ('native', 'qt'):
             with patch.dict(cache.os.environ, {}, clear=True):
                 key = self.key('macos-client', component)
-            for value in ('', '15.0'):
+            for value in ('', '13.0'):
                 with patch.dict(cache.os.environ, {'PLANK_MAC_CLIENT_MIN_MACOS': value}):
                     self.assertEqual(key, self.key('macos-client', component))
-            for value in ('14.0', '27.0', 'unknown'):
+            for value in ('14.0', '15.0', '27.0', 'unknown'):
                 with patch.dict(cache.os.environ, {'PLANK_MAC_CLIENT_MIN_MACOS': value}):
                     with self.assertRaises(ValueError):
                         self.key('macos-client', component)

@@ -19,16 +19,47 @@ export SC_NATIVE_TEST_PRIVATE_KEY="$test_tmp/key.pem"
 SC_NATIVE_TEST_CERTIFICATE_SHA256=$(sha256sum "$test_tmp/cert.der")
 export SC_NATIVE_TEST_CERTIFICATE_SHA256=${SC_NATIVE_TEST_CERTIFICATE_SHA256%% *}
 
-run_native_test() {
-  local test_name=$1
-  if [[ ${SC_NATIVE_CARGO_PROFILE:-debug} == release ]]; then
-    cargo test --release --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
-      "$test_name" -- --ignored --exact
-  else
-    cargo test --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
-      "$test_name" -- --ignored --exact
-  fi
-}
+cargo_profile_args=()
+# Performance qualification uses optimized product code. Explicit debug runs
+# are still useful diagnostics, but are not release performance qualification.
+case ${SC_NATIVE_CARGO_PROFILE:-release} in
+  release) cargo_profile_args+=(--release) ;;
+  debug) ;;
+  *) echo "SC_NATIVE_CARGO_PROFILE must be release or debug" >&2; exit 2 ;;
+esac
+if [[ -n ${PLANK_TRANSPORT_CARGO_FEATURES:-} ]]; then
+  cargo_profile_args+=(--features "$PLANK_TRANSPORT_CARGO_FEATURES")
+fi
 
-run_native_test native::tests::native_kyproto_round_trip_preserves_all_initial_lanes
-run_native_test native::tests::native_raptorq_survives_progressive_transport_loss_at_150_mbps
+# Dependency tests are not included by an ordinary product cargo test. Run the
+# actual audio/video FEC parsers and receiver state machines with our lockfile.
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  -p plank-transport -p kyproto --lib protocol::driver::av
+
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native::version_tests::incompatible_peers_fail_tls_before_setup_or_media \
+  -- --ignored --exact --nocapture
+
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native::tests::native_kyproto_round_trip_preserves_all_initial_lanes \
+  -- --ignored --exact --nocapture
+
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native_ffi::data_tests::reliable_data_overflow_fails_both_receivers \
+  -- --ignored --exact --nocapture
+
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native_ffi::cancellation_tests::cancellation_interrupts_real_auth_endpoints_and_promotion \
+  -- --ignored --exact --nocapture
+
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native_ffi::microphone_lane::tests::encrypted_ffi_microphone_mute_reopen_and_bounds \
+  -- --ignored --exact --nocapture
+
+# Three required passes, not retries: set -e stops on the first failure.
+for loss_trial in 1 2 3; do
+  echo "native_loss_matrix_trial=$loss_trial"
+  cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+    native::tests::native_raptorq_survives_progressive_transport_loss_at_150_mbps \
+    -- --ignored --exact --nocapture
+done

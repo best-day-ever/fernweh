@@ -88,9 +88,18 @@ done
 cargo metadata --locked --offline --no-deps \
   --format-version 1 \
   --manifest-path "${plank_transport_dir}/Cargo.toml" >/dev/null
+# The vendored Quinn tests use a separate archive and are never linked into
+# the packaged Host. They cover exact DATAGRAM boundaries and owned telemetry.
+CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offline \
+  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+  --lib connection::datagrams::plank_tests
+CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offline \
+  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+  --features plank-telemetry \
+  --lib tests::plank_telemetry_snapshot_is_owned_and_preserves_queue_counters -- --exact
 rg -q '^#define PLANK_TRANSPORT_ABI_VERSION 14u$' \
   "${plank_transport_dir}/include/plank_transport.h" || {
-  echo "host requires PLANK transport ABI 13" >&2
+  echo "host requires PLANK transport ABI 14" >&2
   exit 1
 }
 rg -Fq 'uint32_t max_udp_payload_size;' \

@@ -91,9 +91,9 @@ def fingerprint(root, deps, product, component, toolchain):
             'inputs': hashes, 'pins': pins, 'source_root': str(root),
             'dependency_root': str(deps), 'toolchain': tools}
     if component in ('native', 'qt'):
-        target = os.environ.get('PLANK_MAC_CLIENT_MIN_MACOS') or '15.0'
-        if target != '15.0':
-            raise ValueError('PLANK Client deployment target must be 15.0')
+        target = os.environ.get('PLANK_MAC_CLIENT_MIN_MACOS') or '13.0'
+        if target != '13.0':
+            raise ValueError('PLANK Client deployment target must be 13.0')
         data['deployment_target'] = target
     return f'plank-{product}-{component}-v2-' + hashlib.sha256(
         json.dumps(data, sort_keys=True).encode()).hexdigest()
