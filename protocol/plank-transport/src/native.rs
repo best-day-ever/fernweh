@@ -1086,6 +1086,25 @@ mod tests {
             .await
             .expect("failed to send loss-test config packet");
 
+        // Establish the media lane before starting the timed loss matrix. A
+        // queued config send only confirms enqueueing; without this receipt
+        // the first measured frame can race the receiver's startup.
+        let startup_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let (mut codec_seen, mut config_seen) = (false, false);
+        while !codec_seen || !config_seen {
+            let packet = tokio::time::timeout_at(startup_deadline, client_video.recv.recv())
+                .await
+                .expect("loss-test startup packet timed out")
+                .expect("loss-test video endpoint closed during startup")
+                .expect("loss-test startup packet failed");
+            match packet {
+                AVPacket::Codec(_) => codec_seen = true,
+                AVPacket::Media(media) if media.header.is_config => config_seen = true,
+                AVPacket::Media(_) => panic!("loss-test media arrived before the startup barrier"),
+                AVPacket::Hole(_) => panic!("loss-test startup packet was lost"),
+            }
+        }
+
         let payload = Bytes::from(
             (0..PAYLOAD_BYTES)
                 .map(|index| ((index * 29 + 7) & 0xff) as u8)
