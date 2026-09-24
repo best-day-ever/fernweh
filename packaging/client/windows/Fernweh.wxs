@@ -1,0 +1,34 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="BDE fernweh"
+           Manufacturer="Best Day Ever"
+           Language="1033"
+           Version="$(var.MsiVersion)"
+           UpgradeCode="F598C7E9-ECA2-432F-B0C0-41F9E1201F8F"
+           Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of BDE fernweh is already installed." />
+    <MediaTemplate CompressionLevel="high" EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="BDE fernweh" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="BDE fernweh" />
+    </StandardDirectory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="FernwehExecutable" Guid="*">
+        <File Id="FernwehExe" Source="$(var.StageDir)\plank-client.exe" KeyPath="yes" />
+        <Shortcut Id="StartMenuShortcut" Directory="ApplicationProgramsFolder"
+                  Name="BDE fernweh" Description="Connect to BDE workstations"
+                  Target="[#FernwehExe]" WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder"
+                      Directory="ApplicationProgramsFolder" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="BDE fernweh" Level="1">
+      <ComponentRef Id="FernwehExecutable" />
+      <ComponentGroupRef Id="FernwehRuntime" />
+    </Feature>
+  </Package>
+</Wix>

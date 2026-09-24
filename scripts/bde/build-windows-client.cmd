@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions
 
-rem Development build of the BDE Windows client from a complete PLANK checkout.
+rem BDE Windows client build from a complete PLANK checkout.
 rem Requires MSVC 2022 Build Tools, Rust 1.89.0, Qt 6.10.2 msvc2022_64,
 rem and the pinned Windows dependency archive under apps\client\libs\windows.
-rem The native PLANK transport is mandatory; this does not create a release
-rem installer or sign anything.
+rem The native PLANK transport is mandatory. Set PLANK_WINDOWS_RELEASE_BUILD=1
+rem for the unmodified release version; packaging and signing are separate.
 
 for %%I in ("%~dp0..\..") do set "PLANK_SOURCE_ROOT=%%~fI"
 if not defined PLANK_QT_ROOT (
@@ -29,6 +29,8 @@ if not exist "%PLANK_SOURCE_ROOT%\packaging\VERSION" (
     exit /b 2
 )
 for /f "usebackq delims=" %%I in ("%PLANK_SOURCE_ROOT%\packaging\VERSION") do set "PLANK_RELEASE_VERSION=%%I"
+set "PLANK_CLIENT_VERSION=%PLANK_RELEASE_VERSION%-windows-dev"
+if "%PLANK_WINDOWS_RELEASE_BUILD%"=="1" set "PLANK_CLIENT_VERSION=%PLANK_RELEASE_VERSION%"
 
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist "%VSWHERE%" (
@@ -58,12 +60,12 @@ if not exist "%PLANK_TRANSPORT_LIBRARY%" (
 )
 
 pushd "%PLANK_WINDOWS_BUILD_DIR%\qmake"
-"%PLANK_QT_ROOT%\bin\qmake.exe" -r "%PLANK_SOURCE_ROOT%\apps\client\moonlight-qt.pro" CONFIG+=release CONFIG+=plank-transport "PLANK_VERSION=%PLANK_RELEASE_VERSION%-windows-dev" "PLANK_TRANSPORT_DIR=%PLANK_SOURCE_ROOT%\protocol\plank-transport" "PLANK_TRANSPORT_LIBRARY=%PLANK_TRANSPORT_LIBRARY%"
+"%PLANK_QT_ROOT%\bin\qmake.exe" -r "%PLANK_SOURCE_ROOT%\apps\client\moonlight-qt.pro" CONFIG+=release CONFIG+=plank-transport "PLANK_VERSION=%PLANK_CLIENT_VERSION%" "PLANK_TRANSPORT_DIR=%PLANK_SOURCE_ROOT%\protocol\plank-transport" "PLANK_TRANSPORT_LIBRARY=%PLANK_TRANSPORT_LIBRARY%"
 if errorlevel 1 goto :failure
 nmake /NOLOGO /S release
 if errorlevel 1 goto :failure
 popd
-echo BDE fernweh Windows client development build completed.
+echo BDE fernweh Windows client %PLANK_CLIENT_VERSION% build completed.
 exit /b 0
 
 :failure
