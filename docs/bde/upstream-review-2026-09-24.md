@@ -59,3 +59,12 @@ certificate pinning; missing or failed reads are unknown. Busy remains an
 advisory label: the existing broker route and Host PAM/handoff admission stay
 authoritative, including a user's own reconnect and confirmed idle-owner
 sign-out. Release requires native Rocky Host, Mac Client and live canary gates.
+
+Canary acceptance for that release: verify the broker reports `busy:false` at
+the idle GDM greeter, `busy:true` during an active stream and for a signed-in
+user desktop after disconnect, and `busy:null` when a Host cannot supply the
+field. Verify the list changes from Online to Busy without disabling Connect,
+an owner can reconnect, and a second user still sees the existing confirmed
+sign-out/refusal flow. A certificate mismatch must remain non-connectable and
+must not supply an occupancy value. Restore the prior Host and broker versions
+if any admission, display, or stream regression appears.
