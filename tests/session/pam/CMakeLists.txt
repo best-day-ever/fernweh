@@ -6,6 +6,8 @@ get_filename_component(PLANK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUT
 set(HOST "${PLANK_ROOT}/apps/host/linux")
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
+find_library(PLANK_GSSAPI_LIBRARY NAMES gssapi_krb5 REQUIRED)
+find_library(PLANK_KRB5_LIBRARY NAMES krb5 REQUIRED)
 if(NOT EXISTS "${PLANK_BOOST_SOURCE_DIR}/libs/config/include/boost/version.hpp")
   message(FATAL_ERROR "Pass the retained Boost 1.89.0 source via PLANK_BOOST_SOURCE_DIR")
 endif()
@@ -21,6 +23,7 @@ add_executable(pam-hardening
   "${HOST}/src/auth/web_auth.cpp"
   "${HOST}/src/auth/pam_client.cpp"
   "${HOST}/src/session/session_context.cpp"
+  "${HOST}/src/plank_arrangement.cpp"
   "${HOST}/tests/unit/test_web_auth.cpp"
   "${HOST}/tests/unit/test_pam_broker_protocol.cpp"
   "${HOST}/tests/unit/test_auth_concurrency.cpp"
@@ -31,9 +34,11 @@ target_compile_options(pam-hardening PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_link_libraries(pam-hardening PRIVATE GTest::gtest_main OpenSSL::Crypto Threads::Threads systemd)
 add_test(NAME pam-hardening COMMAND pam-hardening)
 set_tests_properties(pam-hardening PROPERTIES TIMEOUT 30)
-add_executable(pam-broker-compile "${HOST}/src/auth/pam_broker.cpp")
+add_executable(pam-broker-compile "${HOST}/src/auth/pam_broker.cpp"
+  "${HOST}/src/auth/gssapi_acceptor.cpp")
 target_compile_options(pam-broker-compile PRIVATE -Wall -Wextra -Wpedantic -Werror)
-target_link_libraries(pam-broker-compile PRIVATE pam Threads::Threads)
+target_link_libraries(pam-broker-compile PRIVATE pam ${PLANK_GSSAPI_LIBRARY}
+  ${PLANK_KRB5_LIBRARY} OpenSSL::Crypto Threads::Threads)
 add_executable(pam-delegation "${PLANK_ROOT}/tests/session/test-pam-broker-channel.cpp")
 target_include_directories(pam-delegation PRIVATE "${HOST}/src")
 target_compile_options(pam-delegation PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -42,7 +47,7 @@ add_test(NAME pam-delegation COMMAND pam-delegation)
 set_tests_properties(pam-delegation PROPERTIES TIMEOUT 15)
 add_executable(pam-https "${HOST}/tests/unit/test_auth_https.cpp"
   "${HOST}/src/auth/web_auth.cpp" "${HOST}/src/auth/pam_client.cpp"
-  "${HOST}/src/session/session_context.cpp")
+  "${HOST}/src/session/session_context.cpp" "${HOST}/src/plank_arrangement.cpp")
 target_include_directories(pam-https PRIVATE "${HOST}")
 target_include_directories(pam-https SYSTEM PRIVATE "${HOST}/third-party" ${BOOST_HEADERS})
 target_compile_options(pam-https PRIVATE -Wall -Wextra -Wpedantic -Werror)
