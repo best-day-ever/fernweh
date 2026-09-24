@@ -35,3 +35,9 @@ bits. Virtual primary now uses `0x10000000` because `0x2000000` belongs to
 NVENC 4:2:0. The macOS Host advertises clipboard on BDE's `0x800000` because
 `0x400000` belongs to desktop sign-out. Client and Host must be upgraded
 together across the RaptorQ 2 transport change.
+
+The upstream `metalpresentation` probe assumes a single renderer-owned target
+array and an upstream secondary-fullscreen helper. BDE's per-monitor Metal
+renderer has a different target lifecycle, so this probe is not a build gate;
+the existing presentation geometry and Metal overlay suites remain in the
+Client gate. A physical dual-display stream still needs acceptance.
