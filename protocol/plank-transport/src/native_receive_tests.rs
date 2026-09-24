@@ -47,7 +47,7 @@ const PAYLOAD_SIZE: usize = 4096;
 const SENTINEL: u32 = 0xfeed;
 
 fn endpoint(lane: Lane) -> PlankTransportNativeEndpoint {
-    let shared = Arc::new(NativeShared::new(false, false, 150_000_000));
+    let shared = Arc::new(NativeShared::new(false, false, 150_000_000, false));
     shared.set_state(EndpointState::Ready);
     // No worker/network is started: use the real synchronous C receive entry
     // points with queues filled by the production video/audio producer helpers.
@@ -64,6 +64,7 @@ fn endpoint(lane: Lane) -> PlankTransportNativeEndpoint {
                 keep_alive_interval: Duration::from_secs(1),
                 max_udp_payload_size: None,
                 initial_video_bitrate_bps: 150_000_000,
+                file_clipboard_enabled: false,
             },
         },
         mode: if matches!(lane, Lane::Input) { 1 } else { 2 },

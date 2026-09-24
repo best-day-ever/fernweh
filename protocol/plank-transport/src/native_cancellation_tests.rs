@@ -14,6 +14,7 @@ fn options() -> super::super::RuntimeOptions {
         keep_alive_interval: Duration::from_secs(1),
         max_udp_payload_size: Some(1344),
         initial_video_bitrate_bps: 150_000_000,
+        file_clipboard_enabled: false,
     }
 }
 
@@ -47,7 +48,7 @@ pub(super) fn endpoint(address: SocketAddr, host: bool, setup: bool) -> Box<Plan
     Box::new(PlankTransportNativeEndpoint {
         config,
         mode: if host { 1 } else { 2 },
-        shared: Arc::new(NativeShared::new(setup && !host, setup, 150_000_000)),
+        shared: Arc::new(NativeShared::new(setup && !host, setup, 150_000_000, false)),
         worker: Mutex::new(None),
     })
 }
@@ -86,7 +87,7 @@ fn stop_checked(mut endpoint: Box<PlankTransportNativeEndpoint>, phase: &str) {
 
 #[tokio::test]
 async fn cancellation_is_durable_and_ignores_spurious_notifications() {
-    let shared = NativeShared::new(false, false, 150_000_000);
+    let shared = NativeShared::new(false, false, 150_000_000, false);
     let mut wait = std::pin::pin!(shared.shutdown_requested());
     let mut cx = TaskContext::from_waker(Waker::noop());
     shared.notify_all();
@@ -115,7 +116,7 @@ async fn cancellation_drops_the_in_flight_operation() {
             self.0.store(true, Ordering::Release);
         }
     }
-    let shared = NativeShared::new(false, false, 150_000_000);
+    let shared = NativeShared::new(false, false, 150_000_000, false);
     let dropped = AtomicBool::new(false);
     let (tx, rx) = tokio::sync::oneshot::channel();
     let operation = async {
@@ -135,7 +136,7 @@ async fn cancellation_drops_the_in_flight_operation() {
 
 #[tokio::test]
 async fn failure_also_cancels_setup_and_preserves_the_original_error() {
-    let shared = NativeShared::new(false, false, 150_000_000);
+    let shared = NativeShared::new(false, false, 150_000_000, false);
     shared.fail("original queue failure");
     assert!(
         shared
@@ -151,7 +152,7 @@ async fn failure_also_cancels_setup_and_preserves_the_original_error() {
         shared.status.lock().unwrap().error,
         "original queue failure"
     );
-    let shared = NativeShared::new(false, false, 150_000_000);
+    let shared = NativeShared::new(false, false, 150_000_000, false);
     shared.set_state(EndpointState::Stopping);
     shared.set_state(EndpointState::Ready);
     assert_eq!(shared.state(), EndpointState::Stopping);

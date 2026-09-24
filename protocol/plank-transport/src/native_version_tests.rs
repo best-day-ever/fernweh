@@ -10,6 +10,7 @@ fn options() -> NativeOptions {
         idle_timeout: Duration::from_secs(5),
         keep_alive_interval: Duration::from_secs(1),
         max_udp_payload_size: Some(1344),
+        file_clipboard_enabled: false,
     }
 }
 

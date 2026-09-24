@@ -23,6 +23,7 @@ async fn reliable_data_overflow_fails_both_receivers() {
             idle_timeout: Duration::from_secs(10),
             keep_alive_interval: Duration::from_secs(1),
             max_udp_payload_size: Some(1344),
+            file_clipboard_enabled: false,
         };
         let server = kynet::Connection::start_server_on_addr(
             address,
@@ -42,7 +43,7 @@ async fn reliable_data_overflow_fails_both_receivers() {
         } else {
             (host_data.send, client_data.recv)
         };
-        let shared = Arc::new(NativeShared::new(false, true, 150_000_000));
+        let shared = Arc::new(NativeShared::new(false, true, 150_000_000, false));
         shared.set_state(EndpointState::SetupReady);
         let send_packets = async {
             for tag in 0..8 {
@@ -91,7 +92,7 @@ async fn reliable_data_overflow_fails_both_receivers() {
 }
 
 fn endpoint(phase: EndpointState) -> PlankTransportNativeEndpoint {
-    let shared = Arc::new(NativeShared::new(false, true, 150_000_000));
+    let shared = Arc::new(NativeShared::new(false, true, 150_000_000, false));
     shared.set_state(phase);
     PlankTransportNativeEndpoint {
         config: EndpointConfig::Client {
@@ -106,6 +107,7 @@ fn endpoint(phase: EndpointState) -> PlankTransportNativeEndpoint {
                 keep_alive_interval: Duration::from_secs(1),
                 max_udp_payload_size: None,
                 initial_video_bitrate_bps: 150_000_000,
+                file_clipboard_enabled: false,
             },
         },
         mode: 2,
