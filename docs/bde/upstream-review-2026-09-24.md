@@ -75,7 +75,17 @@ if any admission, display, or stream regression appears.
 advanced from `cc511584` to `b5c3a7a5`; Linux Host `main` remains
 `5829bf7c`. The new parent commits span macOS camera, microphone, virtual
 output, audio clock and native media transport work, including protocol and
-build changes. They have no upstream workstation Busy implementation to take.
+build changes. Upstream `main` has no workstation Busy implementation to take.
+
+Separate, unmerged `session-indicator` branches now exist in upstream Linux
+Host (`aabaf34c`) and Client (`86d1b343`). The Host branch publishes
+`PlankOccupied` and may publish `PlankSessionUser` when an administrator opts
+in; the Client branch labels the Host "In Session" and can show that name.
+BDE's released contract is `PlankWorkstationBusy` through a certificate-pinned
+broker `busy` field, with no account name exposed. A future import must
+reconcile these field names and keep BDE's nameless default, broker admission,
+and authorized handoff behavior. No code from these unmerged branches is in
+the Busy release.
 
 Do not merge this broad media series into the Busy release. It changes the
 transport and Client/Host media contracts together, and upstream's `1.1.006`
