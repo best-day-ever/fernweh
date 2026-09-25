@@ -68,3 +68,17 @@ an owner can reconnect, and a second user still sees the existing confirmed
 sign-out/refusal flow. A certificate mismatch must remain non-connectable and
 must not supply an occupancy value. Restore the prior Host and broker versions
 if any admission, display, or stream regression appears.
+
+## 2026-09-25 upstream refresh
+
+`instinctual/plank` advanced from `acb2988` to `5593932` and its Client pin
+advanced from `cc511584` to `b5c3a7a5`; Linux Host `main` remains
+`5829bf7c`. The new parent commits span macOS camera, microphone, virtual
+output, audio clock and native media transport work, including protocol and
+build changes. They have no upstream workstation Busy implementation to take.
+
+Do not merge this broad media series into the Busy release. It changes the
+transport and Client/Host media contracts together, and upstream's `1.1.006`
+through `1.1.014` candidates have a separate version lineage. Review and
+qualify those commits as their own coordinated integration after the Busy
+release; preserve BDE's broker admission, display and release pins meanwhile.
