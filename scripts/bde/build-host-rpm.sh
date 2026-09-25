@@ -29,6 +29,10 @@
 #                               (e.g. bde-broker -> ...0.bde_broker.1.el9)
 #   PLANK_BUILD_JOBS           parallel build jobs inside the container
 #                               (default 4, matching CI's PLANK_BUILD_JOBS)
+#   SC_NATIVE_LOSS_ATTESTED_SHA256
+#                               SHA-256 of this build's transport test binary
+#                               after three native Rocky 9.7 x86_64 loss passes;
+#                               use only when emulated timing fails
 #
 # Output:
 #   scripts/bde/build/log.txt        full container stdout/stderr
@@ -51,6 +55,11 @@ build_jobs=${PLANK_BUILD_JOBS:-4}
 deps_volume=${PLANK_BDE_DEPS_VOLUME:-plank-bde-host-deps}
 container_name=${PLANK_BDE_CONTAINER_NAME:-plank-bde-host-build}
 build_branch=${PLANK_BDE_BUILD_BRANCH:-bde-main}
+native_loss_attested_sha256=${SC_NATIVE_LOSS_ATTESTED_SHA256:-}
+if [[ -n $native_loss_attested_sha256 && ! $native_loss_attested_sha256 =~ ^[0-9a-f]{64}$ ]]; then
+  echo "SC_NATIVE_LOSS_ATTESTED_SHA256 must be a lowercase SHA-256" >&2
+  exit 2
+fi
 [[ $build_branch =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
   echo "PLANK_BDE_BUILD_BRANCH must be lowercase kebab-case: $build_branch" >&2
   exit 2
@@ -164,6 +173,7 @@ docker rm -f "$container_name" >/dev/null 2>&1 || true
 # minutes, and macOS zsh has no GNU `timeout` by default.
 docker run --rm --platform "$platform" --name "$container_name" \
   -e PLANK_BUILD_BRANCH="$build_branch" \
+  -e SC_NATIVE_LOSS_ATTESTED_SHA256="$native_loss_attested_sha256" \
   -e PLANK_CUDA_REPO_BASEURL="${PLANK_CUDA_REPO_BASEURL:-}" \
   -v "$repo_dir:/workspace" \
   -v "${deps_volume}:/deps" \
