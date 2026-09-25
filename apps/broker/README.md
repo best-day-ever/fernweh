@@ -33,7 +33,7 @@ inside the session range, sane client address, target inside
 | `POST /v1/auth/start {"username"[,"method"]}` | `challenge` + `conversation_id` + prompts (below) | 429 `{"state":"denied","retry_after":s}`; unknown `method` → 200 `denied` |
 | `POST /v1/auth/respond {"conversation_id","responses":[pw, otp]}` | `authenticated`, `session_token`, `expires_in`, `username` | 200 `{"state":"denied"}` (always generic, ≥ `min_respond_ms`), 429 |
 | `POST /v1/auth/respond {"conversation_id","passkey":{credential_id,authenticator_data,signature}}` | same as above | same as above |
-| `GET /v1/hosts` (Bearer) | `{"hosts":[{id,name,online,in_use_by,connectable,reason}]}`; also refreshes this session's leases from this address | 401 `{"state":"denied"}`, 503 directory unavailable |
+| `GET /v1/hosts` (Bearer) | `{"hosts":[{id,name,online,busy,in_use_by,connectable,reason}]}`; also refreshes this session's leases from this address | 401 `{"state":"denied"}`, 503 directory unavailable |
 | `POST /v1/hosts/{fqdn}/connect` (Bearer) | `{route,endpoint,port,host_cert_sha256,username,gssapi_token,expires_in:30}`; `route` is `"relay"` (endpoint = broker name, port = lease) or `"direct"` (endpoint = host IPv4, port = `hosts.port`) | 401; 403 `denied` (not assigned, or the KDC refused the host ticket); 409 `{"state":"unavailable","reason":"offline"\|"certificate changed"\|"no address"}`; 503 no free port / relay / KDC |
 | `POST /v1/hosts/{fqdn}/keepalive` (Bearer) | `{"state":"ok","expires_in":90}` (lease or direct grant) | 404 `{"state":"no_lease"}` → call `connect` again |
 | `POST /v1/logout` (Bearer) | `{"state":"logged_out"}` | 401 |
@@ -141,8 +141,11 @@ directory --user <u>` prints the gate facts the broker can read.
 ### Host list
 
 `reason` values are `null`, `"offline"`, `"certificate changed"`, `"no address"`.
-`in_use_by` is always `null`: the host's unauthenticated `/serverinfo` does not
-reveal a session owner.
+`busy` is `true` when the pinned Host reports an active seat0 user desktop or
+stream, `false` for an idle greeter, and `null` if the Host is offline, its pin
+changed, or it does not support the status field. The broker polls it with the
+normal Host probe; this is advisory and does not change `connectable` or Host
+admission. `in_use_by` remains `null`: occupancy does not reveal the account.
 
 ## Behaviour summary
 

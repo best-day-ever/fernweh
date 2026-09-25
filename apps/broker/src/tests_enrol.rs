@@ -112,7 +112,7 @@ fn harness_cfg(tweak: impl FnOnce(&mut Config)) -> E {
             krb: krb.clone(),
             dir: dir.clone(),
             relay: Arc::new(FakeRelay::default()),
-            prober: Arc::new(FakeProber { certs: Mutex::new(HashMap::new()) }),
+            prober: Arc::new(FakeProber { certs: Mutex::new(HashMap::new()), busy: Mutex::new(HashMap::new()) }),
             pins: Arc::new(PinStore::memory()),
             audit: audit.clone(),
             clock: clock.clone(),

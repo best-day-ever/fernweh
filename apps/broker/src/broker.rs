@@ -118,6 +118,7 @@ pub struct HostEntry {
     pub id: String,
     pub name: String,
     pub online: bool,
+    pub busy: Option<bool>,
     pub in_use_by: Option<String>,
     pub connectable: bool,
     pub reason: Option<String>,
@@ -308,6 +309,7 @@ struct State {
 #[derive(Clone, Debug)]
 pub struct HostStatus {
     pub online: bool,
+    pub busy: Option<bool>,
     pub cert_sha256: Option<[u8; 32]>,
     pub pin_mismatch: bool,
     pub checked: Instant,
@@ -1110,7 +1112,7 @@ impl Broker {
         let st = match r {
             Err(e) => {
                 debug!(host = %fqdn, "probe: {e}");
-                HostStatus { online: false, cert_sha256: None, pin_mismatch: prev_mismatch, checked: now }
+                HostStatus { online: false, busy: None, cert_sha256: None, pin_mismatch: prev_mismatch, checked: now }
             }
             Ok(h) => {
                 let hexh = hex::encode(h);
@@ -1134,7 +1136,8 @@ impl Broker {
                         true
                     }
                 };
-                HostStatus { online: true, cert_sha256: Some(h), pin_mismatch: mismatch, checked: now }
+                let busy = if mismatch { None } else { self.d.prober.busy(fqdn, ip, self.cfg.hosts.port, h).await };
+                HostStatus { online: true, busy, cert_sha256: Some(h), pin_mismatch: mismatch, checked: now }
             }
         };
         self.status.write().unwrap().insert(fqdn.to_string(), st.clone());
@@ -1176,6 +1179,7 @@ impl Broker {
             id: fqdn.to_string(),
             name,
             online,
+            busy: st.and_then(|s| s.busy),
             in_use_by: None,
             connectable: reason.is_none(),
             reason: reason.map(str::to_string),

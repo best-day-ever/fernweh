@@ -42,3 +42,43 @@ array and an upstream secondary-fullscreen helper. BDE's per-monitor Metal
 renderer has a different target lifecycle, so this probe is not a build gate;
 the existing presentation geometry and Metal overlay suites remain in the
 Client gate. A physical dual-display stream still needs acceptance.
+
+## Follow-up merge check and workstation occupancy
+
+The upstream PLANK, Client and Linux Host `main` refs still point to the commits
+reviewed above (`acb2988`, `cc511584`, `5829bf7c`) on 2026-09-24. Their recent
+merged display changes are already included in BDE's display layout work. No
+new upstream commit needs to be merged into the current BDE release.
+
+BDE's broker has always returned `in_use_by: null` because a Host's public
+serverinfo must not disclose a person's name. The proposed occupancy contract
+adds `PlankWorkstationBusy` as a coarse Host flag and `busy: true|false|null`
+to the broker's assigned-host response. The Host uses the active seat0 desktop
+or stream as the source of truth. The broker reads the flag only after Host
+certificate pinning; missing or failed reads are unknown. Busy remains an
+advisory label: the existing broker route and Host PAM/handoff admission stay
+authoritative, including a user's own reconnect and confirmed idle-owner
+sign-out. Release requires native Rocky Host, Mac Client and live canary gates.
+
+Canary acceptance for that release: verify the broker reports `busy:false` at
+the idle GDM greeter, `busy:true` during an active stream and for a signed-in
+user desktop after disconnect, and `busy:null` when a Host cannot supply the
+field. Verify the list changes from Online to Busy without disabling Connect,
+an owner can reconnect, and a second user still sees the existing confirmed
+sign-out/refusal flow. A certificate mismatch must remain non-connectable and
+must not supply an occupancy value. Restore the prior Host and broker versions
+if any admission, display, or stream regression appears.
+
+## 2026-09-25 upstream refresh
+
+`instinctual/plank` advanced from `acb2988` to `5593932` and its Client pin
+advanced from `cc511584` to `b5c3a7a5`; Linux Host `main` remains
+`5829bf7c`. The new parent commits span macOS camera, microphone, virtual
+output, audio clock and native media transport work, including protocol and
+build changes. They have no upstream workstation Busy implementation to take.
+
+Do not merge this broad media series into the Busy release. It changes the
+transport and Client/Host media contracts together, and upstream's `1.1.006`
+through `1.1.014` candidates have a separate version lineage. Review and
+qualify those commits as their own coordinated integration after the Busy
+release; preserve BDE's broker admission, display and release pins meanwhile.

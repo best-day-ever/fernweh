@@ -2,7 +2,9 @@
 set -euo pipefail
 deps="$PLANK_SOURCE_ROOT/apps/host/linux/third-party/build-deps"
 ffmpeg="$PLANK_DEP_ROOT/host-ffmpeg"
-if [[ ! -f "$ffmpeg/lib/libavcodec.a" ]]; then
+# The cache volume can outlive a fresh source checkout. Verification below
+# needs the patched generated source in build-deps/build even on a cache hit.
+if [[ ! -f "$ffmpeg/lib/libavcodec.a" || ! -d "$deps/build/FFmpeg/FFmpeg" ]]; then
   cmake -S "$deps" -B "$deps/build" -DBUILD_ALL=OFF -DBUILD_FFMPEG=ON \
     -DBUILD_FFMPEG_SVT_AV1=OFF -DCMAKE_C_COMPILER=/opt/rh/gcc-toolset-14/root/usr/bin/gcc \
     -DCMAKE_CXX_COMPILER=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
