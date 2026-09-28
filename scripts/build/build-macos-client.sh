@@ -80,7 +80,7 @@ passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
 test -x "$passkey_helper"
 bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in outputtopology plankdisplaymode planktoolbarlogic plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom; do
+for suite in outputtopology plankdisplaymode planktoolbarlogic plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy; do
 mkdir -p "$build/tests/$suite"
 (
     cd "$build/tests/$suite"
@@ -88,7 +88,8 @@ mkdir -p "$build/tests/$suite"
         QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
         "QMAKE_CXXFLAGS+=-include arm_acle.h"
     make -j"${PLANK_BUILD_JOBS:-8}"
-    PLANK_REPO_ROOT="$source_root" PLANK_PASSKEY_HELPER="$passkey_helper" QT_QPA_PLATFORM=offscreen "./$suite"
+    PLANK_REPO_ROOT="$source_root" PLANK_CLIENT_SOURCE="$client" PLANK_PASSKEY_HELPER="$passkey_helper" \
+        QT_QPA_PLATFORM=offscreen "./$suite"
 )
 done
 # Dummy input only: no microphone permission or physical recording on builders.
