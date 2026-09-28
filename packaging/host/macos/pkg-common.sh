@@ -9,8 +9,17 @@ ulimit -c 0
 
 app='/Applications/PLANK Host.app'
 microphone_driver='/Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver'
+output_driver='/Library/Audio/Plug-Ins/HAL/PLANK Output.driver'
 executable="$app/Contents/MacOS/plank-host"
 state='/Library/Application Support/PLANK'
+configuration='/private/etc/plank'
+# PKG scripts carry the new helper; the standalone uninstaller lives beside
+# the same signed helper in the installed app. Never execute an older helper.
+configuration_resources="$(/usr/bin/dirname "${BASH_SOURCE[0]}")"
+configure_host() {
+    "$configuration_resources/plank-configure" "host-$1" "$configuration" "$state" \
+        "$configuration_resources/host.conf.example" || fail 'Host configuration validation failed'
+}
 logs='/Library/Logs/PLANK'
 machine=la.instinctual.PLANK.Host.machine
 desktop=la.instinctual.PLANK.Host.desktop
@@ -69,6 +78,15 @@ verify_microphone_driver() {
     /usr/bin/codesign --verify --strict --all-architectures \
         -R "=identifier \"la.instinctual.PLANK.Microphone\" and anchor apple generic and certificate leaf[subject.OU] = \"$team\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" \
         "$microphone_driver"
+}
+
+verify_output_driver() {
+    safe_directory "$output_driver"
+    safe_file "$output_driver/Contents/Info.plist" 644
+    safe_file "$output_driver/Contents/MacOS/plank-output" 755
+    /usr/bin/codesign --verify --strict --all-architectures \
+        -R "=identifier \"la.instinctual.PLANK.Output\" and anchor apple generic and certificate leaf[subject.OU] = \"$team\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" \
+        "$output_driver"
 }
 
 job_path() {
@@ -141,8 +159,8 @@ gui_domains() {
 console_uid() { /usr/bin/stat -f %u /dev/console; }
 open_permission_setup() {
     local uid
-    uid=$(console_uid)
-    if [[ $uid =~ ^[1-9][0-9]*$ ]]; then
+    uid=$(console_uid) || uid=''
+    if [[ $uid =~ ^[1-9][0-9]*$ ]] && launchctl_cmd print "gui/$uid" >/dev/null 2>&1; then
         # Open the signed app as the existing console user, never as root.
         # The app uses normal macOS consent prompts; no TCC writes or reset.
         # The graphical worker shares this bundle ID. Without -n LaunchServices
@@ -151,7 +169,7 @@ open_permission_setup() {
             echo 'PLANK Host installed; open PLANK Host in Applications to complete privacy setup.'
         fi
     else
-        echo 'PLANK Host installed at LoginWindow. Log into the Mac and open PLANK Host once for privacy setup.'
+        echo 'PLANK Host installed. Permission setup is pending. Log into the Mac and open PLANK Host once for privacy setup.'
     fi
 }
 stop_roles() {
@@ -182,17 +200,7 @@ start_roles() {
 }
 
 check_configuration() {
-    local port uuid
-    if present "$state/host.plist"; then
-        safe_file "$state/host.plist" 644
-        /usr/bin/plutil -lint "$state/host.plist" >/dev/null
-        [[ $(/usr/bin/plutil -extract Address raw -expect string "$state/host.plist") = 0.0.0.0 ]] || fail 'Host must listen on all interfaces'
-        port=$(/usr/bin/plutil -extract Port raw -expect integer "$state/host.plist")
-        [[ $port =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || fail 'Invalid Host port'
-        [[ -n $(/usr/bin/plutil -extract Name raw -expect string "$state/host.plist") ]] || fail 'Invalid Host name'
-        uuid=$(/usr/bin/plutil -extract UUID raw -expect string "$state/host.plist")
-        [[ $uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || fail 'Invalid Host identity'
-    fi
+    configure_host check
     if present "$state/SignIn"; then
         safe_directory "$state/SignIn"
         [[ $(/usr/bin/stat -f %Lp "$state/SignIn") = 700 ]] || fail 'Identity directory must be private'
@@ -209,6 +217,7 @@ preflight() {
     verify_jobs
     if present "$app"; then verify_app yes; fi
     if present "$microphone_driver"; then verify_microphone_driver; fi
+    if present "$output_driver"; then verify_output_driver; fi
     if present "$state"; then safe_directory "$state"; check_configuration; fi
 }
 
@@ -244,16 +253,10 @@ prepare_logs() {
 initialize_state() {
     local stage name
     ensure_directory "$state" 755
-    if ! present "$state/host.plist"; then
-        stage=$(/usr/bin/mktemp "$state/.config.XXXXXX")
-        /usr/bin/plutil -create xml1 "$stage"
-        /usr/bin/plutil -insert Address -string 0.0.0.0 "$stage"
-        /usr/bin/plutil -insert Port -integer 28989 "$stage"
-        /usr/bin/plutil -insert Name -string 'PLANK Mac Host' "$stage"
-        /usr/bin/plutil -insert UUID -string "$(/usr/bin/uuidgen)" "$stage"
-        /bin/chmod 644 "$stage"
-        /bin/mv "$stage" "$state/host.plist"
-    fi
+    # Public settings stay readable; routing recovery records require root-only
+    # access and must exist before the machine coordinator starts.
+    ensure_directory "$state/OutputRouting" 700
+    configure_host prepare
     if ! present "$state/SignIn"; then
         stage=$(/usr/bin/mktemp -d "$state/.identity.XXXXXX")
         /usr/bin/openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 \

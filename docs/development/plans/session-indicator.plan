@@ -1,0 +1,97 @@
+# Advisory session indicator
+
+Branch: `session-indicator`, based on current root main
+`5593932d5e8bc9fea2f52292fc0a5665b5c650a0` and Client main
+`b5c3a7a5ddd37e010155883054931be3010fc5a2` (1.1.014).
+Integrates root PR13, Client PR8 and Linux Host PR10 without replacing the
+newer native camera, stereo microphone or audio-clock work.
+
+## Contract
+
+- Show In Session for a logged-in local desktop or reserved/live PLANK stream.
+- Advisory only: same-user local-to-remote access, explicit remote takeover and
+  different-user ownership enforcement are unchanged.
+- Optional Linux/macOS username publication remains administrator-controlled and off
+  by default. Opt-in exposes the sanitized name before authentication.
+- No extra poll, account lookup, auth queue work or teardown from discovery.
+- No persistent usernames in Client bookmarks. Preserve readable status while
+  truncating long names. LoginWindow never publishes a remote user's name.
+
+## Implementation
+
+1. Retain the PR Client model/parser/UI work on top of current Client main.
+   Reject names unless occupancy is exactly 1; preserve the status label width.
+2. Reuse the account already resolved by the Linux supervisor. Bind its sanitized
+   advisory name to the versioned private attachment record, and confirm the same
+   UID/session/class against local logind before returning it. No new resolver,
+   polling thread or service. Read stream occupancy atomically instead of calling
+   the cleanup-producing session_count function.
+3. Reflect macOS pending/active stream leases through an atomic advisory bit.
+   Select pre-serialized occupied/free responses on the network queue; retain
+   existing authentication and ownership policy without new locks or OS queries.
+4. Test parser limits, privacy default, scope loss, login-screen streams, lease
+   expiry/revocation, persistence absence and unchanged authentication behavior.
+5. Run focused Linux and SDK27 checks from exact-source worktrees. Package builds
+   and live desktop/takeover/UI acceptance remain separate gates. No deployment,
+   release or merge to main without the corresponding operator request.
+
+## Validation
+
+Linux production occupancy and private-record tests pass locally, including
+10000 cached reads, name limits, malformed records and desktop transitions.
+Existing session-policy tests and supervisor GCC14/C++23 compilation pass.
+The production stream owner is exercised with stub media workers: reservations,
+failed/successful setup, removal and status polling during a deliberately stalled
+join all pass. SDK27 authentication/discovery, TLS loopback and certificate-chain
+tests pass. Actual Qt Client parser/persistence tests and QML syntax pass on the
+Ubuntu builder. See HANDOFF for exact source provenance and the unrelated stale
+packaging source-pattern assertions. Full package, visual UI and live session
+qualification remain pending; no installed software was changed.
+
+## Follow-up: optional remembered sign-in username (issue17)
+
+Implemented on this branch, without changing Host authentication or the public
+occupancy contract. Administrator policy `authentication.remember_username`
+defaults false on Linux/macOS Clients. Store only the successful local sign-in
+name per bookmark, never discovery usernames, passwords or tokens. Prefill an
+editable field and focus the password, without auto-submit. Clear names when
+destinations change; disabling policy purges primary and backup entries at
+startup. Preserve the current same-user access and takeover rules.
+
+Production policy/parser/persistence tests and the actual inline login dialog
+run offscreen on the Ubuntu builder. All pass; package and live-session tests
+remain separate. Documentation: `docs/user/remembered-usernames.md`.
+
+## Follow-up: macOS Host settings (issue20)
+
+Expose `[security] publish_session_user = false` and `[network] ping_timeout =
+10000` in the macOS INI reader and fully commented reference template. Reuse the
+desktop provisioning account lookup, sanitize/cache the short name only after
+administrator opt-in, and never publish an authenticated remote name at
+LoginWindow. Existing graphical-worker retirement handles logout/user switching;
+locking keeps the same desktop scope. No discovery-time resolver or new service.
+
+Pass the validated 200–120000 ms inactivity limit into native QUIC; preserve
+the existing one-second keepalive at the default and shorten it for smaller
+timeouts. Keep the independent 10-second handshake deadline and Client
+Wait/Disconnect policy unchanged. Reject invalid Mac INI values, test boundary
+values and upgrade preservation, and correct Linux's legacy media-ping comments
+without changing Linux runtime behavior. Existing Client metadata-v1 parsing
+already handles optional Mac names; no new feature bit or fallback is needed.
+
+## Follow-up: automatic macOS workstation name (issue19)
+
+When `[general] host_name` is absent, resolve the local OS hostname at startup
+through `gethostname()`, matching Linux. Validate length/UTF-8/control characters;
+fall back to `PLANK` if the OS lookup fails or returns unusable data. Explicit
+administrator overrides always win. Do not add DNS queries, per-poll lookups,
+another preference source, a watcher or an install-time hostname snapshot.
+
+Ship a fully documented commented-out override. Retire only the exact old
+installer-generated INI name block, with validated ownership/mode/content and
+an atomic replacement; retain all other bytes and preserve edited/custom blocks.
+The existing one-time plist conversion omits the old generic placeholder and
+still retains custom names, ports, UUID and TLS material. Validate defaults,
+hostname changes/failure, custom overrides, idempotent upgrades, interrupted
+installation, and rejection of unsafe files before any configuration rewrite.
+No Client runtime, protocol, authentication or Linux behavior change is needed.

@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #import "microphone-producer.h"
 #include "microphone-link.h"
+#include "microphone-queue.h"
 #include <xpc/xpc.h>
 #include <mach/mach_time.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#import "../camera-device/camera-clock.h"
 
-enum { MicQueueFrames = 2880, MicTargetFrames = 960 };
 @implementation PLANKMacMicrophoneProducer {
     dispatch_queue_t _queue;
     xpc_connection_t _peer;
     dispatch_source_t _timer;
     PLANKMicLink *_link;
     size_t _bytes;
-    uint64_t _generation, _lease, _clockSeed, _nextFrame, _nextSample;
+    uint64_t _generation, _lease, _clockSeed, _nextFrame;
     uint64_t _requestedAt, _acknowledgedAt;
-    BOOL _started, _stopped, _pending, _hasSample, _primed;
+    BOOL _started, _stopped, _pending;
     BOOL _automaticInput;
     BOOL (^_valid)(void);
     void (^_ready)(BOOL);
-    float _samples[MicQueueFrames];
-    unsigned _head, _count;
-    uint64_t _renderedFrames, _silenceFrames, _resyncs, _discardedFrames;
+    PLANKMicQueue _pcm;
+    uint64_t _renderedFrames, _silenceFrames, _resyncs;
 }
 static uint64_t producerNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC); }
 - (instancetype)init { return nil; }
@@ -60,7 +60,7 @@ static uint64_t producerNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC
     if (!_valid()) { [self stop]; return; }
     _pending = YES; _requestedAt = producerNow();
     xpc_object_t message = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_uint64(message, "version", 1);
+    xpc_dictionary_set_uint64(message, "version", PLANKMicLinkVersion);
     xpc_dictionary_set_uint64(message, "generation", _generation);
     xpc_dictionary_set_bool(message, "automatic_input", _automaticInput);
     __weak typeof(self) weakSelf = self;
@@ -90,27 +90,11 @@ static uint64_t producerNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC
     });
 }
 - (BOOL)submit:(const float *)samples count:(uint32_t)count sampleTime:(uint64_t)sampleTime {
+    return [self submit:samples count:count sampleTime:sampleTime captureTimeNanos:0];
+}
+- (BOOL)submit:(const float *)samples count:(uint32_t)count sampleTime:(uint64_t)sampleTime captureTimeNanos:(uint64_t)captureTime {
     dispatch_assert_queue(_queue);
-    if (!_link || _stopped || !samples || count != PLANKMicPacketFrames ||
-        sampleTime % PLANKMicPacketFrames || sampleTime > UINT64_MAX - count ||
-        (_hasSample && sampleTime < _nextSample)) return NO;
-    for (unsigned i = 0; i < count; i++) if (!isfinite(samples[i])) return NO;
-    if (_hasSample && sampleTime != _nextSample) {
-        // Missing packets are silence, never repetitions of old speech. Large
-        // discontinuities flush immediately rather than padding a stale queue.
-        uint64_t missing = sampleTime - _nextSample;
-        if (missing <= 2 * PLANKMicPacketFrames && _count + missing + count <= MicQueueFrames) {
-            for (unsigned i = 0; i < missing; i++) _samples[(_head + _count++) % MicQueueFrames] = 0;
-        } else { _head = _count = 0; _primed = NO; }
-    }
-    _hasSample = YES; _nextSample = sampleTime + count;
-    if (_count + count > MicQueueFrames) {
-        unsigned discard = _count + count - MicQueueFrames;
-        _head = (_head + discard) % MicQueueFrames; _count -= discard;
-        _discardedFrames += discard;
-    }
-    for (unsigned i = 0; i < count; i++) _samples[(_head + _count++) % MicQueueFrames] = fminf(1, fmaxf(-1, samples[i]));
-    return YES;
+    return _link && !_stopped && PLANKMicQueueSubmitTimed(&_pcm, samples, count, sampleTime, captureTime, producerNow());
 }
 - (void)tick {
     if (_stopped) return;
@@ -125,32 +109,32 @@ static uint64_t producerNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC
     if (sequence != atomic_load(&_link->clockSequence)) return;
     uint64_t now = mach_absolute_time();
     if (!running || !anchor || !seed || now < anchor) {
-        atomic_store(&_link->deadline, 0); _count = _head = 0; _primed = NO; return;
+        atomic_store(&_link->deadline, 0); PLANKMicQueueFlush(&_pcm);
+        if (_mediaClock) PLANKReverseMediaClockClear(&_mediaClock->value); return;
     }
     uint64_t frame = (uint64_t)((now - anchor) / _link->ticksPerFrame);
     if (_clockSeed != seed || _nextFrame < frame || _nextFrame > frame + PLANKMicRate) {
         atomic_store(&_link->deadline, 0);
         _clockSeed = seed; _nextFrame = ((frame + 959) / 480) * 480;
         PLANKMicBufferReset(&_link->samples, _nextFrame);
-        atomic_store(&_link->producerSeed, seed); _primed = NO;
+        atomic_store(&_link->producerSeed, seed); _pcm.primed = NO;
         _resyncs++;
+        if (_mediaClock) PLANKReverseMediaClockClear(&_mediaClock->value);
     }
-    if (!_primed && _count >= MicTargetFrames) _primed = YES;
     // <=30 ms look-ahead and at most three 10 ms blocks per tick. Adjust one
     // sample per block around the 20 ms target to absorb independent clocks;
     // never enlarge the queue to conceal drift or late network delivery.
     for (unsigned block = 0; block < 3 && _nextFrame < frame + 1440; block++) {
-        float output[480] = {0};
-        if (_primed && _count >= 479) {
-            unsigned consume = _count > MicTargetFrames + 480 ? 481 : _count < MicTargetFrames ? 479 : 480;
-            for (unsigned i = 0; i < 480; i++) {
-                double offset = (double)i * consume / 480;
-                unsigned a = (unsigned)offset, b = MIN(a + 1, consume - 1);
-                output[i] = _samples[(_head + a) % MicQueueFrames] * (1 - (offset - a)) +
-                    _samples[(_head + b) % MicQueueFrames] * (offset - a);
-            }
-            _head = (_head + consume) % MicQueueFrames; _count -= consume;
-        } else { _primed = NO; _silenceFrames += 480; }
+        float output[480 * PLANKMicChannels];
+        uint64_t captureTime = 0;
+        if (!PLANKMicQueueRenderTimed(&_pcm, ns, output, &captureTime)) _silenceFrames += 480;
+        if (_mediaClock) {
+            CMTime scheduled = CMTimeConvertScale(CMClockMakeHostTimeFromSystemUnits(
+                anchor + (uint64_t)(_nextFrame * _link->ticksPerFrame)), 1000000000, kCMTimeRoundingMethod_Default);
+            if (captureTime && CMTIME_IS_NUMERIC(scheduled) && scheduled.value > 0)
+                PLANKReverseMediaClockObserve(&_mediaClock->value, captureTime, (uint64_t)scheduled.value, PLANKCameraHostTimeNanos());
+            else PLANKReverseMediaClockClear(&_mediaClock->value);
+        }
         PLANKMicBufferWrite(&_link->samples, _nextFrame, output, 480);
         _renderedFrames += 480;
         _nextFrame += 480;
@@ -163,8 +147,8 @@ static uint64_t producerNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC
         atomic_store(&_link->deadline, 0);
         PLANKMicBufferReset(&_link->samples, _nextFrame);
     }
-    memset(_samples, 0, sizeof(_samples));
-    _count = _head = 0; _primed = _hasSample = NO;
+    PLANKMicQueueClear(&_pcm);
+    if (_mediaClock) PLANKReverseMediaClockClear(&_mediaClock->value);
 }
 - (void)stop {
     dispatch_assert_queue(_queue);
@@ -173,10 +157,12 @@ static uint64_t producerNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC
     if (_link) { atomic_store(&_link->deadline, 0); munmap(_link, _bytes); _link = NULL; }
     if (_timer) dispatch_source_cancel(_timer);
     if (_peer) xpc_connection_cancel(_peer);
-    memset(_samples, 0, sizeof(_samples)); _count = 0;
-    NSLog(@"PLANK microphone producer stopped: frames=%llu silence=%llu resyncs=%llu overflow=%llu",
+    PLANKMicQueueClear(&_pcm);
+    if (_mediaClock) PLANKReverseMediaClockClear(&_mediaClock->value);
+    NSLog(@"PLANK microphone producer stopped: frames=%llu silence=%llu resyncs=%llu overflow=%llu expired=%llu",
         (unsigned long long)_renderedFrames, (unsigned long long)_silenceFrames,
-        (unsigned long long)_resyncs, (unsigned long long)_discardedFrames);
+        (unsigned long long)_resyncs, (unsigned long long)_pcm.discardedFrames,
+        (unsigned long long)_pcm.expiredFrames);
     void (^ready)(BOOL) = _ready; _ready = nil;
     if (ready) ready(NO);
 }

@@ -77,7 +77,8 @@ def main():
             port = reservation.getsockname()[1]
         config = {"Address": "127.0.0.1", "Port": port, "Name": "PLANK Host assembly",
                   "UUID": str(uuid.uuid4())}
-        (identity / "host.plist").write_bytes(plistlib.dumps(config))
+        (identity / "host.conf").write_text(f'[general]\nhost_name = {config["Name"]}\n[network]\nport = {port}\n')
+        (identity / "identity.plist").write_bytes(plistlib.dumps({"UUID": config["UUID"]}))
         for path in identity.iterdir():
             os.chmod(path, 0o600)
             os.chown(path, args.desktop_uid, -1)
@@ -118,6 +119,7 @@ def main():
                 assert response.findtext("ServerCodecModeSupport") == "1049088"
                 assert response.findtext("PlankTopologyVersion") == "13"
                 assert response.findtext("PlankFeatureFlags") == "12091505"
+                assert response.findtext("PlankOccupied") == "1"
                 assert fixture.request(certificate, port, {}, raw=b"GET /plank/topology HTTP/1.1\r\nHost: localhost\r\n\r\n")[0] == 401
                 assert fixture.request(certificate, port, {}, raw=b"GET /applist HTTP/1.1\r\nHost: localhost\r\n\r\n")[0] == 401
                 command("launchctl", "kill", "SIGTERM", graphical_job)

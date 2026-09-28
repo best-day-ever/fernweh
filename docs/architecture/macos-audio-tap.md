@@ -1,4 +1,48 @@
-# Session-scoped local audio suppression
+# macOS audio tap
+
+Current desktop capture is restricted to PLANK Output with `CATapUnmuted`,
+preserving the non-root process allowlist and verified system-alert membership.
+Physical outputs play locally. See [PLANK Output](../development/plans/macos-output-device.plan).
+ScreenCaptureKit continues to capture desktop video, with its audio output
+disabled. Its [stream configuration](https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration)
+has no playback-output device selector in the macOS27 SDK; microphone device
+selection is a separate input capability. The Core Audio
+[device/stream tap](https://developer.apple.com/documentation/coreaudio/catapdescription/init%28processes%3Adeviceuid%3Astream%3A%29)
+restricts capture to audio destined for PLANK Output. This requires separate
+audio lifecycle and buffering, but preserves the distinction between local and
+remote playback. ScreenCaptureKit itself does not route audio to speakers.
+The root LoginWindow worker retains its separate ScreenCaptureKit audio path;
+the desktop process tap is never broadened to a global root tap.
+
+The private capture aggregate explicitly uses PLANK Output as its main audio
+device and clock. Its only hardware-style subdevice is that virtual null sink;
+its only input is the process-scoped stereo tap. Preparation verifies the
+selected clock and fails if it differs. The IO callback clears the aggregate's
+virtual output buffers. Physical speakers and microphone devices are not members
+of this aggregate. This replaces the earlier tap-only aggregate's implicit clock
+selection; live recurrence testing of this clock change remains required.
+
+Both virtual audio drivers advertise a 15840-frame zero-timestamp period.
+SDK27's `AudioServerPlugIn.h` requires at least10923; the previous480-frame
+period violated that contract. This clock interval is separate from HAL IO
+buffer size and from the5ms playback/10ms microphone packets. Microphone IPC
+still copies480-frame blocks; HAL reads remain bounded by the8192-frame history.
+Deterministic driver tests check the SDK minimum, boundary interpolation and
+clock generations. Installed Host1.1.014 verification finds both corrected
+clock periods and512-frame IO buffers without a buffer-size setter. The operator
+reports clean playback and a clean repeated1kHz tone; six steady seconds measure
+coherence above0.99996 from Client decoding through its physical playback buffer.
+This is initial recovery validation; sustained duplex/recurrence testing remains.
+
+Capture diagnostics retain HAL sample position, host time and callback time with
+each bounded ring entry. The consumer logs timing gaps at exponentially spaced
+counts, distinguishing source sample gaps, clock changes and delivery delay.
+There is no logging in the HAL callback and no recorded media payload.
+
+The earlier suppression investigation and qualification below describe the
+preceding implementation, whose global output scope is superseded.
+
+## Historical local-suppression investigation
 
 Work branch: `macos-audio-tap`, based on main `35ed81f`.
 

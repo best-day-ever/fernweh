@@ -212,8 +212,11 @@ For the two explicitly provisioned development accounts, add
 `--retire-user-agent operator --retire-user-agent permission-test-user` on the first
 upgrade only. These old user jobs are renamed to `.plist.retired` with permanently
 dropped user privileges; no home enumeration or private-key deletion occurs.
-The shared public configuration is `/Library/Application Support/PLANK/host.plist`
-(root/0644, parent0755); LoginWindow keys remain in `SignIn` (root/0700/0600).
+The administrator configuration is `/etc/plank/host.conf`
+(root/0644, parent0755). Workstation UUID lives separately in
+`/Library/Application Support/PLANK/identity.plist`; LoginWindow keys remain in
+`SignIn` (root/0700/0600). PKG and development installation use the same native
+configuration validator/converter. No runtime plist configuration fallback remains.
 Desktop keys and logs are created by the signed app as the actual user, never
 by root launchd following a user-writable log path. This does not grant consent.
 
@@ -702,7 +705,7 @@ Current expectation is 403 checks/15 scenarios. Include `apps/host/macos/session
 sources as well as the `apps/host/macos/input`
 headers/sources, `tests/input/macos-fake-input.{h,m}`, `plank_transport_input.h`,
 `plank_transport_control.h`, both media modules and
-`tests/protocol/macos-preview-launch-v4.json` in standalone staged inputs.
+`tests/protocol/macos-preview-launch-v5.json` in standalone staged inputs.
 This is not a new transport-library build. Each lifecycle test remains bounded.
 
 The four added scenarios connect real anonymous XPC admission to the actual
