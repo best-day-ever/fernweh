@@ -2,8 +2,9 @@
 
 The Windows x64 source build uses `scripts/bde/build-windows-client.cmd` with
 `PLANK_WINDOWS_RELEASE_BUILD=1`. Keep the build directory separate from the
-development build; the release executable must report product version
-`1.1.001.0`, product `BDE fernweh`, and company `Best Day Ever`.
+development build; the release executable must report the product version from
+`packaging/VERSION` (for example `1.1.025.0`), product `BDE fernweh`, and
+company `Best Day Ever`.
 
 On the Windows build machine, stage from a fresh output directory:
 
@@ -19,8 +20,10 @@ Maintenance Fee agreement. The staged tree contains the client license and
 an explicit unsigned candidate README. The MSI is per-machine and therefore
 requires administrator rights to install.
 
-For this candidate, the WiX property version is `1.1.1` because MSI stores
-numeric version fields; the executable and artifact name retain `1.1.001`.
+The WiX property version drops the padding because MSI stores numeric
+version fields (`1.1.025` becomes `1.1.25`); the executable and artifact name
+retain the padded version. A newer MSI upgrades an installed candidate in
+place (checked from 1.1.001 to 1.1.025 on RPBS_PROTAINE).
 After packaging, compare the staged and installed executable SHA-256, verify
 the Start menu shortcut, and run an install/uninstall/reinstall cycle. Keep
 the existing development ZIP separate while testing.
