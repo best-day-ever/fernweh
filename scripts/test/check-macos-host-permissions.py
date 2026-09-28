@@ -7,21 +7,26 @@ import subprocess
 import tempfile
 
 
-EXECUTABLES = {"Contents/MacOS/plank-host", "Contents/Resources/uninstall.sh"}
+CAMERA = "Contents/Library/SystemExtensions/la.instinctual.PLANK.Host.Camera.systemextension"
+EXECUTABLES = {"Contents/MacOS/plank-host", "Contents/Resources/uninstall.sh", "Contents/Resources/plank-configure", CAMERA + "/Contents/MacOS/plank-camera"}
 REQUIRED_APP = {
     "Contents", "Contents/MacOS", "Contents/Resources", "Contents/_CodeSignature",
     "Contents/MacOS/plank-host", "Contents/Info.plist", "Contents/Resources/plank.icns",
+    "Contents/Resources/plank-configure", "Contents/Resources/host.conf.example",
     "Contents/_CodeSignature/CodeResources",
+    CAMERA, CAMERA + "/Contents/Info.plist", CAMERA + "/Contents/MacOS/plank-camera",
+    CAMERA + "/Contents/_CodeSignature/CodeResources",
 }
 APP = "Applications/PLANK Host.app"
 DRIVER = "Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver"
+OUTPUT_DRIVER = "Library/Audio/Plug-Ins/HAL/PLANK Output.driver"
 
 
 def expected_mode(name, directory, app_only=False):
     if directory:
         return "drwxr-xr-x"
     relative = name if app_only else name.removeprefix(APP + "/")
-    return "-rwxr-xr-x" if relative in EXECUTABLES or name == DRIVER + "/Contents/MacOS/plank-microphone" else "-rw-r--r--"
+    return "-rwxr-xr-x" if relative in EXECUTABLES or name in {DRIVER + "/Contents/MacOS/plank-microphone", OUTPUT_DRIVER + "/Contents/MacOS/plank-output"} else "-rw-r--r--"
 
 
 def check_records(records, app_only=False):
@@ -33,6 +38,8 @@ def check_records(records, app_only=False):
         "Library/LaunchAgents/la.instinctual.PLANK.Host.sign-in.plist",
         DRIVER, DRIVER + "/Contents/Info.plist", DRIVER + "/Contents/MacOS/plank-microphone",
         DRIVER + "/Contents/_CodeSignature/CodeResources",
+        OUTPUT_DRIVER, OUTPUT_DRIVER + "/Contents/Info.plist", OUTPUT_DRIVER + "/Contents/MacOS/plank-output",
+        OUTPUT_DRIVER + "/Contents/_CodeSignature/CodeResources",
     } | {APP + "/" + name for name in REQUIRED_APP})
     missing = required - records.keys()
     if missing:

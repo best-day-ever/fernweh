@@ -1410,7 +1410,7 @@ for required_display_policy_token in \
   'displayPolicyKnown' \
   'allowedLayoutKinds' \
   'TemporaryPhysicalLayoutFeature' \
-  'This headless workstation does not provide physical displays.' \
+  'Match Host requires physical displays attached to the workstation.' \
   'This workstation does not support the display layout selected by the bookmark.'; do
   rg -Fq "$required_display_policy_token" "$source_dir/app" || {
     echo "host display-policy invariant is missing: ${required_display_policy_token}" >&2
@@ -1474,7 +1474,7 @@ for required_relay_wake_token in \
   'manualBookmark &&' \
   'relay_wake_port'; do
   rg -Fq "$required_relay_wake_token" \
-    "$source_dir/app" "$repo_dir/packaging/client/linux/config/plank-client.conf" || {
+    "$source_dir/app" "$repo_dir/packaging/client/config/plank-client.conf" || {
     echo "relay-mediated Wake PC invariant is missing: ${required_relay_wake_token}" >&2
     exit 1
   }
@@ -1551,7 +1551,7 @@ rg -Fq '\$$ORIGIN/../lib/plank' "$source_dir/app/app.pro" || {
   exit 1
 }
 echo "client_direct_runtime_gate=pass"
-client_policy="$repo_dir/packaging/client/linux/config/plank-client.conf"
+client_policy="$repo_dir/packaging/client/config/plank-client.conf"
 rg -Fxq '[network]' "$client_policy" || {
   echo "client administrator policy is missing its network section" >&2
   exit 1
@@ -1768,6 +1768,9 @@ mkdir -p "$build_dir/tests/pacershutdown"
 )
 echo "client_render_shutdown_gate=pass"
 
+c++ -std=c++17 -Wall -Wextra -Werror -I"$source_dir/app/streaming/audio" \
+  "$repo_dir/tests/audio/client-microphone-clock.cpp" -o "$build_dir/tests/client-microphone-clock"
+"$build_dir/tests/client-microphone-clock"
 mkdir -p "$build_dir/tests/client-microphone"
 (
   cd "$build_dir/tests/client-microphone"
@@ -1775,6 +1778,18 @@ mkdir -p "$build_dir/tests/client-microphone"
   make -j2
   timeout 30 ./client-microphone
 )
+mkdir -p "$build_dir/tests/client-microphone-timed"
+(
+  cd "$build_dir/tests/client-microphone-timed"
+  qmake6 "$repo_dir/tests/audio/client-microphone.pro" "PLANK_CLIENT_SOURCE=$source_dir" PLANK_TIMED_CAPTURE_TEST=1 CONFIG+=release
+  make -j2
+  timeout 30 ./client-microphone
+)
+
+PLANK_CLIENT_SOURCE="$source_dir" bash "$repo_dir/scripts/test/test-native-camera-capture.sh" \
+  "$build_dir/tests/native-camera"
+bash "$repo_dir/scripts/test/test-client-camera-session.sh" "$repo_dir" "$source_dir" \
+  "$build_dir/tests/camera-session"
 
 mkdir -p "$build_dir"
 (

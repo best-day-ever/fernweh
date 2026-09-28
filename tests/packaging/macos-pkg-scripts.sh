@@ -15,6 +15,7 @@ done
     # Bash 3.2 on macOS can return early when sourcing a process-substitution
     # pipe. Read the complete trusted fixture before defining its function.
     eval "$(/usr/bin/sed -e '$d' -e 's|/bin/rm|remove_cmd|g' \
+        -e 's|/usr/bin/systemextensionsctl|extension_cmd|g' \
         -e 's|/usr/sbin/pkgutil|receipt_cmd|g' "$root/packaging/host/macos/uninstall.sh")"
     calls=''
     preflight() { [[ $1 = / ]]; calls="$calls|preflight"; }
@@ -22,14 +23,71 @@ done
     present() { return 0; }
     verify_app() { [[ $1 = yes ]]; calls="$calls|verify"; }
     verify_microphone_driver() { calls="$calls|verify-microphone"; }
+    verify_output_driver() { calls="$calls|verify-output"; }
     remove_cmd() { calls="$calls|remove:$*"; }
     receipt_cmd() { calls="$calls|receipt:$*"; }
+    extension_cmd() { [[ $1 = list ]]; }
+    console_uid() { echo 502; }
+    launchctl_cmd() { fail 'Absent camera must not launch anything'; }
     reject uninstall_host unexpected-argument
     uninstall_host >/dev/null
-    [[ $calls = "|preflight|stop|verify-microphone|remove:-rf /Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver|remove:/Library/LaunchDaemons/$machine.plist|remove:/Library/LaunchAgents/$desktop.plist|remove:/Library/LaunchAgents/$signin.plist|verify|remove:-rf /Applications/PLANK Host.app|receipt:--pkg-info la.instinctual.PLANK.Host|receipt:--forget la.instinctual.PLANK.Host" ]]
-    # Never remove anything when preflight or bounded shutdown fails.
+    [[ $calls = "|preflight|stop|verify-microphone|remove:-rf /Library/Audio/Plug-Ins/HAL/PLANK Microphone.driver|verify-output|remove:-rf /Library/Audio/Plug-Ins/HAL/PLANK Output.driver|remove:/Library/LaunchDaemons/$machine.plist|remove:/Library/LaunchAgents/$desktop.plist|remove:/Library/LaunchAgents/$signin.plist|verify|remove:-rf /Applications/PLANK Host.app|receipt:--pkg-info la.instinctual.PLANK.Host|receipt:--forget la.instinctual.PLANK.Host" ]]
+    # Registered camera: automatically request removal as the console user,
+    # wait for verified disappearance, then stop services/remove the app.
+    calls=''; removed=0
+    extension_cmd() { [[ $1 = list ]]; if [[ $removed = 0 ]]; then echo 'la.instinctual.PLANK.Host.Camera'; fi; }
+    launchctl_cmd() {
+        if [[ $* = 'print gui/502' ]]; then return; fi
+        [[ $* = "asuser 502 /usr/bin/sudo -n -u #502 $executable --disable-camera" ]]
+        calls="$calls|deactivate"; removed=1
+    }
+    uninstall_host >/dev/null
+    [[ $calls = '|preflight|deactivate|stop|verify-microphone|'* && $calls = *"|remove:-rf $app|receipt:"* ]]
+
+    # Never remove anything or stop working services on camera failure.
     remove_cmd() { echo 'unexpected removal'; exit 90; }
+    stop_roles() { fail 'Must not stop Host before camera removal completes'; }
+    extension_cmd() { echo 'la.instinctual.PLANK.Host.Camera'; }
+    pause_drain() { :; }
+    launchctl_cmd() { if [[ $1 = print ]]; then return 0; fi; return 2; }
+    [[ $(uninstall_host 2>&1 || true) = *'requires a restart'* ]]
+    launchctl_cmd() { if [[ $1 = print ]]; then return 0; fi; return 1; }
+    [[ $(uninstall_host 2>&1 || true) = *'Camera removal did not complete'* ]]
+    launchctl_cmd() { return 0; }
+    [[ $(uninstall_host 2>&1 || true) = *'still registered'* ]]
+    launchctl_cmd() { return 1; }
+    [[ $(uninstall_host 2>&1 || true) = *'No active desktop'* ]]
+    console_uid() { echo 0; }
+    launchctl_cmd() { fail 'Never run camera removal as root'; }
+    [[ $(uninstall_host 2>&1 || true) = *'Log into the Mac desktop'* ]]
+    console_uid() { echo 'invalid'; }
+    reject uninstall_host
+    console_uid() { return 1; }
+    reject uninstall_host
+    console_uid() { echo 502; }
+    present() { [[ $1 != "$app" ]]; }
+    [[ $(uninstall_host 2>&1 || true) = *'reinstall Host'* ]]
+    present() { return 0; }
+    # Registry failure after a successful request is not proof of removal.
+    removed=0
+    extension_cmd() { if [[ $removed = 0 ]]; then echo 'la.instinctual.PLANK.Host.Camera'; else return 1; fi; }
+    launchctl_cmd() { if [[ $1 = asuser ]]; then removed=1; fi; }
+    [[ $(uninstall_host 2>&1 || true) = *'Cannot verify camera removal'* ]]
+    # A short registry delay is retried, with a bounded total wait.
+    removed=0; delays=0
+    extension_cmd() { if [[ $delays -lt 2 ]]; then echo 'la.instinctual.PLANK.Host.Camera'; fi; }
+    pause_drain() { delays=$((delays+1)); }
+    remove_camera >/dev/null
+    [[ $removed = 1 && $delays = 2 ]]
+    extension_cmd() { return 1; }
+    reject uninstall_host
+    # An unregistered camera does not require a desktop at all.
+    extension_cmd() { :; }
+    console_uid() { fail 'Unregistered camera needs no console'; }
+    remove_camera
+    # Never remove anything when preflight or bounded shutdown fails.
     preflight() { fail 'fixture unsafe metadata'; }
+    reject uninstall_host
     [[ $(uninstall_host 2>&1 || true) = 'PLANK: fixture unsafe metadata' ]]
     preflight() { :; }
     stop_roles() { fail 'fixture drain timeout'; }
@@ -48,6 +106,15 @@ missing_job gui/501/example 'Could not find domain for'; ok
 reject missing_job system/example 'Could not find service "unrelated"'
 reject missing_job system/example 'Operation not permitted'
 reject preflight /Volumes/Other
+
+# A native helper error must terminate validation even when the caller tests
+# its status with `if` (which disables Bash errexit throughout nested calls).
+(
+    configuration_resources='/nonexistent-plank-package-test'
+    present() { return 1; }
+    reject check_configuration
+)
+ok
 
 # Test actual job_state failure handling; never invoke launchctl.
 (
@@ -124,8 +191,16 @@ ok
 ok
 (
     console_uid() { echo 502; }
-    launchctl_cmd() { return 1; }
+    launchctl_cmd() { [[ $1 = print ]]; }
     [[ $(open_permission_setup) = *'open PLANK Host in Applications'* ]]
+)
+ok
+(
+    console_uid() { echo 502; }
+    launchctl_cmd() { [[ $1 = print ]] || fail 'Missing GUI must never launch setup'; return 1; }
+    [[ $(open_permission_setup) = *'Permission setup is pending'* ]]
+    console_uid() { return 1; }
+    [[ $(open_permission_setup) = *'Permission setup is pending'* ]]
 )
 ok
 
@@ -152,21 +227,39 @@ if [[ ${1:-} = --filesystem ]]; then
     /bin/chmod 755 "$fixture"
     /usr/bin/cc -std=gnu11 -Wall -Wextra -Werror \
         "$root/tests/packaging/macos-log-access.c" -o "$fixture/log-access"
-    state="$fixture/state"; logs="$fixture/logs"
+    state="$fixture/state"; logs="$fixture/logs"; configuration="$fixture/etc"
+    configuration_resources="$fixture"
+    /usr/bin/xcrun clang -fobjc-arc -Wall -Wextra -Werror -I"$root/apps/host/macos/session" \
+        "$root/scripts/package/macos-configure.m" "$root/apps/host/macos/session/host-configuration.m" \
+        -framework Foundation -o "$fixture/plank-configure"
+    /usr/bin/install -m 0644 "$root/packaging/host/macos/config/plank-host.conf" "$fixture/host.conf.example"
     initialize_state
     prepare_machine_authority
+    [[ $(/usr/bin/stat -f '%Su:%Lp' "$state") = root:755 ]]; ok
+    [[ $(/usr/bin/stat -f '%Su:%Lp' "$state/OutputRouting") = root:700 ]]; ok
+    # Reproduce the shared-parent/private-journal mismatch and reject unsafe
+    # pre-existing routing storage instead of broadening its access.
+    /bin/chmod 755 "$state/OutputRouting"
+    reject initialize_state
+    /bin/chmod 700 "$state/OutputRouting"
+    /bin/rmdir "$state/OutputRouting"
+    /bin/ln -s "$state/SignIn" "$state/OutputRouting"
+    reject initialize_state
+    /bin/rm "$state/OutputRouting"
+    initialize_state
+    [[ $(/usr/bin/stat -f '%Su:%Lp' "$state/OutputRouting") = root:700 ]]; ok
     [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs") = root:admin:750 ]]; ok
     for name in host-machine.log host-sign-in.log; do
         [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs/$name") = root:admin:640 ]]; ok
         "$fixture/log-access" "$logs" "$logs/$name" "$state/SignIn/key.pem" admin; ok
         "$fixture/log-access" "$logs" "$logs/$name" "$state/SignIn/key.pem" wheel; ok
     done
-    [[ $(/usr/libexec/PlistBuddy -c 'Print :Address' "$state/host.plist") = 0.0.0.0 ]]; ok
-    [[ $(/usr/libexec/PlistBuddy -c 'Print :Port' "$state/host.plist") = 28989 ]]; ok
-    /usr/bin/plutil -replace Port -integer 29999 "$state/host.plist"
-    before=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
+    [[ ! -e "$state/host.plist" && -s "$state/identity.plist" ]]; ok
+    /usr/bin/grep -qx 'port = 28989' "$configuration/host.conf"; ok
+    /usr/bin/sed -i '' 's/port = 28989/port = 29999/' "$configuration/host.conf"
+    before=$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)
     initialize_state
-    after=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
+    after=$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)
     [[ $before = "$after" ]]; ok
     # Renewal and the CA-profile upgrade retain the machine private key. No
     # root key is copied to desktop users, and a second install is idempotent.
@@ -176,15 +269,15 @@ if [[ ${1:-} = --filesystem ]]; then
     prepare_machine_authority
     /usr/bin/openssl x509 -in "$state/SignIn/cert.pem" -noout -checkend 2592000; ok
     [[ $machine_key_before = "$(/usr/bin/shasum -a 256 "$state/SignIn/key.pem" "$state/SignIn/key.der")" ]]; ok
-    before=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
+    before=$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)
     prepare_machine_authority
-    [[ $before = "$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
+    [[ $before = "$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
     # An interrupted certificate-pair update must be repaired on reinstall.
     printf 'damaged DER fixture' > "$state/SignIn/cert.der"
     prepare_machine_authority
     /usr/bin/cmp -s <(/usr/bin/openssl x509 -in "$state/SignIn/cert.pem" -outform DER) "$state/SignIn/cert.der"; ok
     [[ $machine_key_before = "$(/usr/bin/shasum -a 256 "$state/SignIn/key.pem" "$state/SignIn/key.der")" ]]; ok
-    before=$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)
+    before=$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)
     # Reproduce the real .82 failure without changing product paths/services.
     /bin/chmod 744 "$logs"
     /bin/chmod 644 "$logs/host-machine.log" "$logs/host-sign-in.log"
@@ -192,7 +285,7 @@ if [[ ${1:-} = --filesystem ]]; then
     [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs") = root:admin:750 ]]; ok
     safe_file "$logs/host-machine.log" 640; ok
     safe_file "$logs/host-sign-in.log" 640; ok
-    [[ $before = "$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
+    [[ $before = "$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
     # Upgrade the previous root-only policy without changing contents or keys.
     /usr/sbin/chown root:wheel "$logs" "$logs/host-machine.log" "$logs/host-sign-in.log"
     /bin/chmod 700 "$logs"
@@ -203,7 +296,7 @@ if [[ ${1:-} = --filesystem ]]; then
         [[ $(/usr/bin/stat -f '%Su:%Sg:%Lp' "$logs/$name") = root:admin:640 ]]; ok
     done
     check_configuration; ok
-    [[ $before = "$(/usr/bin/shasum -a 256 "$state/host.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
+    [[ $before = "$(/usr/bin/shasum -a 256 "$configuration/host.conf" "$state/identity.plist" "$state/SignIn/"* "$logs/"*)" ]]; ok
     /bin/chmod 660 "$logs/host-sign-in.log"
     reject prepare_logs
     /bin/chmod 640 "$logs/host-sign-in.log"
@@ -219,14 +312,14 @@ if [[ ${1:-} = --filesystem ]]; then
     /usr/sbin/chown nobody "$logs/host-machine.log"
     reject prepare_logs
     /usr/sbin/chown root "$logs/host-machine.log"
-    /bin/ln -s "$state/host.plist" "$fixture/symlink"
+    /bin/ln -s "$configuration/host.conf" "$fixture/symlink"
     reject safe_file "$fixture/symlink" 644
-    /bin/ln "$state/host.plist" "$fixture/hardlink"
-    reject safe_file "$state/host.plist" 644
+    /bin/ln "$configuration/host.conf" "$fixture/hardlink"
+    reject safe_file "$configuration/host.conf" 644
     /bin/rm "$fixture/hardlink"
-    /bin/chmod 666 "$state/host.plist"
+    /bin/chmod 666 "$configuration/host.conf"
     reject check_configuration
-    /bin/chmod 644 "$state/host.plist"
+    /bin/chmod 644 "$configuration/host.conf"
     /bin/ln -s "$state" "$fixture/directory-link"
     reject safe_directory "$fixture/directory-link"
     /bin/chmod 777 "$logs"

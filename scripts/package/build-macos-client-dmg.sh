@@ -51,16 +51,10 @@ while IFS= read -r -d '' file; do
         { echo "deployment target gate: $file minos=${minos:-none} > $macos_min" >&2; exit 1; }
 done < <(find "$app" -type f -print0)
 echo "macos_deployment_target_gate=pass min=$macos_min"
-mkdir "$output/plank.iconset"
-clang -fobjc-arc -mmacosx-version-min="${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}" "$source_root/scripts/package/macos-app-icon.m" \
-    -framework Foundation -framework CoreGraphics -framework ImageIO -o "$output/macos-app-icon"
-"$output/macos-app-icon" "$source_root/branding/assets/plank-logo.png" "$output/plank.iconset"
-iconutil -c icns "$output/plank.iconset" -o "$app/Contents/Resources/plank.icns"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile plank' "$app/Contents/Info.plist"
-# Remove only the inherited icon in this newly created packaging tree.
-if [[ -f "$app/Contents/Resources/moonlight.icns" ]]; then
-    rm "$app/Contents/Resources/moonlight.icns"
-fi
+# The base build installs the approved Client icon; every packaging path must
+# ship that exact artwork.
+cmp "$build/app/plank-client.app/Contents/Resources/plank.icns" "$app/Contents/Resources/plank.icns"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")" = plank
 mkdir -p "$app/Contents/Resources/licenses"
 cp "$source_root/apps/client/LICENSE" "$app/Contents/Resources/licenses/client.txt"
 for name in SDL3-3.4.2 SDL3_ttf-3.2.2 opus-1.5.2 openssl-3.5.5 freetype-2.14.1 ffmpeg-9.0.1; do

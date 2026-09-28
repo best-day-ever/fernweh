@@ -344,24 +344,53 @@ int32_t plank_transport_native_audio_receive(
         uint8_t *payload, size_t payload_capacity,
         size_t *payload_size_out, uint32_t timeout_ms);
 
-/* Optional Client -> Host mono 48 kHz/480-frame Opus lane. Enable on BOTH
+/* Optional Client -> Host stereo 48 kHz/480-frame Opus lane. Enable on BOTH
  * peers only after authenticated capability agreement; never for a Linux
  * Host lacking microphone injection. Capture waits for Host activation ACK.
  * State: 0 unavailable, 1 opening, 2 ready, 3 failed. Microphone lane failure
  * does not terminate ordinary video/output-audio/input. No new socket.
  * Activation generations increase per connection. Zero mutes and flushes;
  * prior generations can never be reactivated. Maximum Opus packet: 1275 bytes.
- * Send queue: 2 packets; receive queue: 8; queued packets expire after 100 ms.
+ * Send queue: 6 packets; receive queue: 8; queued packets expire after 100 ms.
  * Receive is nonblocking; BUFFER_TOO_SMALL preserves the queued packet.
  * Owner must still reject stale generations at its final decode/inject boundary.
  */
 int32_t plank_transport_native_microphone_enable(PlankTransportNativeEndpoint *endpoint);
 uint32_t plank_transport_native_microphone_state(const PlankTransportNativeEndpoint *endpoint);
 int32_t plank_transport_native_microphone_activate(PlankTransportNativeEndpoint *endpoint, uint64_t generation);
+/* Schema3 is negotiated independently; schema2 remains the legacy default.
+ * Capture time is Client CLOCK_MONOTONIC nanoseconds for the first decoded sample. */
+int32_t plank_transport_native_microphone_enable_version(PlankTransportNativeEndpoint *endpoint, uint32_t version);
+int32_t plank_transport_native_microphone_send_timed(PlankTransportNativeEndpoint *endpoint,
+    uint64_t generation, uint64_t sample_time, uint64_t capture_time_ns, const uint8_t *data, size_t length);
+int32_t plank_transport_native_microphone_receive_timed(PlankTransportNativeEndpoint *endpoint,
+    uint64_t *generation, uint64_t *sample_time, uint64_t *capture_time_ns, uint8_t *data, size_t capacity, size_t *length);
 int32_t plank_transport_native_microphone_send(PlankTransportNativeEndpoint *endpoint,
         uint64_t generation, uint64_t sample_time, const uint8_t *payload, size_t payload_size);
 int32_t plank_transport_native_microphone_receive(PlankTransportNativeEndpoint *endpoint,
         uint64_t *generation, uint64_t *sample_time, uint8_t *payload, size_t capacity, size_t *size_out);
+
+/* Optional Client -> Host camera lane, using bounded PCAM v1 records.
+ * Enable on BOTH peers after authenticated capability agreement, AFTER enabling
+ * the microphone if negotiated. microphone_negotiated must be exactly 0 or 1
+ * and match that fixed session capability; microphone allocation precedes camera.
+ * Availability/generation rules match microphone. Capture waits for Host ACK.
+ * Native payload maximum: 4 MiB. Source/receiver queues: 2/3 frames; 150 ms age.
+ * H.264 gaps/overflow discard dependent frames until an independent frame arrives.
+ * keyframe_needed returns the activation requiring recovery, or zero. The
+ * caller rate-limits requests; this level stays set until a keyframe is queued.
+ * Camera failure leaves desktop video, audio, microphone and input available.
+ * Receive is nonblocking; BUFFER_TOO_SMALL preserves the unclaimed record.
+ */
+int32_t plank_transport_native_camera_enable(PlankTransportNativeEndpoint *endpoint,
+        uint32_t microphone_negotiated);
+uint32_t plank_transport_native_camera_state(const PlankTransportNativeEndpoint *endpoint);
+int32_t plank_transport_native_camera_activate(PlankTransportNativeEndpoint *endpoint, uint64_t generation);
+uint64_t plank_transport_native_camera_keyframe_needed(const PlankTransportNativeEndpoint *endpoint);
+int32_t plank_transport_native_camera_send(PlankTransportNativeEndpoint *endpoint,
+        const uint8_t *record, size_t length);
+int32_t plank_transport_native_camera_receive(PlankTransportNativeEndpoint *endpoint,
+        uint8_t *record, size_t capacity, size_t *length);
 
 int32_t plank_transport_native_input_send(
         PlankTransportNativeEndpoint *endpoint, uint8_t type,

@@ -7,6 +7,7 @@ export CARGO_NET_OFFLINE=true
 python3 "$PLANK_SOURCE_ROOT/tests/network/test_datagram_sender.py"
 case $role in
   linux-host)
+    bash "$PLANK_SOURCE_ROOT/tests/protocol/test-occupancy-indicator.sh"
     export PLANK_HOST_FFMPEG_BUILD="$PLANK_SOURCE_ROOT/apps/host/linux/third-party/build-deps/build"
     export PLANK_HOST_FFMPEG_ROOT="$PLANK_DEP_ROOT/host-ffmpeg"
     export PLANK_BOOST_SOURCE_DIR="$PLANK_DEP_ROOT/boost-1.89.0"
@@ -41,6 +42,7 @@ case $role in
     fi
     ;;
   macos-client)
+    bash "$PLANK_SOURCE_ROOT/scripts/test/build-macos-configuration.sh" "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/client-config-tests"
     export PLANK_MAC_CLIENT_DEPS="$PLANK_DEP_ROOT/macos-client" PLANK_QT_ROOT="$PLANK_DEP_ROOT/qt/6.10.2/macos"
     if [[ ${PLANK_CI_SIGNED:-false} = true ]]; then
       bash "$PLANK_SOURCE_ROOT/scripts/package/build-macos-client-dmg.sh" "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/client-package"

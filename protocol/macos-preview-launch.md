@@ -1,4 +1,4 @@
-# Authenticated macOS preview launch (schema 4)
+# Authenticated macOS preview launch
 
 Experimental, on `macos-host` only. The actual Host advertises HEVC Main10 and
 fixed capture; component-only fixtures still advertise zero capabilities.
@@ -55,14 +55,21 @@ bounded request may finish but cannot trigger more work behind that prompt.
 Disconnect cancels the paused worker. Login/logout recovery otherwise remains
 automatic. These rules do not apply credentials to bookmark discovery polls.
 
-The body has exactly the eleven fields in
-`tests/protocol/macos-preview-launch-v4.json`:
+New peers use the independently versioned feature contract in
+[media-feature-negotiation.md](media-feature-negotiation.md), with launch envelope7.
+This document also defines the retained schema6 adapter. Schemas4/5 use the same
+fields except `camera`, which must be absent. Schema4 microphone is always
+disabled by the Host because its old mono packet format is incompatible.
+
+The schema6 body has exactly the twelve fields in
+`tests/protocol/macos-preview-launch-v6.json`:
 
 | Field | Required value |
 | --- | --- |
-| `schema_version` | Integer 4 |
+| `schema_version` | Integer 6 |
 | `clipboard` | Boolean Client opt-in; false on Linux Clients |
 | `microphone` | Boolean reverse-audio capability opt-in; not recording consent |
+| `camera` | Boolean reverse-camera capability opt-in; not capture consent (Linux Client only) |
 | `capture_generation` | Current authenticated topology generation |
 | `capture_id` | Current fixed-capture identifier |
 | `width`, `height` | Exact advertised even pixel dimensions, 2–8192 |
@@ -77,12 +84,12 @@ existing route policy; accepting a numeric value does not prove that path MTU.
 Unknown fields, booleans as integers, wrong profiles and stale geometry fail.
 There is no resize, profile substitution, implicit takeover or fallback port.
 
-A successful response has schema 4, `state: "connecting"`, an independent
+A successful response has schema 6, `state: "connecting"`, an independent
 one-use `transport_token`, `udp_port`, the exact `max_udp_payload_size`, the
 selected `capture` descriptor and:
 
 ```json
-"services": {"audio": true, "input": true, "pen": "normalized", "cursor": "embedded", "clipboard": false, "microphone": false}
+"services": {"audio": true, "input": true, "pen": "normalized", "cursor": "embedded", "clipboard": false, "microphone": false, "camera": false}
 ```
 
 Clipboard is true only when explicitly requested by a capable Client and
@@ -91,7 +98,8 @@ LoginWindow and for Linux Clients. See `clipboard-sync.md`; the Client must use
 this negotiated result, not discovery alone, before accessing a pasteboard.
 
 Microphone is true only for an authenticated desktop worker with the installed
-PLANK input device and a capable Client. It is false at LoginWindow. No Client
+PLANK input device exposing 48 kHz stereo float32 and a capable Client.
+A still-loaded mono driver is unavailable until the matching driver is loaded. It is false at LoginWindow. No Client
 input device opens just because the field is true: activation additionally
 requires OS consent and a generation-matched Host acknowledgement. See
 `microphone.md`. Linux Host negotiation is unchanged.
@@ -115,8 +123,10 @@ order. Malformed/unsupported controls fail the session. System audio is Opus,
 stereo 48 kHz, 5 ms packets (one stream, one coupled stream, mapping 0/1).
 Keyboard, absolute mouse, buttons, scrolling and normalized pen use native input.
 No separate cursor, raw-HID or generic-touchscreen capability is claimed.
-See `macos-pen-input.md` for pressure, validation and cleanup. Schema1 is rejected;
-this requires matching Host/Client candidates, without a legacy fallback.
+See `macos-pen-input.md` for pressure, validation and cleanup. Explicit adapters
+retain schemas4/5/6; earlier launch and transport protocols remain unsupported.
+The reply matches the requested schema exactly, omitting `camera` below schema6.
+Schema4 always returns `microphone: false`.
 The native library itself retains its shared Linux endpoint implementation.
 
 The Client now has a typed manifest parser and explicit native service flags.
@@ -139,8 +149,8 @@ See `tests/protocol/macos-display-v3.json`. Width and height are even backing
 pixel counts from 2 through 8192; scale is integer 1 or 2. Logical desktop
 dimensions are pixels divided by scale and may be odd. Booleans, fractional
 values, missing/extra fields and prior schemas are rejected. Matching Host and
-Client builds are required; no silent 1x downgrade. Launch is schema 4
-and fixed-capture topology remains schema 13 (already carrying both geometries).
+Client display contracts are required; no silent 1x downgrade. Launch supports
+schemas4/5/6/7 and fixed-capture topology remains schema13 (already carrying both geometries).
 
 For macOS Clients, Match Client reads the current CoreGraphics mode's backing
 pixels and logical bounds, preserving the user's current "Looks like" setting
@@ -156,3 +166,11 @@ logical bounds and selected encoder profile; launch validates the resulting
 topology. Recovery retains the successful scale. Size bounds are not a promise
 of encoder support for every size. No nearest-preset substitution or global
 display preference is used.
+
+Schema6 negotiates the optional PCAM camera lane separately from microphone.
+The Host advertises camera capability only for the authenticated desktop user
+when its signed application contains the camera extension. This does not prove
+extension activation/approval. Explicit camera-on waits for the root broker and
+extension lease before capture is acknowledged; absence or failure is reported
+as camera unavailable. The Client starts with camera off, including reconnects.
+`camera.md` defines activation, recovery and the local producer boundary.

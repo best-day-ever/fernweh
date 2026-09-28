@@ -14,9 +14,10 @@ source_root=$1
 output=$2
 mkdir "$output"
 cd "$source_root"
-shasum -a 256 apps/host/macos/audio-device/microphone-{buffer.h,driver.c} \
+shasum -a 256 apps/host/macos/audio-device/driver-clock.h \
+    apps/host/macos/audio-device/microphone-{format.h,buffer.h,queue.h,driver.c} \
     apps/host/macos/audio-device/microphone-{link.h,driver-ipc.h,broker.h,broker.m,producer.h,producer.m,selection.h,selection.m} \
-    tests/audio/macos-microphone-{buffer,driver}.c packaging/host/macos/microphone-info.plist \
+    tests/audio/macos-microphone-{buffer,driver,queue}.c packaging/host/macos/microphone-info.plist \
     probes/macos/microphone-{tone-driver.c,read.m,reader-info.plist} \
     probes/macos/microphone-xpc-{driver.c,source.c,shared.h} \
     probes/macos/microphone-managed{.m,-config.h} \
@@ -25,6 +26,8 @@ flags=(-std=c11 -O2 -g -mmacosx-version-min=27.0 -Wall -Wextra -Werror
        -Iapps/host/macos/audio-device)
 xcrun --sdk macosx clang "${flags[@]}" tests/audio/macos-microphone-buffer.c -o "$output/buffer-test"
 "$output/buffer-test"
+xcrun --sdk macosx clang "${flags[@]}" tests/audio/macos-microphone-queue.c -o "$output/queue-test"
+"$output/queue-test"
 xcrun --sdk macosx clang "${flags[@]}" tests/audio/macos-microphone-driver.c \
     -framework CoreAudio -framework CoreFoundation -o "$output/driver-test"
 "$output/driver-test"
@@ -83,6 +86,7 @@ codesign --verify --strict "$managed"
 xcrun --sdk macosx clang -O2 -g -fobjc-arc -mmacosx-version-min=27.0 -Wall -Wextra -Werror \
     -include probes/macos/microphone-managed-config.h probes/macos/microphone-managed.m \
     apps/host/macos/audio-device/microphone-{broker,producer,selection}.m \
-    -framework Foundation -framework Security -framework CoreAudio -o "$output/microphone-managed"
+    apps/host/macos/media/reverse-media-clock.m \
+    -framework Foundation -framework Security -framework CoreAudio -framework CoreMedia -o "$output/microphone-managed"
 codesign --force --sign - --identifier la.instinctual.PLANK.Microphone.Probe.Managed "$output/microphone-managed"
 echo "microphone_component_gate=pass installed=no production_injection=not-qualified"

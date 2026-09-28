@@ -26,6 +26,7 @@
     PLANKMacAuthenticationSession *_sessions;
     PLANKMacServerInformation *_information;
     NSData *_serverInformationXML;
+    NSData *_occupiedServerInformationXML;
     NSDictionary *(^_topology)(void);
     PLANKMacLaunchHandler _launch;
     uint16_t _controlPort;
@@ -146,7 +147,8 @@
                     reply = [_sessions respondForPeer:request.peer conversation:value[@"conversation_id"] password:password];
                     status = 200;
                 } else if (([path isEqual:@"/plank/launch"] && _launch) ||
-                           ([path isEqual:@"/plank/display"] && self.prepareDisplay)) {
+                           ([path isEqual:@"/plank/display"] && self.prepareDisplay) ||
+                           ([path isEqual:@"/plank/negotiate"] && self.negotiateMedia)) {
                     NSString *token = [authorization hasPrefix:@"Bearer "] && authorization.length == 51 ?
                         [authorization substringFromIndex:7] : nil;
                     PLANKMacAccountIdentity identity = {0};
@@ -154,7 +156,12 @@
                     if (token && [_sessions authorizeToken:token peer:request.peer identity:&identity]) {
                         potentialClaim = token;
                         status = 503;
-                        if ([path isEqual:@"/plank/display"]) {
+                        if ([path isEqual:@"/plank/negotiate"]) {
+                            reply = self.negotiateMedia(value, &status) ?: @{@"state": @"denied", @"error": @"protocol_incompatible"};
+                            if (![_sessions authorizeToken:token peer:request.peer identity:&identity]) {
+                                status = 401; reply = @{@"state": @"denied"};
+                            }
+                        } else if ([path isEqual:@"/plank/display"]) {
                             reply = self.prepareDisplay(value, token, request.peer, ^BOOL {
                                 return !atomic_load(&request->cancelled) &&
                                     clock_gettime_nsec_np(CLOCK_MONOTONIC) < request.deadline;
@@ -175,7 +182,8 @@
                         BOOL expiredRequest = atomic_load(&request->cancelled) ||
                             clock_gettime_nsec_np(CLOCK_MONOTONIC) >= request.deadline;
                         if ((status != 200 && !readinessPending) || expiredRequest) [_sessions revokeToken:token];
-                        if ([path isEqual:@"/plank/display"] && (status == 200 || readinessPending))
+                        if (([path isEqual:@"/plank/display"] || [path isEqual:@"/plank/negotiate"]) &&
+                            (status == 200 || readinessPending))
                             claimedToken = token; // revoke if delivery fails/cancels
                     }
                 }
@@ -221,7 +229,9 @@
                 if ([method isEqual:@"GET"]) {
                     BOOL information = PLANKMacIsServerInformationTarget(path) && owner->_serverInformationXML;
                     if (information && !authorization.length) {
-                        [owner replyBytes:owner->_serverInformationXML type:@"application/xml; charset=utf-8"
+                        NSData *xml = [owner->_sessions hasStreamLease] ?
+                            owner->_occupiedServerInformationXML : owner->_serverInformationXML;
+                        [owner replyBytes:xml type:@"application/xml; charset=utf-8"
                                     token:nil status:200 request:request];
                     } else if (information || PLANKMacIsTopologyTarget(path) || PLANKMacIsDesktopTarget(path)) {
                         if (owner->_authBusy) { [owner reply:@{@"state": @"denied"} status:503 request:request]; return; }
@@ -285,7 +295,8 @@
                                 }
                                 dispatch_async(owner->_networkQueue, ^{
                                     if (information) {
-                                        NSData *xml = [owner->_information XMLForControlPort:owner->_controlPort authorized:authorized];
+                                        NSData *xml = [owner->_information XMLForControlPort:owner->_controlPort
+                                            authorized:authorized streamOccupied:[owner->_sessions hasStreamLease]];
                                         [owner replyBytes:xml type:@"application/xml; charset=utf-8" token:nil
                                                   status:200 request:request];
                                     } else if (status == 200 && PLANKMacIsDesktopTarget(path)) {
@@ -310,7 +321,8 @@
                 }
                 if (![path isEqual:@"/plank/auth/start"] && ![path isEqual:@"/plank/auth/respond"] &&
                     !([path isEqual:@"/plank/launch"] && owner->_launch) &&
-                    !([path isEqual:@"/plank/display"] && owner.prepareDisplay)) {
+                    !([path isEqual:@"/plank/display"] && owner.prepareDisplay) &&
+                    !([path isEqual:@"/plank/negotiate"] && owner.negotiateMedia)) {
                     [owner reply:@{@"state": @"denied"} status:404 request:request];
                     return;
                 }
@@ -405,7 +417,11 @@
             uint16_t boundPort = nw_listener_get_port(owner->_listener);
             owner->_controlPort = boundPort;
             owner->_serverInformationXML = [owner->_information XMLForControlPort:boundPort];
-            if (!owner->_serverInformationXML) { [owner stop]; if (failed) failed(); return; }
+            owner->_occupiedServerInformationXML = [owner->_information XMLForControlPort:boundPort
+                authorized:NO streamOccupied:YES];
+            if (!owner->_serverInformationXML || !owner->_occupiedServerInformationXML) {
+                [owner stop]; if (failed) failed(); return;
+            }
             ready(boundPort);
         }
         else if (state == nw_listener_state_failed) {

@@ -677,7 +677,8 @@ mod tests {
         let microphone_packet = crate::microphone::Packet {
             generation: 42,
             sample_time: 0,
-            opus: Bytes::from_static(&[0xF0, 0xFF, 0xFE]),
+            capture_time_ns: 0,
+            opus: Bytes::from_static(&[0xF4, 0xFF, 0xFE]),
         };
         let microphone_payload = microphone_packet.encode().unwrap();
         microphone_source

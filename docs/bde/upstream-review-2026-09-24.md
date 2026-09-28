@@ -92,3 +92,34 @@ transport and Client/Host media contracts together, and upstream's `1.1.006`
 through `1.1.014` candidates have a separate version lineage. Review and
 qualify those commits as their own coordinated integration after the Busy
 release; preserve BDE's broker admission, display and release pins meanwhile.
+
+## 2026-09-28 import of upstream 1.1.024
+
+`instinctual/plank` main reached `179c3a7` (VERSION `1.1.027`, Client
+`34c2adb8`, Linux Host `b8308a44`). BDE merges up to the published
+`1.1.024` point instead: root `9b13431`, Client `183e9f20`, Linux Host
+`b8308a44`. The later `1.1.025`–`1.1.027` commits (Client `53e4130b`,
+`ccbb875e`, `34c2adb8`, common-c `55758dc`) are an audio-sync series that
+upstream's HANDOFF marks as a rollback checkpoint with reported crackles and
+video holds; re-review it once upstream releases a fix.
+
+| Upstream work | BDE disposition |
+|---|---|
+| Linux Host raw HID contact release on suspend (`da805d9a`, `b8308a44`) | Import |
+| Mac Client Wacom focus across Spaces and release barriers (`696e4e7e`, `9961eba2`) | Import |
+| Host occupancy `PlankOccupied`, lock-free stream snapshot (`09f4ad15`–`aabaf34c`) | Import; one value published as both `PlankWorkstationBusy` and `PlankOccupied` |
+| Opt-in `PlankSessionUser` | Import, default off; BDE never enables it |
+| Client In Session labels, remembered bookmark usernames | Import (LAN bookmarks only; Fernweh list keeps broker Busy) |
+| Mac tablet/microphone consent and Permissions pane | Import; BDE launch skips the microphone prompt |
+| Mac current-pixel display fallback, Match Host naming, notch offset removal | Import |
+| Mac media negotiation, microphone/camera, macOS Host 1.1.007–1.1.024 | Import as source; unused by BDE Linux Hosts |
+| macOS `.pkg` Client installer, admin configuration, uninstaller | Not used; BDE keeps its signed DMG and broker feed |
+| Distinct Client icon | Adopted through the base build |
+| Audio-sync `1.1.025`–`1.1.027` | Deferred |
+
+Conflict notes: the Host keeps BDE's `SC-DISPLAY-3`/`SC-DISPLAY-4` supervisor
+display messages and takes upstream's `SC-SESSION-3` update (it carries the
+advisory account name). The Mac Host keeps BDE feature flags `12091505`
+(clipboard on `0x800000`). Release notes for the colliding `1.1.003`–`1.1.006`
+numbers keep BDE's text; upstream's are in `docs/releases/upstream/`. The BDE
+version after this import is `1.1.025`, above upstream's merged `1.1.024`.

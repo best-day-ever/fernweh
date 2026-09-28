@@ -4,11 +4,13 @@
 #import "audio-tap-policy.h"
 #import "audio-tap-system-alerts.h"
 #import "audio-output-volume.h"
+#import "../audio-device/output-format.h"
 #import <CoreAudio/CoreAudio.h>
 #import <CoreAudio/AudioHardwareTapping.h>
 #import <CoreAudio/CATapDescription.h>
 #include <libproc.h>
 #include <unistd.h>
+#include <mach/mach_time.h>
 
 static AudioObjectPropertyAddress property(AudioObjectPropertySelector selector) {
     return (AudioObjectPropertyAddress){selector, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
@@ -26,7 +28,12 @@ typedef struct {
 static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
                          const AudioBufferList *input, const AudioTimeStamp *time,
                          AudioBufferList *output, const AudioTimeStamp *outputTime, void *context) {
-    (void)device; (void)now; (void)output; (void)outputTime;
+    (void)device; (void)now; (void)outputTime;
+    // The aggregate's sole output is the PLANK null sink used as its clock.
+    // It carries no audio from this capture callback.
+    if (output) for (UInt32 b = 0; b < output->mNumberBuffers; ++b)
+        if (output->mBuffers[b].mData)
+            memset(output->mBuffers[b].mData, 0, output->mBuffers[b].mDataByteSize);
     TapInput *state = context;
     if (atomic_load_explicit(&state->buffer.stopped, memory_order_acquire)) return noErr;
     uint32_t bytes = state->planar ? 4 : 8;
@@ -38,7 +45,8 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
             input->mBuffers[b].mData && input->mBuffers[b].mDataByteSize == frames * bytes;
     if (!valid) atomic_store(&state->buffer.failed, 1);
     else PLANKTapPush(&state->buffer, input->mBuffers[0].mData,
-        state->planar ? input->mBuffers[1].mData : NULL, frames, time->mHostTime);
+        state->planar ? input->mBuffers[1].mData : NULL, frames, time->mHostTime,
+        (time->mFlags & kAudioTimeStampSampleTimeValid) ? time->mSampleTime : NAN, mach_absolute_time());
     dispatch_source_merge_data(state->ready, 1);
     return noErr;
 }
@@ -65,6 +73,9 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
     BOOL _outputListening, _deviceListening;
     float _leftGain, _rightGain; // owner queue only; HAL properties read on control
     uint64_t _overrunEvents;
+    uint64_t _timingEvents, _previousHostTime, _previousCallbackTime;
+    uint32_t _previousFrames;
+    double _previousSampleTime, _tickSeconds;
     BOOL _failureReported;
 }
 - (instancetype)init { return nil; }
@@ -73,6 +84,10 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
     self = [super init];
     if (!self) return nil;
     _owner = queue; _sample = [sample copy]; _failed = [failed copy];
+    mach_timebase_info_data_t timebase;
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || !timebase.numer || !timebase.denom) return nil;
+    _tickSeconds = (double)timebase.numer / timebase.denom / 1e9;
+    _previousSampleTime = NAN;
     _control = dispatch_queue_create("la.instinctual.PLANK.audio-tap", DISPATCH_QUEUE_SERIAL);
     _input = calloc(1, sizeof(*_input));
     if (!_input) return nil;
@@ -131,10 +146,19 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
 }
 - (void)refreshOutputVolume {
     if (atomic_load(&_input->buffer.stopped)) return;
-    AudioObjectID output = kAudioObjectUnknown; UInt32 bytes = sizeof(output);
-    AudioObjectPropertyAddress address = property(kAudioHardwarePropertyDefaultOutputDevice);
-    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, NULL, &bytes, &output);
-    if (status) output = kAudioObjectUnknown;
+    // Capture and gain both belong to PLANK Output. A manual switch to physical
+    // speakers must neither redirect this tap nor change remote gain.
+    CFStringRef uid = CFSTR(PLANK_OUTPUT_DEVICE_UID);
+    AudioObjectID output = kAudioObjectUnknown;
+    AudioValueTranslation translation = {&uid, sizeof(uid), &output, sizeof(output)};
+    UInt32 bytes = sizeof(translation);
+    AudioObjectPropertyAddress address = property(kAudioHardwarePropertyDeviceForUID);
+    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, NULL, &bytes, &translation);
+    if (status || bytes != sizeof(translation)) output = kAudioObjectUnknown;
+    if (_running && output != _outputDevice) {
+        atomic_store(&_input->buffer.failed, 5);
+        dispatch_source_merge_data(_ready, 1);
+    }
     AudioObjectPropertyAddress deviceProperty = {kAudioObjectPropertySelectorWildcard,
         kAudioObjectPropertyScopeOutput, kAudioObjectPropertyElementWildcard};
     if (output != _outputDevice || (output && !_deviceListening)) {
@@ -162,35 +186,51 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
         (void)count; (void)addresses;
         [weakSelf refreshOutputVolume];
     };
-    AudioObjectPropertyAddress address = property(kAudioHardwarePropertyDefaultOutputDevice);
+    AudioObjectPropertyAddress address = property(kAudioHardwarePropertyDevices);
     OSStatus status = AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &address, _control, _outputChanged);
-    if (status) { NSLog(@"PLANK audio default-output listener failed: status=%d", (int)status); return NO; }
+    if (status) { NSLog(@"PLANK audio device-list listener failed: status=%d", (int)status); return NO; }
     _outputListening = YES;
     [self refreshOutputVolume];
-    return YES;
+    return _outputDevice != kAudioObjectUnknown && _deviceListening;
 }
 - (BOOL)prepare {
     if (![self observeOutputVolume]) return NO;
     NSArray *processes = [self ownedAudioProcesses];
     if (!processes) return NO;
-    _description = [[CATapDescription alloc] initStereoMixdownOfProcesses:processes];
+    _description = [[CATapDescription alloc] initWithProcesses:processes
+        andDeviceUID:@PLANK_OUTPUT_DEVICE_UID withStream:0];
     _description.name = @"PLANK Session Audio";
     _description.privateTap = YES;
     _description.processRestoreEnabled = NO; // no bundle-ID cross-user matching
-    _description.muteBehavior = CATapMutedWhenTapped;
+    _description.exclusive = NO; // include only the verified process allowlist
+    _description.muteBehavior = CATapUnmuted; // PLANK Output itself is a null sink
     if (AudioHardwareCreateProcessTap(_description, &_tap)) return NO;
     if (atomic_load(&_input->buffer.stopped)) return NO;
     NSDictionary *specification = @{
         @kAudioAggregateDeviceNameKey: @"PLANK Private Session Audio",
         @kAudioAggregateDeviceUIDKey: NSUUID.UUID.UUIDString,
         @kAudioAggregateDeviceIsPrivateKey: @YES,
+        // Keep capture on the clock of the virtual device being tapped. A
+        // tap-only aggregate leaves the time source implicit when other audio
+        // devices or capture applications enter and leave the HAL graph.
+        @kAudioAggregateDeviceMainSubDeviceKey: @PLANK_OUTPUT_DEVICE_UID,
+        @kAudioAggregateDeviceSubDeviceListKey: @[@{
+            @kAudioSubDeviceUIDKey: @PLANK_OUTPUT_DEVICE_UID}],
         @kAudioAggregateDeviceTapAutoStartKey: @NO,
         @kAudioAggregateDeviceTapListKey: @[@{
             @kAudioSubTapUIDKey: _description.UUID.UUIDString,
             @kAudioSubTapDriftCompensationKey: @YES}]
     };
     if (AudioHardwareCreateAggregateDevice((__bridge CFDictionaryRef)specification, &_device)) return NO;
-    // This device contains only our private tap, never the physical output.
+    AudioObjectPropertyAddress clockProperty = property(kAudioAggregateDevicePropertyMainSubDevice);
+    CFStringRef clockUID = NULL; UInt32 clockBytes = sizeof(clockUID);
+    OSStatus clockStatus = AudioObjectGetPropertyData(_device, &clockProperty, 0, NULL, &clockBytes, &clockUID);
+    BOOL clockMatches = !clockStatus && clockBytes == sizeof(clockUID) && clockUID &&
+        CFGetTypeID(clockUID) == CFStringGetTypeID() && CFEqual(clockUID, CFSTR(PLANK_OUTPUT_DEVICE_UID));
+    if (clockUID) CFRelease(clockUID);
+    if (!clockMatches) { NSLog(@"PLANK audio tap clock unavailable: expected PLANK Output"); return NO; }
+    // Input remains only the process-scoped tap. The clock's output is our
+    // virtual null sink; no physical speaker or microphone joins this device.
     // Request the existing Opus input rate without changing user device settings.
     AudioObjectPropertyAddress rateProperty = property(kAudioDevicePropertyNominalSampleRate);
     Float64 rate = 48000;
@@ -240,7 +280,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
 }
 - (BOOL)activate {
     // startWithCompletion won the activation/cancellation race. From here stop
-    // must await HAL cleanup before reporting that local playback is released.
+    // must await HAL cleanup before reporting that capture has stopped.
     if (AudioDeviceStart(_device, _io)) return NO;
     _running = YES;
     return YES;
@@ -260,7 +300,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
         if (ready) ready = [self activate];
         dispatch_async(self->_owner, ^{
             if (self->_stopped) return;
-            NSLog(@"PLANK desktop audio tap: %@", ready ? @"active; local playback muted while captured" :
+            NSLog(@"PLANK desktop audio tap: %@", ready ? @"active; capturing PLANK Output only; local playback unchanged" :
                 @"unavailable; releasing any partial audio resources");
             completion(ready);
         });
@@ -272,7 +312,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
     if (failure) {
         _failureReported = YES;
         const char *reason = failure == 1 ? "invalid-callback" : failure == 3 ? "process-update" :
-            failure == 4 ? "format-change" : "unknown";
+            failure == 4 ? "format-change" : failure == 5 ? "output-device-change" : "unknown";
         NSLog(@"PLANK audio tap failed: reason=%s code=%d", reason, failure);
         if (_failed) _failed(); return;
     }
@@ -288,6 +328,27 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
         block = PLANKTapPeek(&_input->buffer);
         if (!block) break;
         @autoreleasepool {
+            // Measure on the owner queue, never log or allocate in HAL's IO
+            // callback. Sample-position gaps distinguish missing source frames
+            // from a host-clock adjustment; callback and handoff ages expose
+            // scheduling delays. Rate-limit persistent failures to powers of two.
+            if (_previousHostTime) {
+                double hostGap = ((double)block->hostTime - (double)_previousHostTime) * _tickSeconds -
+                    (double)_previousFrames / 48000;
+                BOOL sampleValid = isfinite(block->sampleTime) && isfinite(_previousSampleTime);
+                double sampleGap = sampleValid ? block->sampleTime - _previousSampleTime - _previousFrames : 0;
+                if (fabs(hostGap) > 0.5 / 48000 || (sampleValid && fabs(sampleGap) > 0.5)) {
+                    ++_timingEvents;
+                    if ((_timingEvents & (_timingEvents - 1)) == 0)
+                        NSLog(@"PLANK audio tap timing: events=%llu frames=%u sample-time-valid=%d sample-gap-frames=%.3f host-gap-ms=%.3f callback-gap-ms=%.3f handoff-ms=%.3f overrun-events=%llu",
+                            (unsigned long long)_timingEvents, block->frames, sampleValid, sampleGap, hostGap * 1000,
+                            ((double)block->callbackTime - (double)_previousCallbackTime) * _tickSeconds * 1000,
+                            ((double)mach_absolute_time() - (double)block->callbackTime) * _tickSeconds * 1000,
+                            (unsigned long long)_overrunEvents);
+                }
+            }
+            _previousHostTime = block->hostTime; _previousCallbackTime = block->callbackTime;
+            _previousFrames = block->frames; _previousSampleTime = block->sampleTime;
             for (uint32_t i = 0; i < block->frames; ++i) {
                 block->samples[i * 2] *= _leftGain;
                 block->samples[i * 2 + 1] *= _rightGain;
@@ -327,7 +388,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
         if (self->_ownsSlot) { atomic_store(&tapInUse, false); self->_ownsSlot = NO; }
         dispatch_async(self->_owner, ^{
             dispatch_source_cancel(self->_ready);
-            NSLog(@"PLANK desktop audio tap stopped; local playback released");
+            NSLog(@"PLANK desktop audio tap stopped; PLANK Output capture released");
             if (!cancelledBeforeActivation && completion) completion();
         });
     });
@@ -339,7 +400,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
 - (void)destroy {
     BOOL clean = YES;
     if (_outputListening) {
-        AudioObjectPropertyAddress address = property(kAudioHardwarePropertyDefaultOutputDevice);
+        AudioObjectPropertyAddress address = property(kAudioHardwarePropertyDevices);
         AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject, &address, _control, _outputChanged);
     }
     if (_deviceListening) {
