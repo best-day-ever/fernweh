@@ -29,8 +29,8 @@ test "$(qmake -query QT_VERSION)" = 6.10.2
 test "$(rustc --version | awk '{print $2}')" = 1.89.0
 python3 "$source_root/tests/packaging/test-macos-client-target.py"
 python3 "$source_root/tests/packaging/test-macos-app-icons.py"
-bash "$source_root/tests/packaging/macos-client-uninstall.sh"
-bash "$source_root/tests/packaging/macos-client-install.sh"
+# BDE ships a signed DMG with a broker update feed, not upstream's .pkg
+# installer, so its install/uninstall package gates do not apply here.
 python3 "$source_root/tests/packaging/test-macos-fullscreen.py" "$source_root"
 mkdir -p "$build/tests"
 xcrun clang++ -std=c++17 -include arm_acle.h -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werror \

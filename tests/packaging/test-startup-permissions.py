@@ -22,19 +22,23 @@ class ClientPermissions(unittest.TestCase):
             self.assertNotIn(forbidden, setup)
         parser = (CLIENT / "cli/commandlineparser.cpp").read_text()
         self.assertIn('if (!posArgs.isEmpty()) parser.showError("Permission setup cannot be combined', parser)
+        # BDE ships a drag-to-Applications DMG, not upstream's .pkg, so no
+        # installer script opens permission setup.
         package = (ROOT / "scripts/package/build-macos-client-dmg.sh").read_text()
-        self.assertIn('packaging/client/macos/pkg-postinstall" "$output/install-scripts/postinstall"', package)
+        self.assertIn("hdiutil create", package)
+        self.assertNotIn("pkg-postinstall", package)
 
-    def test_client_launcher_resolves_microphone_before_bookmarks(self):
+    def test_client_launcher_resolves_consent_before_bookmarks(self):
+        # BDE: Linux Hosts never negotiate the Client microphone, so launch
+        # resolves keyboard and attached-Wacom consent only.
         main = (CLIENT / "main.cpp").read_text()
-        launch = main.split("// Resolve optional microphone consent", 1)[1]
+        launch = main.split("// Resolve launch-time consent", 1)[1]
         self.assertIn("GlobalCommandLineParser::NormalStartRequested", launch)
         self.assertIn("QTimer::singleShot(0, &engine", launch)
-        for call in ("requestKeyboardPermission();", "MacRawWacomInput::requestPermissionIfNeeded();",
-                     "plankMacRequestMicrophonePermission("):
+        for call in ("requestKeyboardPermission();", "MacRawWacomInput::requestPermissionIfNeeded();"):
             self.assertLess(launch.index(call), launch.index("context->load("))
+        self.assertNotIn("plankMacRequestMicrophonePermission(", launch.split("context->load(", 1)[0])
         self.assertIn("QPointer<QQmlApplicationEngine>", launch)
-        self.assertIn("Qt::QueuedConnection", launch)
         self.assertIn("Load immediately on Linux and for non-prompting CLI", launch)
 
     def test_session_microphone_is_query_only(self):
