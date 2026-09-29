@@ -12,11 +12,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-pub(super) struct LossProxy {
+pub(crate) struct LossProxy {
     pub address: SocketAddr,
     pub loss_basis_points: Arc<AtomicU64>,
     pub forwarded: Arc<AtomicU64>,
     pub dropped: Arc<AtomicU64>,
+    pub blackhole: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<io::Result<Option<u64>>>>,
 }
@@ -39,6 +40,8 @@ impl LossProxy {
         let forwarded = Arc::new(AtomicU64::new(0));
         let dropped = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
+        let blackhole = Arc::new(AtomicBool::new(false));
+        let discard_all = blackhole.clone();
         let (loss, sent, omitted, stopping) = (
             loss_basis_points.clone(),
             forwarded.clone(),
@@ -66,6 +69,10 @@ impl LossProxy {
                         }
                         Err(error) => return Err(error),
                     };
+                    if discard_all.load(Ordering::Acquire) {
+                        omitted.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
                     let destination = if source == server {
                         let Some(client) = client else { continue };
                         sequence = sequence.wrapping_add(1);
@@ -96,6 +103,7 @@ impl LossProxy {
             loss_basis_points,
             forwarded,
             dropped,
+            blackhole,
             stop,
             worker: Some(worker),
         })

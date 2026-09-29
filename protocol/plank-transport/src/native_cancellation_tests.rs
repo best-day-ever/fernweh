@@ -241,6 +241,50 @@ fn unused_address() -> SocketAddr {
         .unwrap()
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "run through scripts/test/run-plank-transport-native-loopback.sh"]
+async fn closed_or_unreachable_peer_releases_live_endpoint() {
+    for unreachable in [false, true] {
+        let address = unused_address();
+        let mut proxy = crate::native::loss_proxy::LossProxy::start(address).unwrap();
+        let mut host = endpoint(address, true, false);
+        let mut client = endpoint(proxy.address, false, false);
+        for endpoint in [&mut host, &mut client] {
+            match &mut endpoint.config {
+                EndpointConfig::Server { options, .. } | EndpointConfig::Client { options, .. } => {
+                    options.idle_timeout = Duration::from_secs(1);
+                    options.keep_alive_interval = Duration::from_millis(100);
+                }
+            }
+        }
+        start(&mut host);
+        wait_bound(address, &host).await;
+        start(&mut client);
+        wait_state(&host, EndpointState::Ready).await;
+        wait_state(&client, EndpointState::Ready).await;
+        if unreachable {
+            // No close packet: simulate a sleeping/disappeared client or lost route.
+            proxy.blackhole.store(true, Ordering::Release);
+        } else {
+            stop_endpoint(&client);
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while host.shared.state() == EndpointState::Ready {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("dead peer left the endpoint ready indefinitely");
+        assert_eq!(host.shared.state(), EndpointState::Failed);
+        let mut payload = [0_u8; 16];
+        let mut size = 0;
+        assert_eq!(unsafe {
+            plank_transport_native_data_receive(&mut *host, payload.as_mut_ptr(), payload.len(), &mut size, 0)
+        }, PLANK_TRANSPORT_ERROR_RUNTIME);
+        stop_endpoint(&host);
+        stop_endpoint(&client);
+        proxy.finish();
+    }
+}
+
 pub(super) async fn wait_state(endpoint: &PlankTransportNativeEndpoint, expected: EndpointState) {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {

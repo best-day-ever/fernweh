@@ -544,7 +544,7 @@ pub async fn promote_setup_client(
 
 #[cfg(test)]
 #[path = "test_loss_proxy.rs"]
-mod loss_proxy;
+pub(crate) mod loss_proxy;
 
 #[cfg(test)]
 #[path = "test_loss_performance.rs"]
