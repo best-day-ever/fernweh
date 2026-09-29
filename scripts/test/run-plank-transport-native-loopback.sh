@@ -57,6 +57,10 @@ cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate
   -- --ignored --exact --nocapture
 
 cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native_ffi::cancellation_tests::closed_or_unreachable_peer_releases_live_endpoint \
+  -- --ignored --exact --nocapture
+
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::microphone_lane::tests::encrypted_ffi_microphone_mute_reopen_and_bounds \
   -- --ignored --exact --nocapture
 
