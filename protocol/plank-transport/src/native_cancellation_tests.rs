@@ -244,11 +244,11 @@ fn unused_address() -> SocketAddr {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "run through scripts/test/run-plank-transport-native-loopback.sh"]
 async fn closed_or_unreachable_peer_releases_live_endpoint() {
-    for unreachable in [false, true] {
+    for (setup, unreachable) in [(false, false), (false, true), (true, false), (true, true)] {
         let address = unused_address();
         let mut proxy = crate::native::loss_proxy::LossProxy::start(address).unwrap();
-        let mut host = endpoint(address, true, false);
-        let mut client = endpoint(proxy.address, false, false);
+        let mut host = endpoint(address, true, setup);
+        let mut client = endpoint(proxy.address, false, setup);
         for endpoint in [&mut host, &mut client] {
             match &mut endpoint.config {
                 EndpointConfig::Server { options, .. } | EndpointConfig::Client { options, .. } => {
@@ -260,6 +260,19 @@ async fn closed_or_unreachable_peer_releases_live_endpoint() {
         start(&mut host);
         wait_bound(address, &host).await;
         start(&mut client);
+        if setup {
+            wait_state(&client, EndpointState::PeerValidation).await;
+            assert_eq!(unsafe {
+                plank_transport_native_endpoint_approve_peer_certificate(&mut *client)
+            }, PLANK_TRANSPORT_OK);
+            wait_state(&client, EndpointState::SetupReady).await;
+            wait_state(&host, EndpointState::SetupReady).await;
+            for endpoint in [&mut host, &mut client] {
+                assert_eq!(unsafe {
+                    plank_transport_native_endpoint_authorize_session(&mut **endpoint)
+                }, PLANK_TRANSPORT_OK);
+            }
+        }
         wait_state(&host, EndpointState::Ready).await;
         wait_state(&client, EndpointState::Ready).await;
         if unreachable {
