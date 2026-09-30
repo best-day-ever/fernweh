@@ -1,0 +1,122 @@
+# Timestamp-based playback synchronization
+
+Integration: main, from audio-playback-safety and checkpoint/audio-sync-1.1.027.
+
+Status:029 output-demand recovery is merged for release1.1.030 at the operator's
+request; real listening/sync qualification remains pending. Prior context:
+resumed after remaining drift with1.1.026.
+Its saved three-hour common-clock session shows estimated lag growing from23ms
+to approximately350ms, output queue33–38ms, and relative-rate correction clamped
+at-250ppm. The operator authorized the timestamp-controller follow-up in this
+branch. The earlier video-clock repair remains integrated; issue18 closure is
+historical acceptance, not proof of long-session synchronization.
+
+## Objective
+
+Diagnose reported changing audio/video offset from macOS Host to Ubuntu Client,
+then synchronize using source timestamps without increasing normal video latency.
+Keep PLANK Output, exact video profiles, native transport, and input unchanged.
+
+## Evidence and boundaries
+
+- Native transport retains audio PTS in milliseconds and video PTS in 90 kHz
+  ticks. The Client previously dropped audio PTS at its decoder submission
+  boundary; the accepted change preserves it for measurement.
+- macOS source audio/video share the Host monotonic clock. Linux audio currently
+  starts an independent sample-count epoch; its video epoch is also independent.
+  Never interpret these Linux timestamps as absolute audio/video alignment.
+- The retained audio controller fits sample progress against rendered video.
+  Its pending-audio backlog query always returns zero on the native path.
+- SDL queued bytes describe unconsumed input; a device buffer is only an estimate
+  of downstream output latency. Neither is a measured speaker presentation time.
+- Existing short tone/coherence checks do not establish sustained lip sync.
+- Confirmed renderer-ownership bug: EGL moves the AVFrame reference, resetting
+  its PTS before Pacer publishes the video clock. The reported hardware path
+  uses EGL. Snapshot PTS before rendering; preserve render-end timing and trace
+  identity. This restores the existing correction reference without adding delay.
+
+## Sequence
+
+1. Read-only installed baseline, exact package versions, queue and timestamp
+   evidence. No session interruption or changes to audio routing.
+2. Preserve source PTS through Opus decoding, including bounded loss concealment,
+   loss before the first packet, timestamp discontinuities and reconnect reset.
+   Add rate-limited diagnostics comparing common-clock audio/video timestamps and
+   estimated output delay. Preserve playback behavior for the baseline candidate.
+3. Correct the confirmed lost video-clock publication and test both consuming and
+   non-consuming renderers. Measure this minimal fix before changing the playback
+   controller. If drift remains, use the measurement to locate capture, transport
+   or presentation delay and replace sample-count correction with one timestamp-
+   aware controller, not another loop on top. Define Linux's clock contract first.
+4. Test initial skew, signed drift, jitter, loss, long gaps, device changes,
+   idle video, reconnect and shutdown; retain bounded queues/cancellation.
+5. Qualified builders produce branch-labelled candidates. A synchronized flash/
+   click source and at least one-hour run must measure both changing offset and
+   absolute offset; repeat with Linux Host before declaring shared-path acceptance.
+
+## Acceptance
+
+No growing offset, extra video delay, unbounded audio queue, silent timestamp
+fallback, competing controllers or new user synchronization preference. Report
+estimated output timing separately from actual acoustic/visual measurements.
+The operator authorized integration after candidate testing. Deployment, release,
+and interruption of an end-user session still require their separate authority.
+
+## 1.1.027 controller
+
+For common-clock macOS Hosts, use one phase controller fed by the same source
+timestamp/output-delay observation as telemetry. Negative lead speeds audio up;
+positive lead slows it. Filter every audio block (not subsampled video/device
+jitter); update bounded resampling at100ms intervals, with a5ms deadband and
+at most1% correction. No integral windup, new queue, video delay, or user setting.
+Unknown/stale timing, large source discontinuities and pauses cancel compensation.
+Output starvation/full-queue guards limit correction when phase is not physically
+recoverable by resampling. This estimates output time; it is not a hardware clock.
+
+Linux Hosts retain the existing relative-rate controller because their source
+epochs are independent. Policies are mutually exclusive, never added together;
+do not invent an absolute Linux phase. Remove the inactive backlog controller
+and SDL pending-audio drop checks: the retired query always returns zero. Native
+queue capacities, wire timestamps, capture, encoder and Host code stay unchanged.
+
+Validation includes signed phase/clock drift, jitter aliasing, invalid timestamps,
+output-pressure guards, tick wrap/reconnect and two-hour synthetic feedback, plus
+ten-minute simulated output clocks driven by actual FFmpeg resampling. Repeat the
+existing Linux rate-fit tests and EGL consuming-frame regression. Hosted builds
+do not replace a multi-hour synchronized live flash/click test on either Client OS.
+
+## 1.1.029 output-demand qualification
+
+The operator authorized integrating027 as a rollback checkpoint before this
+follow-up. Its real soak reports brief crackles despite bounded estimated phase.
+Audio concealment was absent during one reported event; SDL input briefly empty
+is supporting evidence, not proof of an audible underrun. Preserve this distinction.
+
+Replace the fixed producer-side10ms starvation cutoff with a guard at SDL's
+actual output-demand boundary. A callback records requested input, shortage
+requests and remaining headroom under SDL's existing stream lock. It never
+allocates, logs, waits for another lock, supplies silence, drops or buffers audio.
+The decode worker snapshots it under the same lock; logging stays off the output
+thread. SDL may overestimate required input, so counters are named shortage
+requests, not measured speaker underruns. No new transport/statistical loss claim.
+
+The existing phase controller stops acceleration if a pull leaves less than
+one source block or reports insufficient input. Resume only after three distinct
+consecutive pulls retain two blocks; stale/missing demand never permits catch-up.
+An extended test of028 found that simply stopping catch-up still permits
+starvation when the device clock is faster and the phase target is unreachable.
+029 also applies a negative, headroom-derived correction ceiling during recovery,
+using the same phase gain, bounded resampler and slew limit. It can retain a few
+milliseconds more audio; do not call this cost-free or claim exact sync from it.
+This constrains the existing rate correction, not another controller. The phase
+target, resampler, upper queue bound, video timing and Linux independent-epoch
+policy remain unchanged. Do not insert an arbitrary timing bias or claim that
+guarding an infeasible phase error makes it synchronized.
+
+Qualification adds actual SDL/FFmpeg finite-queue tests with independent arrival
+and consumption clocks, output chunk sizes, jitter and signed clock drift.
+An infeasible phase case must protect playback without pretending to reach zero
+offset. Existing constant-depth models remain useful for rate/phase arithmetic,
+but cannot establish underrun safety. After build gates, require another real
+listening/flash-click soak: no crackles, no growing offset, acceptable absolute
+sync and unchanged video latency. No automatic end-user installation.
