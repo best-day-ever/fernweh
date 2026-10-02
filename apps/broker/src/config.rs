@@ -188,7 +188,7 @@ impl PasskeyConfig {
 
 /// First sign-in and 2FA enrolment in the client (`/v1/enroll/*`, bde-linux
 /// `docs/plank-broker.md` §16). Gates: member of `group`, of none of
-/// `excluded_groups`, no OTP token or passkey yet, password set within `window_days`,
+/// `excluded_groups`, no OTP token or passkey yet, optional password age limit,
 /// and proof of that password (FAST AS for `kadmin/changepw`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -202,7 +202,7 @@ pub struct EnrolConfig {
     /// Members of these groups never enrol remotely (G2).
     #[serde(default = "d_enrol_excluded")]
     pub excluded_groups: Vec<String>,
-    /// The password must have been set at most this many days ago (G4).
+    /// Maximum password age in days (G4); 0 disables the age limit.
     #[serde(default = "d_7u64")]
     pub window_days: u64,
     /// Password proofs (`enroll/respond`) per user per 24 h, from any address.
@@ -543,8 +543,8 @@ impl Config {
         if e.excluded_groups.iter().any(|g| g.eq_ignore_ascii_case(&e.group)) {
             bail!("enrol.group must not be one of enrol.excluded_groups");
         }
-        if !(1..=90).contains(&e.window_days) {
-            bail!("enrol.window_days must be 1-90");
+        if e.window_days > 90 {
+            bail!("enrol.window_days must be 0-90");
         }
         if e.daily_cap == 0 || e.max_code_attempts == 0 || e.max_password_attempts == 0 {
             bail!("enrol.daily_cap / max_code_attempts / max_password_attempts must be at least 1");
@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(c.enrol.user_ldap_uris(&c.ldap), &["ldaps://ipa1.example.org:636".to_string()][..]);
         assert!(with(r#"group = "admins""#).is_err());
         assert!(with(r#"group = "bad group""#).is_err());
-        assert!(with("window_days = 0").is_err());
+        assert_eq!(with("window_days = 0").unwrap().enrol.window_days, 0);
         assert!(with("daily_cap = 0").is_err());
         assert!(with(r#"issuer = "a:b""#).is_err());
         assert!(with(r#"ldap_uris = ["http://x"]"#).is_err());
