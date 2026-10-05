@@ -116,6 +116,8 @@ install -m 0600 /dev/null "$payload_dir/var/lib/plank/plank-state.json"
 install -d -m 0700 "$payload_dir/var/log/plank"
 install -D -m 0644 "$repo_dir/packaging/host/linux/udev/70-plank-host-wacom.rules" \
   "$payload_dir/usr/lib/udev/rules.d/70-plank-host-wacom.rules"
+install -D -m 0644 "$repo_dir/packaging/host/linux/xorg/90-plank-virtual-wacom.conf" \
+  "$payload_dir/usr/share/X11/xorg.conf.d/90-plank-virtual-wacom.conf"
 install -D -m 0644 "$repo_dir/packaging/host/linux/modules-load.d/plank.conf" \
   "$payload_dir/usr/lib/modules-load.d/plank.conf"
 install -D -m 0644 "$repo_dir/packaging/host/linux/firewalld/plank.xml" \
@@ -191,6 +193,8 @@ rpm -qpl "$rpm_file" | rg -q '/etc/pam\.d/plank-remote$'
 rpm -qpl "$rpm_file" | rg -q '/usr/lib64/security/pam_plank_handoff\.so$'
 rpm -qpl "$rpm_file" | rg -q \
   '/usr/lib/udev/rules\.d/70-plank-host-wacom\.rules$'
+rpm -qpl "$rpm_file" | rg -q \
+  '/usr/share/X11/xorg\.conf\.d/90-plank-virtual-wacom\.conf$'
 if rpm -qpl "$rpm_file" | rg -q \
   '/usr/lib/udev/rules\.d/70-plank-wacom\.rules$'; then
   echo "host RPM still contains the ambiguously named Wacom udev rule" >&2
