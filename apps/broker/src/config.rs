@@ -267,11 +267,11 @@ pub struct Limits {
     /// Every `auth/respond` answer takes at least this long (constant-ish timing).
     #[serde(default = "d_1500")]
     pub min_respond_ms: u64,
-    /// Device-bound sessions (§14): absolute and idle lifetime. The TGT is renewed
-    /// in the background up to the absolute lifetime.
-    #[serde(default = "d_90_days")]
+    /// Device-bound sessions (§14): 0 disables the corresponding application
+    /// expiry. Kerberos credentials are renewed within the KDC's own limits.
+    #[serde(default)]
     pub device_session_absolute_secs: u64,
-    #[serde(default = "d_90_days")]
+    #[serde(default)]
     pub device_session_idle_secs: u64,
     /// Renew a device-bound session's TGT when less than this is left.
     #[serde(default = "d_7200")]
@@ -286,9 +286,6 @@ fn d_listen() -> SocketAddr {
 }
 fn d_session_dir() -> PathBuf {
     "/var/lib/plank-broker/sessions".into()
-}
-fn d_90_days() -> u64 {
-    90 * 86400
 }
 fn d_7200() -> u64 {
     7200
@@ -482,8 +479,8 @@ impl Config {
             }
         }
         let l = &self.limits;
-        if l.device_session_idle_secs == 0 || l.device_session_idle_secs > l.device_session_absolute_secs {
-            bail!("limits.device_session_idle_secs must be 1..=device_session_absolute_secs");
+        if l.device_session_absolute_secs != 0 && l.device_session_idle_secs > l.device_session_absolute_secs {
+            bail!("limits.device_session_idle_secs must not exceed a finite device_session_absolute_secs");
         }
         if l.device_proof_skew_secs == 0 || l.device_proof_skew_secs > 300 {
             bail!("limits.device_proof_skew_secs must be 1..=300");
@@ -615,8 +612,8 @@ mod tests {
         assert_eq!(c.ldap.hbac_service, "plank-remote");
         assert_eq!(c.ldap.hostgroup, "plank-remote");
         assert_eq!(c.limits.starts_per_minute_per_ip, 5);
-        assert_eq!(c.limits.device_session_absolute_secs, 90 * 86400);
-        assert_eq!(c.limits.device_session_idle_secs, 90 * 86400);
+        assert_eq!(c.limits.device_session_absolute_secs, 0);
+        assert_eq!(c.limits.device_session_idle_secs, 0);
         assert_eq!(c.ldap.base_dn("EXAMPLE.ORG"), "dc=example,dc=org");
         assert_eq!(c.hosts.port, 28989);
         assert_eq!(c.passkey.rp_id(&c.kerberos.realm), "example.org");

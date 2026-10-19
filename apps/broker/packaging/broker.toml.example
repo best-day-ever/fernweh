@@ -62,8 +62,8 @@ max_sessions = 500
 max_conversations = 1000
 max_connections = 256
 min_respond_ms = 1500
-device_session_absolute_secs = 7776000  # device-bound sessions: 90 d
-device_session_idle_secs = 7776000       # 90 d
+device_session_absolute_secs = 0        # never expire a device-bound login by age
+device_session_idle_secs = 0            # never expire it for inactivity
 renew_before_secs = 7200
 device_proof_skew_secs = 60
 

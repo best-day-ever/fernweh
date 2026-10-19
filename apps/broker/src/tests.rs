@@ -1318,7 +1318,7 @@ mod device_sessions {
         let j = serde_json::to_value(&r).unwrap();
         assert_eq!(j["device_bound"], true);
         assert_eq!(r.expires_in, 90 * DAY);
-        let want = LoginOptions { renew_life_secs: Some(90 * DAY as u32), persistent: true };
+        let want = LoginOptions { renew_life_secs: Some(i32::MAX as u32), persistent: true };
         assert!(h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login anna {want:?}")));
         let recs = h.sessions.load_all();
         assert_eq!(recs.len(), 1);
@@ -1478,7 +1478,7 @@ mod device_sessions {
         let r = h.b.auth_respond_passkey(IP, &c.conversation_id, Some(sign(&prompt))).await.unwrap();
         assert!(r.device_bound);
         assert_eq!(r.expires_in, 90 * DAY);
-        let want = LoginOptions { renew_life_secs: Some(90 * DAY as u32), persistent: true };
+        let want = LoginOptions { renew_life_secs: Some(i32::MAX as u32), persistent: true };
         assert!(h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login_passkey anna {want:?}")));
         assert!(h.b.list_hosts(IP, &r.session_token).await.is_err());
         assert!(h.b.list_hosts(IP, hosts_bearer(&d, &r.session_token, h.now())).await.is_ok());
@@ -1486,7 +1486,41 @@ mod device_sessions {
     }
 
     #[tokio::test]
-    async fn kdc_can_grant_less_than_the_requested_ninety_days() {
+    async fn never_expiry_survives_a_year_of_inactivity_and_restart() {
+        let mut k = kdc();
+        k.renew_till_unix = T0 + i32::MAX as u64;
+        let h = harness_with(k);
+        let d = TestDevice::new();
+        let reply = h.bound_login(&d).await;
+        assert_eq!(reply.expires_in, i32::MAX as u64, "only the credential horizon, no application timeout");
+        let token = reply.session_token;
+        let mut ticket_end = T0 + DAY;
+        while h.now() < T0 + 366 * DAY {
+            h.clock.advance(Duration::from_secs(ticket_end - 3600 - h.now()));
+            ticket_end = h.now() + DAY;
+            *h.krb.renewed_end_unix.lock().unwrap() = ticket_end;
+            h.b.reap().await;
+        }
+        // No client request, app activity, or idle-clock bump for the whole year.
+        h.b.shutdown().await;
+        let restarted = h.restart();
+        assert_eq!(restarted.restore_sessions(), 1);
+        assert!(restarted.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_finite_expiry_can_be_reenabled_later() {
+        let mut k = kdc();
+        k.renew_till_unix = T0 + i32::MAX as u64;
+        let h = harness_cfg(k, |cfg| cfg.limits.device_session_absolute_secs = 90 * DAY);
+        let reply = h.bound_login(&TestDevice::new()).await;
+        assert_eq!(reply.expires_in, 90 * DAY);
+        let want = LoginOptions { renew_life_secs: Some((90 * DAY) as u32), persistent: true };
+        assert!(h.krb.log.lock().unwrap().iter().any(|entry| entry == &format!("login anna {want:?}")));
+    }
+
+    #[tokio::test]
+    async fn kdc_can_grant_less_than_the_requested_maximum() {
         let mut k = kdc();
         k.renew_till_unix = T0 + 30 * DAY;
         let h = harness_with(k);

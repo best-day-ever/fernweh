@@ -455,7 +455,12 @@ impl Broker {
     fn login_options(&self, device: &Option<DeviceKey>) -> LoginOptions {
         match device {
             Some(_) => LoginOptions {
-                renew_life_secs: Some(self.cfg.limits.device_session_absolute_secs.min(u32::MAX as u64) as u32),
+                // "Never" at the application layer requests the largest renewal
+                // interval supported by MIT's signed 32-bit krb5_deltat API.
+                renew_life_secs: Some(match self.cfg.limits.device_session_absolute_secs {
+                    0 => i32::MAX as u32,
+                    secs => secs.min(i32::MAX as u64) as u32,
+                }),
                 persistent: true,
             },
             None => LoginOptions::default(),
@@ -791,7 +796,10 @@ impl Broker {
                 .renew_till_unix
                 .max(ticket.end_unix)
                 .saturating_sub(unix)
-                .min(self.cfg.limits.device_session_absolute_secs),
+                .min(match self.cfg.limits.device_session_absolute_secs {
+                    0 => u64::MAX,
+                    secs => secs,
+                }),
             None => tgt_left.min(self.cfg.limits.session_absolute_secs),
         };
         let token = random_token();
@@ -844,9 +852,12 @@ impl Broker {
         } else {
             (l.session_absolute_secs, l.session_idle_secs)
         };
-        if now >= s.ends_unix || now >= s.ticket_end_unix || now.saturating_sub(s.created_unix) >= absolute {
+        if now >= s.ends_unix
+            || now >= s.ticket_end_unix
+            || (absolute != 0 && now.saturating_sub(s.created_unix) >= absolute)
+        {
             Some("expired")
-        } else if now.saturating_sub(s.last_used_unix) >= idle {
+        } else if idle != 0 && now.saturating_sub(s.last_used_unix) >= idle {
             Some("idle")
         } else {
             None
