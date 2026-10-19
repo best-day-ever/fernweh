@@ -90,7 +90,7 @@ def fingerprint(root, deps, product, component, toolchain):
     data = {'schema': 2, 'product': product, 'component': component,
             'inputs': hashes, 'pins': pins, 'source_root': str(root),
             'dependency_root': str(deps), 'toolchain': tools}
-    if component in ('native', 'qt'):
+    if product == 'macos-client' and component in ('native', 'qt'):
         target = os.environ.get('PLANK_MAC_CLIENT_MIN_MACOS') or '13.0'
         if target != '13.0':
             raise ValueError('PLANK Client deployment target must be 13.0')

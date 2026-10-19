@@ -68,6 +68,10 @@ cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate
   native_ffi::camera_lane::tests::encrypted_camera_with_and_without_microphone \
   -- --ignored --exact --nocapture
 
+cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+  native_ffi::camera_lane::tests::encrypted_version_mismatch_disables_only_camera \
+  -- --ignored --exact --nocapture
+
 # The throughput gate is timing-sensitive under x86 emulation. A release
 # builder may use three passes from a native x86_64 Rocky 9.7 machine, but only
 # for the identical compiled test executable. All other tests still run here.
