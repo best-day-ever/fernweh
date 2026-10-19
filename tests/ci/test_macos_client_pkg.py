@@ -19,7 +19,8 @@ class MacClientPkgTests(unittest.TestCase):
         ci = (ROOT / 'scripts/ci/build.sh').read_text()
         self.assertIn('scripts/package/build-macos-client-pkg.sh', ci)
         self.assertNotIn('build-macos-client-dmg.sh', ci)
-        self.assertFalse((ROOT / 'scripts/package/build-macos-client-dmg.sh').exists())
+        # BDE retains its DMG entrypoint for existing signed in-app updates.
+        self.assertTrue((ROOT / 'scripts/package/build-macos-client-dmg.sh').exists())
 
     def test_only_the_final_pkg_is_collected(self):
         self.assertIn('pkg="$output/plank-client_${PLANK_PACKAGE_VERSION}_arm64.pkg"', self.script)
