@@ -54,12 +54,12 @@ if ($ReleaseCandidate) {
 @'
 BDE fernweh Windows x64 UNSIGNED RELEASE CANDIDATE
 
-The client source is merged and a human test on RPBS_PROTAINE confirmed
-password/TOTP sign-in, desktop streaming and interactive input. Audio, Wacom,
-colour and multiple displays have not yet been accepted on Windows.
+The client includes upstream input recovery and BDE account setup. Audio, Wacom,
+colour and multiple displays still require interactive testing on this release.
 
 This installer has no Authenticode signature and Windows may warn on install.
-An organization code-signing identity is required for a signed release.
+Unsigned ALPHA updates are available in the app through the pinned broker feed.
+Updates verify download integrity and MSI product identity before normal Windows elevation.
 Windows Hello is deferred; sign in with password and TOTP.
 '@ | Set-Content -LiteralPath (Join-Path $OutputDir 'README.txt') -Encoding UTF8
     Write-Host "Unsigned release candidate staged at $OutputDir"
@@ -70,7 +70,7 @@ Windows Hello is deferred; sign in with password and TOTP.
 BDE fernweh Windows x64 DEVELOPMENT BUILD
 
 Run plank-client.exe from this folder. This portable build is for bring-up
-and testing on RPBS_PROTAINE. It is unsigned and has no installer or update
+and testing on the designated Windows test machine. It is unsigned and has no installer or update
 feed. It has not passed interactive streaming, Wacom, colour or multi-display
 acceptance. Do not distribute it as a production client.
 

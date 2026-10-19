@@ -31,7 +31,7 @@ async fn public_client_update_feed_streams_only_the_published_release() {
     )
     .unwrap();
     let h = harness_cfg(FakeKerberos::new(&[]), |cfg| {
-        cfg.client_updates = Some(ClientUpdatesConfig { directory: directory.clone() });
+        cfg.client_updates = Some(ClientUpdatesConfig { directory: directory.clone(), windows_directory: None });
     });
     let app = crate::api::router(h.b);
     let manifest = app
@@ -56,6 +56,46 @@ async fn public_client_update_feed_streams_only_the_published_release() {
     assert_eq!(old.status(), StatusCode::NOT_FOUND);
     std::fs::remove_dir_all(directory).unwrap();
 }
+#[tokio::test]
+async fn windows_updates_are_independent_and_require_complete_published_artifacts() {
+    let root = std::env::temp_dir().join(format!("fernweh-platform-test-{}", rand::random::<u64>()));
+    let mac = root.join("mac");
+    let win = root.join("windows");
+    std::fs::create_dir_all(&mac).unwrap();
+    std::fs::create_dir_all(&win).unwrap();
+    let bytes = b"unsigned-alpha-msi-fixture";
+    let h = harness_cfg(FakeKerberos::new(&[]), |cfg| {
+        cfg.client_updates = Some(ClientUpdatesConfig { directory: mac.clone(), windows_directory: Some(win.clone()) });
+    });
+    let app = crate::api::router(h.b);
+    let get = |url: &str| Request::builder().uri(url).body(Body::empty()).unwrap();
+    assert_eq!(app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::NOT_FOUND);
+    std::fs::write(win.join("current.json"), serde_json::json!({
+        "version":"1.1.040", "sha256":hex::encode(crate::util::sha256(bytes)), "size":bytes.len()
+    }).to_string()).unwrap();
+    assert_eq!(app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::SERVICE_UNAVAILABLE);
+    std::fs::write(win.join("1.1.040.msi"), b"partial").unwrap();
+    assert_eq!(app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::SERVICE_UNAVAILABLE);
+    std::fs::write(win.join("1.1.040.msi"), bytes).unwrap();
+    let response = app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let feed: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(),4096).await.unwrap()).unwrap();
+    assert_eq!(feed["platform"], "windows-x64");
+    assert_eq!(feed["product_name"], "BDE fernweh");
+    assert_eq!(feed["upgrade_code"], "{F598C7E9-ECA2-432F-B0C0-41F9E1201F8F}");
+    assert_eq!(feed["url"], "/v1/client-updates/windows-x64/1.1.040.msi");
+    let response = app.clone().oneshot(get(feed["url"].as_str().unwrap())).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "application/x-msi");
+    assert_eq!(axum::body::to_bytes(response.into_body(),4096).await.unwrap().as_ref(), bytes);
+    for url in ["/v1/client-updates/windows-x64/1.1.039.msi", "/v1/client-updates/windows-x64/1.1.040.dmg", "/v1/client-updates/macos-arm64", "/v1/client-updates/macos-arm64/1.1.040.msi"] {
+        assert_eq!(app.clone().oneshot(get(url)).await.unwrap().status(), StatusCode::NOT_FOUND, "{url}");
+    }
+    std::fs::write(win.join("current.json"), r#"{"version":"../secret","sha256":"bad","size":0}"#).unwrap();
+    assert_eq!(app.oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::NOT_FOUND);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 use crate::directory::FakeDirectory;
 use crate::hbac::fixtures::*;
 use crate::hbac::UserView;

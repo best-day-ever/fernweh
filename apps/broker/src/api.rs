@@ -440,6 +440,8 @@ pub fn router(b: Arc<Broker>) -> Router {
     Router::new()
         .route("/v1/client-updates/macos-arm64", get(crate::updates::manifest))
         .route("/v1/client-updates/macos-arm64/{filename}", get(crate::updates::download))
+        .route("/v1/client-updates/windows-x64", get(crate::updates::windows_manifest))
+        .route("/v1/client-updates/windows-x64/{filename}", get(crate::updates::windows_download))
         .route("/v1/auth/start", post(auth_start))
         .route("/v1/auth/respond", post(auth_respond))
         .route("/v1/hosts", get(hosts))

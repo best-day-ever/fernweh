@@ -27,6 +27,8 @@
 #   PLANK_BDE_BUILD_BRANCH     package branch qualifier (default bde-main);
 #                               lowercase kebab-case, becomes the RPM Release
 #                               (e.g. bde-broker -> ...0.bde_broker.1.el9)
+#   PLANK_BDE_WORK_ROOT        isolated build scratch path under /deps/work
+#                               (default /deps/work); dependencies remain cached
 #   PLANK_BUILD_JOBS           parallel build jobs inside the container
 #                               (default 4, matching CI's PLANK_BUILD_JOBS)
 #   SC_NATIVE_LOSS_ATTESTED_SHA256
@@ -52,6 +54,15 @@ platform=${PLANK_BDE_PLATFORM:-linux/amd64}
 # Same pinned Rocky 9.7 image build.yml uses for the linux-host CI job.
 image=${PLANK_BDE_IMAGE:-rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0}
 build_jobs=${PLANK_BUILD_JOBS:-4}
+work_root=${PLANK_BDE_WORK_ROOT:-/deps/work}
+[[ $build_jobs =~ ^[1-9][0-9]*$ ]] || {
+  echo "PLANK_BUILD_JOBS must be a positive integer" >&2
+  exit 2
+}
+[[ $work_root =~ ^/deps/work(/[A-Za-z0-9._-]+)*$ && $work_root != */.. && $work_root != */../* ]] || {
+  echo "PLANK_BDE_WORK_ROOT must be an absolute scratch path under /deps/work" >&2
+  exit 2
+}
 deps_volume=${PLANK_BDE_DEPS_VOLUME:-plank-bde-host-deps}
 container_name=${PLANK_BDE_CONTAINER_NAME:-plank-bde-host-build}
 build_branch=${PLANK_BDE_BUILD_BRANCH:-bde-main}
@@ -108,7 +119,7 @@ date -u +%FT%TZ
 uname -m
 export PLANK_CANONICAL_ROOT=/workspace
 export PLANK_SOURCE_ROOT=/workspace
-export PLANK_WORK_ROOT=/deps/work
+export PLANK_WORK_ROOT=${PLANK_BDE_WORK_ROOT:-/deps/work}
 export PLANK_DEP_ROOT=/deps
 export PLANK_ARTIFACT_ROOT=/deps/packages
 export PLANK_RUSTUP_ROOT=/deps/rustup
@@ -173,6 +184,8 @@ docker rm -f "$container_name" >/dev/null 2>&1 || true
 # minutes, and macOS zsh has no GNU `timeout` by default.
 docker run --rm --platform "$platform" --name "$container_name" \
   -e PLANK_BUILD_BRANCH="$build_branch" \
+  -e PLANK_BUILD_JOBS="$build_jobs" \
+  -e PLANK_BDE_WORK_ROOT="$work_root" \
   -e SC_NATIVE_LOSS_ATTESTED_SHA256="$native_loss_attested_sha256" \
   -e PLANK_CUDA_REPO_BASEURL="${PLANK_CUDA_REPO_BASEURL:-}" \
   -v "$repo_dir:/workspace" \

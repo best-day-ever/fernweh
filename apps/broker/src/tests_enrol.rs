@@ -299,6 +299,14 @@ async fn gates_deny_generically_and_skip_the_kdc() {
 }
 
 #[tokio::test]
+async fn age_limit_can_be_disabled_for_beta_enrolment() {
+    let e = harness_cfg(|cfg| cfg.enrol.window_days = 0);
+    let id = e.start(IP, "fred").await;
+    let reply = e.respond(IP, &id, ONE_TIME).await.unwrap();
+    assert!(matches!(reply, EnrolReply::NewPassword { .. }));
+}
+
+#[tokio::test]
 async fn existing_factor_is_already_enrolled_only_after_proof() {
     let e = harness();
     // Disabled token (invisible to the KDC): wrong password is plain denied ...

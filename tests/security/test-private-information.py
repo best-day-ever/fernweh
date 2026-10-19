@@ -160,6 +160,35 @@ class GitIntegrationTests(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertNotIn(value, result.stdout + result.stderr)
 
+    def test_merge_does_not_rescan_existing_fixtures_against_second_parent(self):
+        # The baseline fixture is intentionally scanner-shaped synthetic data.
+        token = 'gh' + 'p_' + 'aB3cD7eF9gH2jK4mN6pQ8rS1tU5vW0xY2zA9'
+        self.stage('fixture.cpp', token)
+        self.git('commit', '-qm', 'Existing synthetic fixture')
+        baseline = self.git('rev-parse', 'HEAD').stdout.strip()
+        self.git('checkout', '-qb', 'upstream', self.initial)
+        self.stage('upstream.cpp', 'Harmless upstream change')
+        self.git('commit', '-qm', 'Upstream update')
+        self.git('checkout', '-qb', 'integration', baseline)
+        self.git('merge', '--no-edit', 'upstream')
+        result = self.check('--range', baseline, 'HEAD')
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_side_branch_secret_removed_before_merge_is_still_scanned(self):
+        token = 'gh' + 'p_' + 'aB3cD7eF9gH2jK4mN6pQ8rS1tU5vW0xY2zA9'
+        self.git('checkout', '-qb', 'upstream')
+        self.stage('fixture.cpp', token)
+        self.git('commit', '-qm', 'Synthetic scanner fixture')
+        self.stage('fixture.cpp', 'Removed before merge')
+        self.git('commit', '-qm', 'Remove fixture')
+        self.git('checkout', '-qb', 'integration', self.initial)
+        self.stage('own.cpp', 'Own change')
+        self.git('commit', '-qm', 'Own change')
+        self.git('merge', '--no-edit', 'upstream')
+        result = self.check('--range', self.initial, 'HEAD')
+        self.assertEqual(1, result.returncode)
+        self.assertNotIn(token, result.stdout + result.stderr)
+
     def test_private_denylist_cannot_be_inside_checkout(self):
         copied = self.repo / 'list.txt'
         copied.write_text(self.value)

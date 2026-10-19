@@ -11,7 +11,7 @@ A full application rebuild still permits reuse of verified, exact-input
 dependencies. Reserve `--clean-bootstrap` for an explicit dependency-bootstrap
 qualification, not ordinary rebuilds after a merge. All four hosted products
 have exact-input dependency caches. Linux Host retains prepared FFmpeg and
-Boost sources, Ubuntu Client retains patched FFmpeg, and macOS Client retains
+Boost sources, Ubuntu Client retains patched FFmpeg and SDL, and macOS Client retains
 prepared libraries and Qt. The other three products also retain the pinned
 Rust toolchain and downloaded Cargo inputs; macOS Host uses native Apple media
 frameworks, so has no separate FFmpeg/Qt dependency build to cache. Application
@@ -31,6 +31,15 @@ configuration. Export `PLANK_SOURCE_ROOT`, `PLANK_CANONICAL_ROOT`, `PLANK_WORK_R
 `PLANK_CARGO_ROOT` for the current builder before using the commands below.
 
 ## Package catalog and source layout
+
+Ubuntu Client builds now require `PLANK_CLIENT_SDL_WORK` from the builder's
+path manifest, prepared by `scripts/build/build-client-sdl.sh`. Hosted builds
+prepare and cache it independently from FFmpeg. The DEB carries the patched
+SDL privately in `/usr/lib/plank`; it never replaces the OS SDL. Package gates
+must resolve `libSDL3.so.0` there with `LD_LIBRARY_PATH` unset, and record the
+SDL source/patch hashes in BUILD-INFO. Do not bypass a missing/stale SDL input
+by linking the distribution library, which still contains the tablet cursor
+retirement defect. Mac Client and Host dependencies are unchanged.
 
 Products live under `apps/`; packaging templates under `packaging/<product>/<os>`.
 Git submodule section names remain `host/sunshine-fork` and
@@ -223,6 +232,12 @@ from its verified bundle before initializing the root worktree. Set
 the `main` defaults are only for a mainline release. The sanitized Host,
 Client and Kymux companion repositories each use `main`.
 
+A canonical submodule may intentionally fetch from a retained local repository.
+Before publishing, check `git remote get-url --push origin`: a successful push
+to that local seed is not a GitHub publication. Set an explicit GitHub push URL
+without changing the local fetch URL, push nested commits first, and verify the
+advertised GitHub branch commit before dispatching its parent's build.
+
 ```bash
 source_root="$PLANK_SOURCE_ROOT"
 client_ref=refs/heads/main
@@ -362,10 +377,13 @@ CARGO_TARGET_DIR="$cargo_preflight" \
     --manifest-path "$root_worktree/protocol/plank-transport/Cargo.toml"
 ```
 
-The SDL3 candidate uses the system's native SDL3 and SDL3_ttf development
-packages and links directly to `libSDL3.so.0` and `libSDL3_ttf.so.0`; do not
+The SDL3 candidate uses the prepared, patched private SDL3 and the system's
+SDL3_ttf. It links directly to `libSDL3.so.0` and `libSDL3_ttf.so.0`; do not
 introduce `sdl2-compat`. Audio uses SDL3's PipeWire driver and device-stream
-API rather than libsoundio or a PulseAudio compatibility renderer.
+API rather than libsoundio or a PulseAudio compatibility renderer. Set
+`PKG_CONFIG_PATH="$PLANK_CLIENT_SDL_WORK/install/lib/pkgconfig"` for standalone
+builder probes; on an installed target, load `/usr/lib/plank/libSDL3.so.0` rather
+than accidentally qualifying the unpatched system SDL.
 
 After installing an SDL3 candidate on the Client hardware-test target, validate
 the same native output API without requiring a Host session:
@@ -375,7 +393,7 @@ root_worktree=${PLANK_ROOT_WORKTREE:?set the exact installed-candidate root work
 g++ -std=c++17 -O2 -o /tmp/plank-sdl3-audio-probe \
   "$root_worktree/probes/client-sdl3-audio-probe.cpp" \
   $(pkg-config --cflags --libs sdl3)
-/tmp/plank-sdl3-audio-probe
+LD_LIBRARY_PATH=/usr/lib/plank /tmp/plank-sdl3-audio-probe
 ```
 
 The probe must print `audio_driver=pipewire` and a real output device. This is
@@ -747,6 +765,14 @@ CMake generation error saying that `simple-web-server` contains a missing
 `Boost::boost` target means the candidate predates that integration fix; do
 not redownload Boost or reuse an older configured build directory.
 
+The isolated Linux input fixture must link its header-only Boost consumers
+(`Boost::asio`, `Boost::endian`, `Boost::format`) as well as the compiled
+libraries. `BOOST_INCLUDE_LIBRARIES` alone does not propagate their include
+directories. Missing `boost/asio.hpp` or `boost/format.hpp` in this fixture is
+a target dependency omission, not a missing download. A builder with distro
+Boost headers can mask it; verify compiler dependency files contain no
+`/usr/include/boost/` paths after rebuilding the fixture.
+
 The `operator` account on `hardware-test-host` uses a C-shell login environment. When deploying
 or validating there, invoke `/bin/bash -s` explicitly and send the script to
 that shell. Do not pass Bash constructs such
@@ -1063,8 +1089,11 @@ process-less Desktop identity with stable GameStream application ID
 `apps.json`, `file_apps`, per-application or global preparation commands,
 Steam/Low-Res launch entries, mutable box art, an application-art HTTP
 endpoint, or the Linux arbitrary-command launcher. Launch/resume state remains
-an in-memory Desktop reservation with the existing retained-input and display
-cleanup hooks.
+an in-memory Desktop reservation with display restoration. Its cleanup must not
+destroy retained input devices: those belong to the desktop worker's input
+subsystem and survive normal disconnect/reconnect and authorized takeover.
+Session join still releases held input. Worker shutdown and genuine tablet
+detach/failure retain their explicit cleanup/recovery paths.
 
 The build also prints `host_legacy_http_surface_absence_gate=pass` and
 `host_secure_credential_write_gate=pass`. The host has no remote-file
