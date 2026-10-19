@@ -495,9 +495,13 @@ impl Directory for IpaDirectory {
     async fn user(&self, uid: &str) -> Result<Option<UserView>, DirError> {
         let mut ldap = self.connect().await?;
         let base = format!("uid={},cn=users,cn=accounts,{}", ldap_escape(uid), self.suffix);
-        let r = self.search(&mut ldap, &base, Scope::Base, "(objectClass=*)", &["memberOf"]).await;
+        let r = self.search(&mut ldap, &base, Scope::Base, "(objectClass=*)", &["memberOf", "nsAccountLock"]).await;
         let _ = ldap.unbind().await;
-        Ok(r?.into_iter().next().map(|e| UserView { groups: attr(&e, "memberof"), dn: e.dn }))
+        Ok(r?.into_iter().next().map(|e| UserView {
+            disabled: attr(&e, "nsaccountlock").iter().any(|v| v.eq_ignore_ascii_case("TRUE")),
+            groups: attr(&e, "memberof"),
+            dn: e.dn,
+        }))
     }
 
     async fn enrol_facts(&self, uid: &str) -> Result<Option<EnrolFacts>, DirError> {

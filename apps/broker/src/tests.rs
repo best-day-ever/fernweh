@@ -140,7 +140,7 @@ fn harness_cfg(krb: FakeKerberos, tweak: impl FnOnce(&mut Config)) -> H {
         rule("plank_remote_bob", &[user("bob")], &[host("ws1")], &[svc("plank-remote")]),
     ]);
     let dir =
-        Arc::new(FakeDirectory::new(v, vec![("anna", anna()), ("bob", UserView { dn: user("bob"), groups: vec![] })]));
+        Arc::new(FakeDirectory::new(v, vec![("anna", anna()), ("bob", UserView { disabled: false, dn: user("bob"), groups: vec![] })]));
     let krb = Arc::new(krb);
     let relay = Arc::new(FakeRelay::default());
     let prober = Arc::new(FakeProber {
@@ -1271,11 +1271,11 @@ mod device_sessions {
     const T0: u64 = 1_800_000_000; // FakeClock::unix() at start
     const DAY: u64 = 86_400;
 
-    /// KDC issuing 24 h tickets renewable for 30 days (the §14.4 IPA policy).
+    /// KDC issuing 24 h tickets renewable for 90 days (the §14.4 IPA policy).
     fn kdc() -> FakeKerberos {
         let mut k = FakeKerberos::new(&[("anna", "secret123456"), ("bob", "hunter2654321")]);
         k.end_unix = T0 + DAY;
-        k.renew_till_unix = T0 + 30 * DAY;
+        k.renew_till_unix = T0 + 90 * DAY;
         k
     }
 
@@ -1317,8 +1317,8 @@ mod device_sessions {
         let r = h.bound_login(&d).await;
         let j = serde_json::to_value(&r).unwrap();
         assert_eq!(j["device_bound"], true);
-        assert_eq!(r.expires_in, 30 * DAY);
-        let want = LoginOptions { renew_life_secs: Some(30 * DAY as u32), persistent: true };
+        assert_eq!(r.expires_in, 90 * DAY);
+        let want = LoginOptions { renew_life_secs: Some(i32::MAX as u32), persistent: true };
         assert!(h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login anna {want:?}")));
         let recs = h.sessions.load_all();
         assert_eq!(recs.len(), 1);
@@ -1371,28 +1371,28 @@ mod device_sessions {
     }
 
     #[tokio::test]
-    async fn tgt_is_renewed_and_the_session_lives_thirty_days() {
+    async fn tgt_is_renewed_and_the_session_lives_ninety_days() {
         let h = harness_with(kdc());
         let d = TestDevice::new();
         let t = h.bound_login(&d).await.session_token;
         // The reaper renews an hour before each ticket end (renew_before 2 h); the KDC
-        // extends by 24 h, capped at renew_till. Use it roughly every 5 days (idle 7 d).
+        // extends by 24 h, capped at renew_till. Leave the client closed for over two months before resuming.
         let mut ticket_end = T0 + DAY;
         let mut last_use = T0;
-        while ticket_end < T0 + 30 * DAY {
+        while ticket_end < T0 + 90 * DAY {
             h.clock.advance(Duration::from_secs(ticket_end - 3600 - h.now()));
-            let next = (h.now() + DAY).min(T0 + 30 * DAY);
+            let next = (h.now() + DAY).min(T0 + 90 * DAY);
             *h.krb.renewed_end_unix.lock().unwrap() = next;
             h.b.reap().await;
             ticket_end = next;
-            if h.now() - last_use >= 5 * DAY {
+            if h.now() - last_use >= 65 * DAY {
                 let r = h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await;
                 assert!(r.is_ok(), "{}: {:?}", (h.now() - T0) / DAY, r.err());
                 last_use = h.now();
             }
         }
-        assert!(h.krb.renewals() >= 28, "{} renewals", h.krb.renewals());
-        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.is_ok(), "still alive before day 30");
+        assert!(h.krb.renewals() >= 88, "{} renewals", h.krb.renewals());
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.is_ok(), "still alive before day 90");
         h.clock.advance(Duration::from_secs(DAY + 10));
         h.b.reap().await;
         assert_eq!(h.b.list_hosts(IP, hosts_bearer(&d, &t, h.now())).await.unwrap_err(), ApiError::Unauthorized);
@@ -1400,8 +1400,8 @@ mod device_sessions {
     }
 
     #[tokio::test]
-    async fn idle_week_and_refused_renewal_end_the_session() {
-        let h = harness_with(kdc());
+    async fn configured_shorter_idle_limit_still_ends_the_session() {
+        let h = harness_cfg(kdc(), |c| c.limits.device_session_idle_secs = 7 * DAY);
         let d = TestDevice::new();
         // Idle: renewed in the background, but nobody uses it for 7 days.
         let t = h.bound_login(&d).await.session_token;
@@ -1470,19 +1470,143 @@ mod device_sessions {
     async fn passkey_login_binds_too() {
         let mut k = FakeKerberos::new(&[]).with_passkey("anna", &CRED);
         k.end_unix = T0 + DAY;
-        k.renew_till_unix = T0 + 30 * DAY;
+        k.renew_till_unix = T0 + 90 * DAY;
         let h = harness_cfg(k, |c| c.passkey.rp_id = Some(RP.into()));
         let d = TestDevice::new();
         let c = h.b.auth_start_method(IP, "anna", Method::Passkey, Some(device_key(&d))).await.unwrap();
         let prompt = serde_json::to_value(&c).unwrap()["prompts"][0].clone();
         let r = h.b.auth_respond_passkey(IP, &c.conversation_id, Some(sign(&prompt))).await.unwrap();
         assert!(r.device_bound);
-        assert_eq!(r.expires_in, 30 * DAY);
-        let want = LoginOptions { renew_life_secs: Some(30 * DAY as u32), persistent: true };
+        assert_eq!(r.expires_in, 90 * DAY);
+        let want = LoginOptions { renew_life_secs: Some(i32::MAX as u32), persistent: true };
         assert!(h.krb.log.lock().unwrap().iter().any(|l| l == &format!("login_passkey anna {want:?}")));
         assert!(h.b.list_hosts(IP, &r.session_token).await.is_err());
         assert!(h.b.list_hosts(IP, hosts_bearer(&d, &r.session_token, h.now())).await.is_ok());
         h.workers_settle(0).await;
+    }
+
+    #[tokio::test]
+    async fn newly_granted_user_is_not_signed_out_by_a_stale_directory_snapshot() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        h.dir.view.lock().unwrap().rules[0].enabled = false;
+        h.b.probe_all().await; // Warm the shared snapshot before this user has access.
+        h.dir.view.lock().unwrap().rules[0].enabled = true;
+        let token = h.bound_login(&d).await.session_token;
+        h.b.reap().await;
+        assert_eq!(h.sessions.load_all().len(), 1, "a fresh grant must survive the first reaper");
+        assert!(!h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.unwrap().hosts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn never_expiry_survives_a_year_of_inactivity_and_restart() {
+        let mut k = kdc();
+        k.renew_till_unix = T0 + i32::MAX as u64;
+        let h = harness_with(k);
+        let d = TestDevice::new();
+        let reply = h.bound_login(&d).await;
+        assert_eq!(reply.expires_in, i32::MAX as u64, "only the credential horizon, no application timeout");
+        let token = reply.session_token;
+        let mut ticket_end = T0 + DAY;
+        while h.now() < T0 + 366 * DAY {
+            h.clock.advance(Duration::from_secs(ticket_end - 3600 - h.now()));
+            ticket_end = h.now() + DAY;
+            *h.krb.renewed_end_unix.lock().unwrap() = ticket_end;
+            h.b.reap().await;
+        }
+        // No client request, app activity, or idle-clock bump for the whole year.
+        h.b.shutdown().await;
+        let restarted = h.restart();
+        assert_eq!(restarted.restore_sessions(), 1);
+        assert!(restarted.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_finite_expiry_can_be_reenabled_later() {
+        let mut k = kdc();
+        k.renew_till_unix = T0 + i32::MAX as u64;
+        let h = harness_cfg(k, |cfg| cfg.limits.device_session_absolute_secs = 90 * DAY);
+        let reply = h.bound_login(&TestDevice::new()).await;
+        assert_eq!(reply.expires_in, 90 * DAY);
+        let want = LoginOptions { renew_life_secs: Some((90 * DAY) as u32), persistent: true };
+        assert!(h.krb.log.lock().unwrap().iter().any(|entry| entry == &format!("login anna {want:?}")));
+    }
+
+    #[tokio::test]
+    async fn kdc_can_grant_less_than_the_requested_maximum() {
+        let mut k = kdc();
+        k.renew_till_unix = T0 + 30 * DAY;
+        let h = harness_with(k);
+        assert_eq!(h.bound_login(&TestDevice::new()).await.expires_in, 30 * DAY);
+    }
+
+    #[tokio::test]
+    async fn account_disable_or_delete_revokes_a_remembered_session() {
+        for delete in [false, true] {
+            let h = harness_with(kdc());
+            let d = TestDevice::new();
+            let token = h.bound_login(&d).await.session_token;
+            assert!(h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.is_ok());
+            if delete {
+                h.dir.users.lock().unwrap().remove("anna");
+            } else {
+                h.dir.users.lock().unwrap().get_mut("anna").unwrap().disabled = true;
+            }
+            h.clock.advance(Duration::from_secs(h.cfg.ldap.cache_ttl_secs));
+            assert_eq!(h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.unwrap_err(), ApiError::Unauthorized);
+            assert!(h.sessions.load_all().is_empty());
+            assert!(!h.krb.destroyed.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn removed_host_permission_ends_relay_and_direct_sessions() {
+        for direct in [false, true] {
+            let h = harness_cfg(kdc(), |cfg| { if direct { direct_lan(cfg); } });
+            let d = TestDevice::new();
+            let token = h.bound_login(&d).await.session_token;
+            let ip = if direct { LAN } else { IP };
+            let path = format!("/v1/hosts/{WS1}/connect");
+            let bearer = Bearer { token: &token, proof: Some(proof(&d, "POST", &path, h.now(), &token, b"{}")) };
+            h.b.connect(ip, bearer, WS1, "e").await.unwrap();
+            // Keep the second host assigned: revoking one active host must still
+            // remove its flows, even when the account has other permissions.
+            h.dir.view.lock().unwrap().rules[0].member_hosts = vec![hostgroup("remote-nested")];
+            h.clock.advance(Duration::from_secs(h.cfg.ldap.cache_ttl_secs));
+            h.b.reap().await;
+            assert!(h.sessions.load_all().is_empty());
+            assert_eq!(h.b.list_hosts(ip, hosts_bearer(&d, &token, h.now())).await.unwrap_err(), ApiError::Unauthorized);
+            if !direct {
+                assert!(h.relay.calls.lock().unwrap().iter().any(|call| matches!(call, RelayRequest::Close { flush: true, .. })));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn keepalive_rechecks_permission_without_waiting_for_reaper() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let token = h.bound_login(&d).await.session_token;
+        h.dir.view.lock().unwrap().rules[0].enabled = false;
+        let path = format!("/v1/hosts/{WS1}/keepalive");
+        let bearer = Bearer { token: &token, proof: Some(proof(&d, "POST", &path, h.now(), &token, b"{}")) };
+        assert_eq!(h.b.keepalive(IP, bearer, WS1).await.unwrap_err(), ApiError::Unauthorized);
+        assert!(h.sessions.load_all().is_empty());
+    }
+
+    #[tokio::test]
+    async fn directory_outage_denies_access_but_preserves_remembered_login() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        let token = h.bound_login(&d).await.session_token;
+        h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.unwrap();
+        h.clock.advance(Duration::from_secs(h.cfg.ldap.cache_ttl_secs));
+        *h.dir.unavailable.lock().unwrap() = true;
+        h.b.reap().await;
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.is_err());
+        assert_eq!(h.sessions.load_all().len(), 1);
+        *h.dir.unavailable.lock().unwrap() = false;
+        assert!(h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.is_ok());
     }
 
     #[tokio::test]

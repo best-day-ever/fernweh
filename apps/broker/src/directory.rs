@@ -128,10 +128,12 @@ impl FakeDirectory {
 #[async_trait]
 impl Directory for FakeDirectory {
     async fn view(&self) -> Result<DirectoryView, DirError> {
+        self.down()?;
         *self.calls.lock().unwrap() += 1;
         Ok(self.view.lock().unwrap().clone())
     }
     async fn user(&self, uid: &str) -> Result<Option<UserView>, DirError> {
+        self.down()?;
         Ok(self.users.lock().unwrap().get(uid).cloned())
     }
 

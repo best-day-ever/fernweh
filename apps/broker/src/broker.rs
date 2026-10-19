@@ -239,6 +239,8 @@ struct Session {
     persisted_last_used: u64,
     /// Every (client, port) this session ever leased: flushed from conntrack at the end.
     ports_used: Vec<(Ipv4Addr, u16)>,
+    /// Hosts admitted since startup, including expired leases with established flows.
+    hosts_used: Vec<String>,
     /// Never persisted. A fresh OTP sign-in grants five minutes to add one
     /// key using this session's user Kerberos ticket and IPA self-service ACL.
     passkey_setup: Option<PendingPasskeySetup>,
@@ -453,7 +455,12 @@ impl Broker {
     fn login_options(&self, device: &Option<DeviceKey>) -> LoginOptions {
         match device {
             Some(_) => LoginOptions {
-                renew_life_secs: Some(self.cfg.limits.device_session_absolute_secs.min(u32::MAX as u64) as u32),
+                // "Never" at the application layer requests the largest renewal
+                // interval supported by MIT's signed 32-bit krb5_deltat API.
+                renew_life_secs: Some(match self.cfg.limits.device_session_absolute_secs {
+                    0 => i32::MAX as u32,
+                    secs => secs.min(i32::MAX as u64) as u32,
+                }),
                 persistent: true,
             },
             None => LoginOptions::default(),
@@ -789,7 +796,10 @@ impl Broker {
                 .renew_till_unix
                 .max(ticket.end_unix)
                 .saturating_sub(unix)
-                .min(self.cfg.limits.device_session_absolute_secs),
+                .min(match self.cfg.limits.device_session_absolute_secs {
+                    0 => i32::MAX as u64,
+                    secs => secs,
+                }),
             None => tgt_left.min(self.cfg.limits.session_absolute_secs),
         };
         let token = random_token();
@@ -810,6 +820,7 @@ impl Broker {
             proofs: HashMap::new(),
             persisted_last_used: unix,
             ports_used: Vec::new(),
+            hosts_used: Vec::new(),
             passkey_setup: None,
             completed_passkey_setup: None,
         };
@@ -841,9 +852,12 @@ impl Broker {
         } else {
             (l.session_absolute_secs, l.session_idle_secs)
         };
-        if now >= s.ends_unix || now >= s.ticket_end_unix || now.saturating_sub(s.created_unix) >= absolute {
+        if now >= s.ends_unix
+            || now >= s.ticket_end_unix
+            || (absolute != 0 && now.saturating_sub(s.created_unix) >= absolute)
+        {
             Some("expired")
-        } else if now.saturating_sub(s.last_used_unix) >= idle {
+        } else if idle != 0 && now.saturating_sub(s.last_used_unix) >= idle {
             Some("idle")
         } else {
             None
@@ -882,9 +896,24 @@ impl Broker {
         true
     }
 
+    /// A remembered login never replaces the current directory account check.
+    /// Directory outages preserve the login but deny the operation.
+    async fn session<'a>(
+        &self,
+        bearer: impl Into<Bearer<'a>>,
+        expect: (&str, &str),
+    ) -> Result<([u8; 32], String, String), ApiError> {
+        let out = self.session_proof(bearer, expect).await?;
+        if self.user(&out.1, false).await?.is_none_or(|user| user.disabled) {
+            self.end_session(out.0, "account_revoked").await;
+            return Err(ApiError::Unauthorized);
+        }
+        Ok(out)
+    }
+
     /// Validate a bearer (and its device proof) and bump its idle timer.
     /// Returns (key, username, ccache).
-    async fn session<'a>(
+    async fn session_proof<'a>(
         &self,
         bearer: impl Into<Bearer<'a>>,
         expect: (&str, &str),
@@ -1058,20 +1087,17 @@ impl Broker {
             }
             Err(e) => {
                 error!("directory: {e}");
-                match cache.as_ref() {
-                    // Serve a recent snapshot through short directory outages.
-                    Some((t, v)) if now.duration_since(*t) < ttl * 10 => Ok(v.clone()),
-                    _ => Err(ApiError::Internal("directory unavailable")),
-                }
+                // Never extend cached authorization through a directory outage.
+                Err(ApiError::Internal("directory unavailable"))
             }
         }
     }
 
-    async fn user(&self, uid: &str) -> Result<Option<UserView>, ApiError> {
+    async fn user(&self, uid: &str, force: bool) -> Result<Option<UserView>, ApiError> {
         let ttl = Duration::from_secs(self.cfg.ldap.cache_ttl_secs);
         let now = self.now();
         if let Some((t, u)) = self.users.lock().unwrap().get(uid) {
-            if now.duration_since(*t) < ttl {
+            if !force && now.duration_since(*t) < ttl {
                 return Ok(u.clone());
             }
         }
@@ -1096,8 +1122,9 @@ impl Broker {
     /// (view, fqdns assigned to `user`).
     async fn assigned(&self, username: &str, force: bool) -> Result<(Arc<DirectoryView>, Vec<String>), ApiError> {
         let view = self.view(force).await?;
-        let hosts = match self.user(username).await? {
-            Some(u) => assigned_hosts(&view, &u),
+        let hosts = match self.user(username, force).await? {
+            Some(u) if !u.disabled => assigned_hosts(&view, &u),
+            Some(_) => Vec::new(),
             None => Vec::new(),
         };
         Ok((view, hosts))
@@ -1274,7 +1301,12 @@ impl Broker {
         host: &str,
     ) -> Result<KeepaliveReply, ApiError> {
         let path = format!("/v1/hosts/{host}/keepalive");
-        let (key, _, _) = self.session(bearer, ("POST", &path)).await?;
+        let (key, user, _) = self.session(bearer, ("POST", &path)).await?;
+        let (_, hosts) = self.assigned(&user, false).await?;
+        if !hosts.iter().any(|assigned| assigned == host) {
+            self.end_session(key, "access_revoked").await;
+            return Err(ApiError::Unauthorized);
+        }
         let client = v4(ip).ok_or(ApiError::NoLease)?;
         let direct = self.refresh_direct(key, client, Some(host));
         if direct == 0 && self.refresh_leases(key, client, Some(host)).await == 0 {
@@ -1367,7 +1399,10 @@ impl Broker {
         if self.is_direct_client(client) {
             let still_logged_in = {
                 let mut st = self.st.lock().unwrap();
-                if st.sessions.contains_key(&key) {
+                if let Some(session) = st.sessions.get_mut(&key) {
+                    if !session.hosts_used.iter().any(|used| used == host) {
+                        session.hosts_used.push(host.to_string());
+                    }
                     st.direct.retain(|g| !(g.session == key && g.host == host && g.client == client));
                     st.direct.push(DirectGrant {
                         session: key,
@@ -1438,6 +1473,9 @@ impl Broker {
             match st.sessions.get_mut(&key) {
                 Some(s) => {
                     s.ports_used.push((client, port));
+                    if !s.hosts_used.iter().any(|used| used == host) {
+                        s.hosts_used.push(host.to_string());
+                    }
                     true
                 }
                 None => {
@@ -1519,8 +1557,48 @@ impl Broker {
         for (k, reason) in expired {
             self.end_session(k, reason).await;
         }
+        // Check every remembered login, including closed clients, against current
+        // account/HBAC policy. The directory cache bounds revocation latency;
+        // this check never bumps the user's idle timer.
+        let sessions: Vec<_> = self
+            .st
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .map(|(key, session)| (*key, session.username.clone()))
+            .collect();
+        for (key, user) in sessions {
+            let Ok((_, assigned)) = self.assigned(&user, false).await else { continue };
+            let revoked = {
+                let st = self.st.lock().unwrap();
+                assigned.is_empty()
+                    || st.sessions.get(&key).is_some_and(|session| {
+                        session.hosts_used.iter().any(|host| !assigned.contains(host))
+                    })
+            };
+            if revoked {
+                // A new grant can be newer than the shared snapshot (especially
+                // just after enrolment). Confirm a negative decision with fresh
+                // account and rule reads before destroying a remembered login.
+                let Ok((_, fresh)) = self.assigned(&user, true).await else { continue };
+                let confirmed = {
+                    let st = self.st.lock().unwrap();
+                    fresh.is_empty()
+                        || st.sessions.get(&key).is_some_and(|session| {
+                            session.hosts_used.iter().any(|host| !fresh.contains(host))
+                        })
+                };
+                if confirmed {
+                    self.end_session(key, "access_revoked").await;
+                }
+            }
+        }
         for (k, ccache) in renew {
-            self.renew_session(k, ccache).await;
+            let active = self.st.lock().unwrap().sessions.contains_key(&k);
+            if active {
+                self.renew_session(k, ccache).await;
+            }
         }
         self.reap_enrol(now);
         self.limiter.lock().unwrap().gc(now);
@@ -1582,6 +1660,7 @@ impl Broker {
                 proofs: HashMap::new(),
                 persisted_last_used: rec.last_used_unix,
                 ports_used: Vec::new(),
+                hosts_used: Vec::new(),
                 passkey_setup: None,
                 completed_passkey_setup: None,
             };
