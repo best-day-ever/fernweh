@@ -797,7 +797,7 @@ impl Broker {
                 .max(ticket.end_unix)
                 .saturating_sub(unix)
                 .min(match self.cfg.limits.device_session_absolute_secs {
-                    0 => u64::MAX,
+                    0 => i32::MAX as u64,
                     secs => secs,
                 }),
             None => tgt_left.min(self.cfg.limits.session_absolute_secs),

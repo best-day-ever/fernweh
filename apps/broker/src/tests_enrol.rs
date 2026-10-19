@@ -71,6 +71,8 @@ fn harness_cfg(tweak: impl FnOnce(&mut Config)) -> E {
     let passwords = Arc::new(Mutex::new(HashMap::new()));
     let otp_keys = Arc::new(Mutex::new(HashMap::new()));
     let mut krb = FakeKerberos::new(&[("anna", "secret123456")]);
+    krb.end_unix = clock.unix() + DAY;
+    krb.renew_till_unix = clock.unix() + i32::MAX as u64;
     krb.passwords = passwords.clone();
     krb.otp_keys = otp_keys.clone();
     *krb.otp_clock.lock().unwrap() = Some(clock.clone() as Arc<dyn Clock>);
@@ -572,7 +574,7 @@ async fn device_key_binds_the_final_session() {
     let v = j(&r);
     assert_eq!(v["state"], "authenticated");
     assert_eq!(v["device_bound"], true);
-    assert_eq!(v["expires_in"], 90 * DAY);
+    assert_eq!(v["expires_in"], i32::MAX as u64);
     // Bound: a bare bearer without proof is refused.
     let token = v["session_token"].as_str().unwrap();
     assert_eq!(e.b.list_hosts(IP, token).await.unwrap_err(), ApiError::Unauthorized);
