@@ -1486,6 +1486,19 @@ mod device_sessions {
     }
 
     #[tokio::test]
+    async fn newly_granted_user_is_not_signed_out_by_a_stale_directory_snapshot() {
+        let h = harness_with(kdc());
+        let d = TestDevice::new();
+        h.dir.view.lock().unwrap().rules[0].enabled = false;
+        h.b.probe_all().await; // Warm the shared snapshot before this user has access.
+        h.dir.view.lock().unwrap().rules[0].enabled = true;
+        let token = h.bound_login(&d).await.session_token;
+        h.b.reap().await;
+        assert_eq!(h.sessions.load_all().len(), 1, "a fresh grant must survive the first reaper");
+        assert!(!h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.unwrap().hosts.is_empty());
+    }
+
+    #[tokio::test]
     async fn never_expiry_survives_a_year_of_inactivity_and_restart() {
         let mut k = kdc();
         k.renew_till_unix = T0 + i32::MAX as u64;

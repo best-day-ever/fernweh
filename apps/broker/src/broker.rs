@@ -904,7 +904,7 @@ impl Broker {
         expect: (&str, &str),
     ) -> Result<([u8; 32], String, String), ApiError> {
         let out = self.session_proof(bearer, expect).await?;
-        if self.user(&out.1).await?.is_none_or(|user| user.disabled) {
+        if self.user(&out.1, false).await?.is_none_or(|user| user.disabled) {
             self.end_session(out.0, "account_revoked").await;
             return Err(ApiError::Unauthorized);
         }
@@ -1093,11 +1093,11 @@ impl Broker {
         }
     }
 
-    async fn user(&self, uid: &str) -> Result<Option<UserView>, ApiError> {
+    async fn user(&self, uid: &str, force: bool) -> Result<Option<UserView>, ApiError> {
         let ttl = Duration::from_secs(self.cfg.ldap.cache_ttl_secs);
         let now = self.now();
         if let Some((t, u)) = self.users.lock().unwrap().get(uid) {
-            if now.duration_since(*t) < ttl {
+            if !force && now.duration_since(*t) < ttl {
                 return Ok(u.clone());
             }
         }
@@ -1122,7 +1122,7 @@ impl Broker {
     /// (view, fqdns assigned to `user`).
     async fn assigned(&self, username: &str, force: bool) -> Result<(Arc<DirectoryView>, Vec<String>), ApiError> {
         let view = self.view(force).await?;
-        let hosts = match self.user(username).await? {
+        let hosts = match self.user(username, force).await? {
             Some(u) if !u.disabled => assigned_hosts(&view, &u),
             Some(_) => Vec::new(),
             None => Vec::new(),
@@ -1578,7 +1578,20 @@ impl Broker {
                     })
             };
             if revoked {
-                self.end_session(key, "access_revoked").await;
+                // A new grant can be newer than the shared snapshot (especially
+                // just after enrolment). Confirm a negative decision with fresh
+                // account and rule reads before destroying a remembered login.
+                let Ok((_, fresh)) = self.assigned(&user, true).await else { continue };
+                let confirmed = {
+                    let st = self.st.lock().unwrap();
+                    fresh.is_empty()
+                        || st.sessions.get(&key).is_some_and(|session| {
+                            session.hosts_used.iter().any(|host| !fresh.contains(host))
+                        })
+                };
+                if confirmed {
+                    self.end_session(key, "access_revoked").await;
+                }
             }
         }
         for (k, ccache) in renew {
