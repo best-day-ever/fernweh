@@ -166,7 +166,7 @@ def gitleaks(mode, refs, denylist, message=None):
                    '--ignore-gitleaks-allow', '--gitleaks-ignore-path', str(ignore),
                    '--report-format=json', '--report-path', str(report)]
         if mode == 'git':
-            command += ['--staged'] if refs is None else ['--log-opts=' + refs + ' --full-history -m']
+            command += ['--staged'] if refs is None else ['--log-opts=' + refs + ' --full-history --diff-merges=first-parent']
         result = subprocess.run(command, input=message, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if result.returncode not in (0, 1):
             raise RuntimeError('Gitleaks failed; commit blocked. Check scanner installation/configuration.')
