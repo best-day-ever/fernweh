@@ -33,7 +33,7 @@ pub struct Config {
     pub passkey: PasskeyConfig,
     #[serde(default)]
     pub enrol: EnrolConfig,
-    /// Optional directory containing the current macOS client release.
+    /// Optional directories containing the current platform client releases.
     #[serde(default)]
     pub client_updates: Option<ClientUpdatesConfig>,
 }
@@ -43,6 +43,9 @@ pub struct Config {
 pub struct ClientUpdatesConfig {
     /// Root-owned, broker-readable directory with current.json and immutable DMGs.
     pub directory: PathBuf,
+    /// Optional independent Windows feed; unsigned ALPHA installers are allowed.
+    #[serde(default)]
+    pub windows_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -474,6 +477,9 @@ impl Config {
 
     pub fn validate(&self) -> Result<()> {
         if let Some(updates) = &self.client_updates {
+            if updates.windows_directory.as_ref().is_some_and(|p| !p.is_absolute()) {
+                bail!("client_updates.windows_directory must be absolute");
+            }
             if !updates.directory.is_absolute() {
                 bail!("client_updates.directory must be absolute");
             }
