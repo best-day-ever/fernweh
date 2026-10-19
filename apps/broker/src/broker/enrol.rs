@@ -10,7 +10,7 @@
 //!   never issues the otp-indicator ticket the final login needs, and a token
 //!   written anyway would close G3 and strand the user.
 //! * G2 not privileged: member of none of `enrol.excluded_groups`.
-//! * G4 fresh password: `krbLastPwdChange` within `enrol.window_days`.
+//! * G4 password age: checked only when `enrol.window_days` is nonzero.
 //! * G5 proof: FAST-armoured AS for `kadmin/changepw` with the password alone.
 //! * G3 no factor yet: no OTP token (enabled or disabled) and no passkey mapping,
 //!   read as the broker AND, once the password is proven, bound as the user.
@@ -268,6 +268,9 @@ impl Broker {
         }
         if self.cfg.enrol.excluded_groups.iter().any(|g| member(g)) {
             return Err("privileged");
+        }
+        if self.cfg.enrol.window_days == 0 {
+            return Ok(());
         }
         let now = self.d.clock.unix();
         let window = self.cfg.enrol.window_days * 86400;
