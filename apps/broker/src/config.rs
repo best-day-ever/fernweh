@@ -269,9 +269,9 @@ pub struct Limits {
     pub min_respond_ms: u64,
     /// Device-bound sessions (§14): absolute and idle lifetime. The TGT is renewed
     /// in the background up to the absolute lifetime.
-    #[serde(default = "d_30_days")]
+    #[serde(default = "d_90_days")]
     pub device_session_absolute_secs: u64,
-    #[serde(default = "d_7_days")]
+    #[serde(default = "d_90_days")]
     pub device_session_idle_secs: u64,
     /// Renew a device-bound session's TGT when less than this is left.
     #[serde(default = "d_7200")]
@@ -287,11 +287,8 @@ fn d_listen() -> SocketAddr {
 fn d_session_dir() -> PathBuf {
     "/var/lib/plank-broker/sessions".into()
 }
-fn d_30_days() -> u64 {
-    30 * 86400
-}
-fn d_7_days() -> u64 {
-    7 * 86400
+fn d_90_days() -> u64 {
+    90 * 86400
 }
 fn d_7200() -> u64 {
     7200
@@ -618,6 +615,8 @@ mod tests {
         assert_eq!(c.ldap.hbac_service, "plank-remote");
         assert_eq!(c.ldap.hostgroup, "plank-remote");
         assert_eq!(c.limits.starts_per_minute_per_ip, 5);
+        assert_eq!(c.limits.device_session_absolute_secs, 90 * 86400);
+        assert_eq!(c.limits.device_session_idle_secs, 90 * 86400);
         assert_eq!(c.ldap.base_dn("EXAMPLE.ORG"), "dc=example,dc=org");
         assert_eq!(c.hosts.port, 28989);
         assert_eq!(c.passkey.rp_id(&c.kerberos.realm), "example.org");

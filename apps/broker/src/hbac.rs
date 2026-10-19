@@ -52,6 +52,8 @@ pub struct DirectoryView {
 
 #[derive(Debug, Clone)]
 pub struct UserView {
+    /// Administrative account lock, independent of ticket renewal.
+    pub disabled: bool,
     pub dn: String,
     /// Group DNs as read from the directory (direct or already transitive).
     pub groups: Vec<String>,
@@ -177,7 +179,7 @@ pub(crate) mod fixtures {
     }
 
     pub fn anna() -> UserView {
-        UserView { dn: user("anna"), groups: vec![group("artists")] }
+        UserView { disabled: false, dn: user("anna"), groups: vec![group("artists")] }
     }
 }
 
@@ -194,7 +196,7 @@ mod tests {
     fn direct_user_direct_host() {
         let v = view(vec![rule("plank_remote_anna", &[user("anna")], &[host("ws1")], &svc_remote())]);
         assert_eq!(assigned_hosts(&v, &anna()), vec!["ws1.example.org"]);
-        let bob = UserView { dn: user("bob"), groups: vec![] };
+        let bob = UserView { disabled: false, dn: user("bob"), groups: vec![] };
         assert!(assigned_hosts(&v, &bob).is_empty());
     }
 
