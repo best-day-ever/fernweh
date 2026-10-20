@@ -213,6 +213,7 @@ struct NativeShared {
     input_receive_space: tokio::sync::Notify,
     data_receive_changed: Condvar,
     file_control_receive_changed: Condvar,
+    file_control_receive_space: tokio::sync::Notify,
     file_data_receive_changed: Condvar,
     file_clipboard_enabled: bool,
     stats: NativeStats,
@@ -259,6 +260,7 @@ impl NativeShared {
             input_receive_space: tokio::sync::Notify::new(),
             data_receive_changed: Condvar::new(),
             file_control_receive_changed: Condvar::new(),
+            file_control_receive_space: tokio::sync::Notify::new(),
             file_data_receive_changed: Condvar::new(),
             file_clipboard_enabled,
             stats: NativeStats::default(),
@@ -876,19 +878,41 @@ async fn receive_file_control(
         if packet.payload.is_empty() || packet.payload.len() > MAX_FILE_CONTROL_PACKET_SIZE {
             return Err(anyhow!("native file control packet size is invalid"));
         }
-        {
-            let mut queues = shared.queues.lock().unwrap();
-            if queues.file_control_receive.len() == FILE_CONTROL_RECEIVE_CAPACITY {
-                return Err(anyhow!("native file control receive queue exhausted"));
-            }
-            queues.file_control_receive.push_back(packet.payload);
+        push_file_control_receive(&shared, packet.payload).await?;
+        if shared.stop.load(Ordering::Acquire) || shared.state() == EndpointState::Failed {
+            return Ok(());
         }
-        shared
-            .stats
-            .file_control_packets_received
-            .fetch_add(1, Ordering::Relaxed);
-        shared.file_control_receive_changed.notify_one();
     }
+    Ok(())
+}
+
+// Large manifests legitimately contain more records than the application queue.
+// Pause this reliable lane until the consumer makes space, keeping ordering and
+// propagating backpressure to QUIC without interrupting the interactive lanes.
+async fn push_file_control_receive(shared: &NativeShared, payload: Bytes) -> Result<()> {
+    shared
+        .until_shutdown(async {
+            loop {
+                let space = shared.file_control_receive_space.notified();
+                {
+                    let mut queues = shared.queues.lock().unwrap();
+                    if queues.file_control_receive.len() < FILE_CONTROL_RECEIVE_CAPACITY {
+                        queues.file_control_receive.push_back(payload);
+                        break;
+                    }
+                }
+                // One producer; notify_one retains a permit if the FFI consumer
+                // frees a slot between the capacity check and this await.
+                space.await;
+            }
+            shared
+                .stats
+                .file_control_packets_received
+                .fetch_add(1, Ordering::Relaxed);
+            shared.file_control_receive_changed.notify_one();
+            Ok(())
+        })
+        .await?;
     Ok(())
 }
 
@@ -2374,7 +2398,15 @@ pub unsafe extern "C" fn plank_transport_native_file_control_receive(
             &endpoint.shared,
             &endpoint.shared.file_control_receive_changed,
             Duration::from_millis(timeout_ms.into()),
-            |queues| queues.file_control_receive.front().cloned(),
+            |queues| {
+                claim_receive_front(
+                    &mut queues.file_control_receive,
+                    Bytes::len,
+                    payload,
+                    payload_capacity,
+                    payload_size_out,
+                )
+            },
         ) else {
             return if endpoint.shared.state() == EndpointState::Failed {
                 PLANK_TRANSPORT_ERROR_RUNTIME
@@ -2382,18 +2414,12 @@ pub unsafe extern "C" fn plank_transport_native_file_control_receive(
                 PLANK_TRANSPORT_TIMEOUT
             };
         };
-        let result = copy_bytes_out(&packet, payload, payload_capacity, payload_size_out);
-        if result != PLANK_TRANSPORT_OK {
-            return result;
-        }
-        endpoint
-            .shared
-            .queues
-            .lock()
-            .unwrap()
-            .file_control_receive
-            .pop_front();
-        PLANK_TRANSPORT_OK
+        let packet = match packet {
+            Ok(packet) => packet,
+            Err(error) => return error,
+        };
+        endpoint.shared.file_control_receive_space.notify_one();
+        copy_bytes_out(&packet, payload, payload_capacity, payload_size_out)
     })
 }
 
