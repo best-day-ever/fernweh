@@ -27,5 +27,5 @@ foreach ($suite in @('windowsclipboardsync', 'windowsfileclipboard', 'windowswac
     & (Join-Path $directory "release\$suite.exe") | Tee-Object -FilePath (Join-Path $directory 'results.log')
     if ($LASTEXITCODE) { throw "$suite tests failed" }
 }
-& "$SourceRoot\apps\client\tests\fernwehupdater\test-windows-updater.ps1"
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$SourceRoot\apps\client\tests\fernwehupdater\test-windows-updater.ps1"
 if ($LASTEXITCODE) { throw 'Windows updater tests failed' }

@@ -1,3 +1,7 @@
+> Windows ALPHA: hash-verified unsigned MSI updates are authorized. The pinned
+> broker feed validates version, size, SHA-256 and MSI family; normal elevation
+> remains. Signing and physical audio/tablet/display qualification remain separate.
+
 # Windows client installer
 
 The Windows x64 source build uses `scripts/bde/build-windows-client.cmd` with
@@ -28,6 +32,7 @@ After packaging, compare the staged and installed executable SHA-256, verify
 the Start menu shortcut, and run an install/uninstall/reinstall cycle. Keep
 the existing development ZIP separate while testing.
 
-The candidate is for internal testing only. Do not publish a Windows update
-feed until a trusted Authenticode signing identity is available and the
-Windows audio, Wacom, colour, multi-display and device-session gates pass.
+The candidate is for internal ALPHA testing. Follow the current BDE authorization
+above for unsigned updates; do not describe them as a signed Windows release.
+Run `scripts/bde/test-windows-client.ps1` before packaging and keep physical
+audio, Wacom, colour, multi-display and device-session acceptance explicit.
