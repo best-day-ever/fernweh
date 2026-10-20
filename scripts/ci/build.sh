@@ -8,6 +8,10 @@ python3 "$PLANK_SOURCE_ROOT/tests/network/test_datagram_sender.py"
 case $role in
   linux-host)
     bash "$PLANK_SOURCE_ROOT/tests/protocol/test-occupancy-indicator.sh"
+    CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
+      LD_LIBRARY_PATH="/opt/rh/gcc-toolset-14/root/usr/lib64:${LD_LIBRARY_PATH:-}" \
+      PLANK_TRANSPORT_DIR="$PLANK_SOURCE_ROOT/protocol/plank-transport" \
+      bash "$PLANK_SOURCE_ROOT/apps/host/linux/tests/clipboard/run-file-recovery.sh"
     export PLANK_HOST_FFMPEG_BUILD="$PLANK_SOURCE_ROOT/apps/host/linux/third-party/build-deps/build"
     export PLANK_HOST_FFMPEG_ROOT="$PLANK_DEP_ROOT/host-ffmpeg"
     export PLANK_BOOST_SOURCE_DIR="$PLANK_DEP_ROOT/boost-1.89.0"
