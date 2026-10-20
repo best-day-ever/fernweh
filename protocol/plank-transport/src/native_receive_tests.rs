@@ -5,6 +5,208 @@ use std::cell::RefCell;
 use std::sync::Barrier;
 use std::task::{Context as TaskContext, Poll, Waker};
 
+#[derive(Default)]
+struct WakeCount(std::sync::atomic::AtomicUsize);
+
+impl std::task::Wake for WakeCount {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn file_control_endpoint() -> PlankTransportNativeEndpoint {
+    let mut endpoint = endpoint(Lane::Input);
+    Arc::get_mut(&mut endpoint.shared)
+        .unwrap()
+        .file_clipboard_enabled = true;
+    endpoint
+}
+
+fn receive_file_control(
+    endpoint: &PlankTransportNativeEndpoint,
+    output: *mut u8,
+    capacity: usize,
+    size: &mut usize,
+) -> i32 {
+    unsafe {
+        plank_transport_native_file_control_receive(
+            ptr::from_ref(endpoint).cast_mut(),
+            output,
+            capacity,
+            size,
+            0,
+        )
+    }
+}
+
+#[tokio::test]
+async fn large_file_manifest_waits_for_ffi_consumer_and_preserves_every_record() {
+    let endpoint = file_control_endpoint();
+    let total = FILE_CONTROL_RECEIVE_CAPACITY * 3 + 1;
+    let mut producer = std::pin::pin!(async {
+        for tag in 0..total as u64 {
+            push_file_control_receive(&endpoint.shared, payload(tag)).await?;
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+    let wakes = Arc::new(WakeCount::default());
+    let waker = Waker::from(wakes.clone());
+    let mut cx = TaskContext::from_waker(&waker);
+
+    // Pause the consumer while the producer reaches its bound. This is a valid
+    // manifest burst, not a fatal queue overflow or permission change.
+    assert!(producer.as_mut().poll(&mut cx).is_pending());
+    assert_eq!(
+        endpoint
+            .shared
+            .queues
+            .lock()
+            .unwrap()
+            .file_control_receive
+            .len(),
+        FILE_CONTROL_RECEIVE_CAPACITY
+    );
+    assert_eq!(endpoint.shared.state(), EndpointState::Ready);
+    let mut size = 0;
+    assert_eq!(
+        receive_file_control(&endpoint, ptr::null_mut(), 0, &mut size),
+        PLANK_TRANSPORT_ERROR_BUFFER_TOO_SMALL
+    );
+    assert_eq!(size, PAYLOAD_SIZE);
+    assert!(producer.as_mut().poll(&mut cx).is_pending());
+    assert_eq!(wakes.0.load(Ordering::Relaxed), 0);
+
+    let mut producer_done = false;
+    for tag in 0..total as u64 {
+        let mut output = vec![0x5a; PAYLOAD_SIZE + 16];
+        assert_eq!(
+            receive_file_control(&endpoint, output.as_mut_ptr(), PAYLOAD_SIZE, &mut size),
+            PLANK_TRANSPORT_OK
+        );
+        assert_eq!(size, PAYLOAD_SIZE);
+        assert_eq!(u64::from_be_bytes(output[..8].try_into().unwrap()), tag);
+        assert!(
+            output[8..PAYLOAD_SIZE]
+                .iter()
+                .all(|&byte| byte == tag as u8)
+        );
+        assert_eq!(&output[PAYLOAD_SIZE..], &[0x5a; 16]);
+        if !producer_done {
+            assert!(
+                wakes.0.swap(0, Ordering::Relaxed) > 0,
+                "FFI dequeue must wake producer"
+            );
+            if let Poll::Ready(result) = producer.as_mut().poll(&mut cx) {
+                result.unwrap();
+                producer_done = true;
+            }
+        }
+        assert!(
+            endpoint
+                .shared
+                .queues
+                .lock()
+                .unwrap()
+                .file_control_receive
+                .len()
+                <= FILE_CONTROL_RECEIVE_CAPACITY
+        );
+    }
+    assert!(producer_done);
+    assert_eq!(endpoint.shared.state(), EndpointState::Ready);
+    assert_eq!(
+        endpoint
+            .shared
+            .stats
+            .file_control_packets_received
+            .load(Ordering::Relaxed),
+        total as u64
+    );
+    assert_eq!(
+        receive_file_control(&endpoint, ptr::null_mut(), 0, &mut size),
+        PLANK_TRANSPORT_TIMEOUT
+    );
+}
+
+#[tokio::test]
+async fn blocked_file_manifest_receive_wakes_on_endpoint_stop_or_failure() {
+    for failure in [false, true] {
+        let endpoint = file_control_endpoint();
+        for tag in 0..FILE_CONTROL_RECEIVE_CAPACITY as u64 {
+            push_file_control_receive(&endpoint.shared, payload(tag))
+                .await
+                .unwrap();
+        }
+        let mut pending = std::pin::pin!(push_file_control_receive(&endpoint.shared, payload(999)));
+        let wakes = Arc::new(WakeCount::default());
+        let waker = Waker::from(wakes.clone());
+        let mut cx = TaskContext::from_waker(&waker);
+        assert!(pending.as_mut().poll(&mut cx).is_pending());
+        if failure {
+            endpoint.shared.fail("test connection closed");
+        } else {
+            assert_eq!(stop_endpoint(&endpoint), PLANK_TRANSPORT_OK);
+        }
+        assert!(wakes.0.load(Ordering::Relaxed) > 0);
+        assert!(matches!(
+            pending.as_mut().poll(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+        assert_eq!(
+            endpoint
+                .shared
+                .queues
+                .lock()
+                .unwrap()
+                .file_control_receive
+                .len(),
+            FILE_CONTROL_RECEIVE_CAPACITY
+        );
+        assert_eq!(
+            endpoint
+                .shared
+                .stats
+                .file_control_packets_received
+                .load(Ordering::Relaxed),
+            FILE_CONTROL_RECEIVE_CAPACITY as u64
+        );
+    }
+}
+
+#[tokio::test]
+async fn overlapping_file_control_receivers_claim_distinct_records_before_copying() {
+    let endpoint = Arc::new(file_control_endpoint());
+    for tag in 0..3 {
+        push_file_control_receive(&endpoint.shared, payload(tag))
+            .await
+            .unwrap();
+    }
+    let read = |endpoint: &PlankTransportNativeEndpoint| {
+        let mut output = vec![0; PAYLOAD_SIZE];
+        let mut size = 0;
+        assert_eq!(
+            receive_file_control(endpoint, output.as_mut_ptr(), output.len(), &mut size),
+            PLANK_TRANSPORT_OK
+        );
+        u64::from_be_bytes(output[..8].try_into().unwrap())
+    };
+    let other = endpoint.clone();
+    interleave_before_copy(
+        move || {
+            drop(
+                other
+                    .shared
+                    .queues
+                    .try_lock()
+                    .expect("copy holds no queue lock"),
+            );
+            assert_eq!(read(&other), 1);
+        },
+        || assert_eq!(read(&endpoint), 0),
+    );
+    assert_eq!(read(&endpoint), 2);
+}
+
 #[tokio::test]
 async fn reliable_input_bursts_wait_for_capacity_without_losing_transitions() {
     let endpoint = endpoint(Lane::Input);
