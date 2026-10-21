@@ -80,7 +80,7 @@ passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
 test -x "$passkey_helper"
 bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in fernwehupdater outputtopology plankdisplaymode planktoolbarlogic plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard; do
+for suite in fernwehupdater outputtopology plankdisplaymode planktoolbarlogic plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync macfileclipboard displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard; do
 mkdir -p "$build/tests/$suite"
 (
     cd "$build/tests/$suite"
