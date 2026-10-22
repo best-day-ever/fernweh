@@ -25,6 +25,9 @@ rg -Fxq 'CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE' "$unit"
 rg -Fxq 'ProtectHome=read-only' "$unit"
 rg -Fxq 'RuntimeDirectory=plank/host' "$unit"
 rg -Fxq 'RuntimeDirectoryMode=0700' "$unit"
+# Failed exact restoration leaves STATE2 for the next supervisor, including
+# after an explicit stop. Keep the root-only directory until reboot.
+rg -Fxq 'RuntimeDirectoryPreserve=yes' "$unit"
 rg -Fxq 'LogsDirectory=plank' "$unit"
 rg -Fxq 'LogsDirectoryMode=0700' "$unit"
 rg -Fxq 'StandardOutput=append:/var/log/plank/host-supervisor.log' "$unit"

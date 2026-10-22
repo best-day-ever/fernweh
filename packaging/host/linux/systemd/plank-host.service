@@ -16,6 +16,7 @@ KillMode=mixed
 UMask=0077
 RuntimeDirectory=plank/host
 RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 LogsDirectory=plank
 LogsDirectoryMode=0700
 StandardOutput=append:/var/log/plank/host-supervisor.log
