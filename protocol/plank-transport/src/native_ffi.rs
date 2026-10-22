@@ -76,6 +76,9 @@ mod collaboration_tests;
 #[path = "native_listener.rs"]
 mod listener;
 
+#[path = "native_socket.rs"]
+mod listener_socket;
+
 #[path = "native_microphone.rs"]
 mod microphone_lane;
 
