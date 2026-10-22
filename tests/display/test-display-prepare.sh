@@ -237,6 +237,7 @@ write_inventory() {
       echo 'physical_1_display_name=Built-in display'
       echo 'physical_1_edid_sha256='
       echo 'physical_1_preferred=1920x1080'
+      echo 'physical_1_native=1920x1080'
       echo 'physical_1_modes=1920x1080'
       echo 'physical_2_dfp=DFP-4'
       echo 'physical_2_dpy=DPY-4'
@@ -245,6 +246,7 @@ write_inventory() {
       echo 'physical_2_display_name=MEC-O-3-H'
       echo 'physical_2_edid_sha256=0d7da54a596598e1b3611d1c138880021ff7ca1e827309a7658dbe7b4b6b1dd5'
       echo 'physical_2_preferred=3840x2160'
+      echo 'physical_2_native=3840x2160'
       echo 'physical_2_modes=4096x2160,3840x2160,1920x1080'
     else
       echo 'physical_count=1'
@@ -255,6 +257,7 @@ write_inventory() {
       echo "physical_1_display_name=${display_name_value:-MEC-O-3-H}"
       echo 'physical_1_edid_sha256=0d7da54a596598e1b3611d1c138880021ff7ca1e827309a7658dbe7b4b6b1dd5'
       echo 'physical_1_preferred=3840x2160'
+      echo 'physical_1_native=3840x2160'
       echo 'physical_1_modes=4096x2160,3840x2160,1920x1080,1280x1024,1280x720,1024x768,720x480,640x480'
     fi
     echo 'virtual_candidate_count=3'
@@ -355,6 +358,28 @@ write_inventory two
 run_hybrid_prepare >/dev/null
 grep -Fq 'Option "MetaModes" "DFP-5: nvidia-auto-select +0+0, DFP-4: nvidia-auto-select +1920+0, DFP-0: NULL, DFP-2: NULL, DFP-6: NULL"' "$output_file"
 grep -Fq 'Option "ConnectedMonitor" "DFP-5, DFP-4, DFP-0, DFP-2, DFP-6"' "$output_file"
+
+# A 2560-wide high-refresh native mode with a 1920-wide remote carrier must
+# put the next output at 2560, without clipping/overlapping the first display.
+sed -i 's/^physical_1_native=1920x1080$/physical_1_native=2560x1440/' "$inventory_file"
+run_hybrid_prepare >/dev/null
+grep -Fq 'DFP-5: nvidia-auto-select +0+0, DFP-4: nvidia-auto-select +2560+0' "$output_file"
+
+# Existing version-1 inventories remain safe by explicitly driving their
+# known mode instead of guessing the width of nvidia-auto-select.
+sed -i '/^physical_[12]_native=/d' "$inventory_file"
+run_hybrid_prepare >/dev/null
+grep -Fq 'DFP-5: 1920x1080 +0+0, DFP-4: 3840x2160 +1920+0' "$output_file"
+
+# An unknown earlier output cannot be positioned safely; use the physical
+# baseline instead. An unknown final output needs no following offset.
+sed -i 's/^physical_1_preferred=.*/physical_1_preferred=/' "$inventory_file"
+expect_physical_fallback "an unknown first physical width"
+write_inventory two
+sed -i '/^physical_2_native=/d; s/^physical_2_preferred=.*/physical_2_preferred=/' "$inventory_file"
+run_hybrid_prepare >/dev/null
+grep -Fq 'DFP-5: nvidia-auto-select +0+0, DFP-4: nvidia-auto-select +1920+0' "$output_file"
+write_inventory two
 
 # Without a DKU baseline the depth is 24 and nothing is carried.
 missing_conf="${work_dir}/missing.conf"
