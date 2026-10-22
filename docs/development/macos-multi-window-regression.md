@@ -36,6 +36,12 @@ without TLS validation must still fail before any credentials are accepted.
 The idle-video watchdog allows three seconds of silence: the Host normally
 sends a static desktop at about one frame per second.
 
+Keep the submitted display plan stable while polling a pending transition.
+Polling refreshes capture dimensions from the host topology, but must not
+resolve a changed saved profile: that would wait for a different request
+which was never submitted. An explicit Apply Screens operation still replans
+before submitting its request.
+
 macOS startup now enables SDL's automatic mouse capture. A stale SDL2 hint
 disabled it even though the manual capture-on-leave workaround had already
 been removed; SDL could therefore clamp and stop motion at the window edge.
