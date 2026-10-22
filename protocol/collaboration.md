@@ -33,7 +33,8 @@ grants are not logged.
 | `GET /plank/collaboration/status?request_id=…` | The requesting guest polls its own request; approved replies include permission, a launch grant and current owner stream settings. |
 | `GET /plank/collaboration/status` | Owner-only participant and pending-request status. |
 | `POST /plank/collaboration/decision` | Owner-only decision for a request. |
-| `POST /plank/collaboration/revoke` | Owner-only revocation, or cancellation of the caller's own request. |
+| `POST /plank/collaboration/revoke` | Owner-only revocation. |
+| `POST /plank/collaboration/cancel` | Cancel the caller's own request or guest participation. |
 
 An approved guest supplies `plankCollaboration=<grant>` to `/launch`. The Host
 revalidates the authenticated guest, owner, desktop and permission before creating
@@ -54,7 +55,7 @@ negotiation; collaboration cannot silently substitute a video profile.
 
 View-only sessions cannot inject keyboard, pointer, pen or raw HID input. The
 Host enforces this at input consumption, independently of client controls.
-Interaction adds desktop keyboard, pointer and pen input. Clipboard, file
+Interaction adds desktop keyboard, pointer and text input. Pen, clipboard, file
 transfer, raw USB/HID, microphone and camera forwarding are unavailable to guests
 in either mode; ordinary owner entitlements remain unchanged.
 
