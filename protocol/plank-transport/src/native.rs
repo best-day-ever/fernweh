@@ -289,6 +289,13 @@ pub async fn accept_server(
         bail!("native KyProto authentication token mismatch");
     }
 
+    accept_authenticated_server(unauthenticated, options).await
+}
+
+pub(crate) async fn accept_authenticated_server(
+    unauthenticated: kyproto::UnauthenticatedConnection,
+    options: NativeOptions,
+) -> Result<NativeServerProtocols> {
     let connection = unauthenticated.accept_authentication().await?;
     let (video_id, video_endpoint) = connection
         .register_video_endpoint(VideoProtocol::UnreliableFec)
@@ -421,6 +428,13 @@ pub async fn accept_setup_server(
         unauthenticated.reject_authentication();
         bail!("setup KyProto marker mismatch");
     }
+    accept_authenticated_setup_server(unauthenticated, options).await
+}
+
+pub(crate) async fn accept_authenticated_setup_server(
+    unauthenticated: kyproto::UnauthenticatedConnection,
+    options: NativeOptions,
+) -> Result<NativeSetupServerProtocols> {
     let connection = unauthenticated.accept_authentication().await?;
     let (data_id, data_endpoint) = connection.register_data_endpoint().await?;
     verify_endpoint_id(data_id, SETUP_DATA_ENDPOINT_ID, "setup data")?;
