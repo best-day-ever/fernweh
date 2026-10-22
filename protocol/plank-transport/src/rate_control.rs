@@ -11,8 +11,8 @@
 use quinn_proto::RttEstimator;
 use quinn_proto::congestion::{Controller, ControllerFactory, ControllerMetrics};
 use std::any::Any;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const MIN_VIDEO_BITRATE_BPS: u64 = 10_000_000;
@@ -93,8 +93,34 @@ impl TransportRatePolicy {
 }
 
 #[derive(Clone)]
+enum RatePolicy {
+    Fixed(Arc<TransportRatePolicy>),
+    Routed(RatePolicyBinding),
+}
+
+impl RatePolicy {
+    fn current(&self) -> Arc<TransportRatePolicy> {
+        match self {
+            Self::Fixed(policy) => policy.clone(),
+            Self::Routed(binding) => binding.0.lock().unwrap().clone(),
+        }
+    }
+}
+
+/// An incoming QUIC connection has no PLANK identity until its token arrives.
+/// Bind its controller to the selected endpoint before acknowledging auth.
+#[derive(Clone)]
+pub(crate) struct RatePolicyBinding(Arc<Mutex<Arc<TransportRatePolicy>>>);
+
+impl RatePolicyBinding {
+    pub(crate) fn bind(&self, policy: Arc<TransportRatePolicy>) {
+        *self.0.lock().unwrap() = policy;
+    }
+}
+
+#[derive(Clone)]
 struct PlankRateController {
-    policy: Arc<TransportRatePolicy>,
+    policy: RatePolicy,
     current_mtu: u16,
     last_rtt: Duration,
     window: u64,
@@ -102,9 +128,17 @@ struct PlankRateController {
 }
 
 impl PlankRateController {
+    #[cfg(test)]
     fn new(policy: Arc<TransportRatePolicy>, current_mtu: u16) -> Self {
-        let initial_window =
-            window_for_rate(policy.active_wire_bps(), INITIAL_WINDOW_RTT, current_mtu);
+        Self::with_policy(RatePolicy::Fixed(policy), current_mtu)
+    }
+
+    fn with_policy(policy: RatePolicy, current_mtu: u16) -> Self {
+        let initial_window = window_for_rate(
+            policy.current().active_wire_bps(),
+            INITIAL_WINDOW_RTT,
+            current_mtu,
+        );
         Self {
             policy,
             current_mtu,
@@ -116,7 +150,11 @@ impl PlankRateController {
 
     fn update_window(&mut self, rtt: Duration) {
         self.last_rtt = rtt;
-        self.window = window_for_rate(self.policy.active_wire_bps(), rtt, self.current_mtu);
+        self.window = window_for_rate(
+            self.policy.current().active_wire_bps(),
+            rtt,
+            self.current_mtu,
+        );
     }
 }
 
@@ -147,10 +185,11 @@ impl Controller for PlankRateController {
         is_persistent_congestion: bool,
         _lost_bytes: u64,
     ) {
+        let policy = self.policy.current();
         let counter = if is_persistent_congestion {
-            &self.policy.persistent_congestion_events
+            &policy.persistent_congestion_events
         } else {
-            &self.policy.repairable_congestion_events
+            &policy.repairable_congestion_events
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
@@ -167,7 +206,7 @@ impl Controller for PlankRateController {
     fn metrics(&self) -> ControllerMetrics {
         let mut metrics = ControllerMetrics::default();
         metrics.congestion_window = self.window;
-        metrics.pacing_rate = Some(self.policy.active_wire_bps());
+        metrics.pacing_rate = Some(self.policy.current().active_wire_bps());
         metrics.bandwidth_estimate = Some(self.bandwidth_estimate_bps);
         metrics
     }
@@ -187,19 +226,35 @@ impl Controller for PlankRateController {
 
 /// Constructs one PLANK rate controller per Quinn path.
 pub struct PlankRateControllerFactory {
-    policy: Arc<TransportRatePolicy>,
+    policy: RatePolicy,
 }
 
 impl PlankRateControllerFactory {
     pub fn new(policy: Arc<TransportRatePolicy>) -> Arc<Self> {
         eprintln!("PLANK sender: controller-budget-floor-bps=1000000000");
-        Arc::new(Self { policy })
+        Arc::new(Self {
+            policy: RatePolicy::Fixed(policy),
+        })
+    }
+
+    pub(crate) fn new_routed() -> (Arc<Self>, RatePolicyBinding) {
+        let binding =
+            RatePolicyBinding(Arc::new(Mutex::new(TransportRatePolicy::new(150_000_000))));
+        (
+            Arc::new(Self {
+                policy: RatePolicy::Routed(binding.clone()),
+            }),
+            binding,
+        )
     }
 }
 
 impl ControllerFactory for PlankRateControllerFactory {
     fn build(self: Arc<Self>, _now: Instant, current_mtu: u16) -> Box<dyn Controller> {
-        Box::new(PlankRateController::new(self.policy.clone(), current_mtu))
+        Box::new(PlankRateController::with_policy(
+            self.policy.clone(),
+            current_mtu,
+        ))
     }
 }
 
@@ -290,5 +345,46 @@ mod tests {
             );
         }
         assert_eq!(controller.window(), initial_window);
+    }
+
+    #[test]
+    fn incoming_connection_binds_only_its_authenticated_endpoint_rate_policy() {
+        let (owner_factory, owner_binding) = PlankRateControllerFactory::new_routed();
+        let (guest_factory, guest_binding) = PlankRateControllerFactory::new_routed();
+        let mut owner = owner_factory.build(Instant::now(), 1_344);
+        let mut guest = guest_factory.build(Instant::now(), 1_344);
+        let owner_policy = TransportRatePolicy::new(150_000_000);
+        let guest_policy = TransportRatePolicy::new(50_000_000);
+        owner_binding.bind(owner_policy.clone());
+        guest_binding.bind(guest_policy.clone());
+        owner_policy.set_requested_video_bps(500_000_000, 1_000_000_000);
+        assert_eq!(owner.metrics().pacing_rate, Some(1_351_000_000));
+        assert_eq!(guest.metrics().pacing_rate, Some(1_000_000_000));
+        owner.on_congestion_event(Instant::now(), Instant::now(), false, 1_344);
+        guest.on_congestion_event(Instant::now(), Instant::now(), true, 1_344);
+        assert_eq!(
+            owner_policy
+                .repairable_congestion_events
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            owner_policy
+                .persistent_congestion_events
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            guest_policy
+                .repairable_congestion_events
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            guest_policy
+                .persistent_congestion_events
+                .load(Ordering::Relaxed),
+            1
+        );
     }
 }

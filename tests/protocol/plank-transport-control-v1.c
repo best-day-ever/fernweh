@@ -106,11 +106,37 @@ static void check_desktop_handoff_notice(void) {
     CHECK(plank_transport_control_decode(packet, size + 1, &decoded) != 0);
 }
 
+static void check_collaboration_permissions(void) {
+    uint8_t expected[] = {0x50, 0x4c, 0x44, 0x31, 0, 13, 0, 4, 0, 0, 0, 0};
+    const uint32_t permissions[] = {
+        PLANK_TRANSPORT_COLLABORATION_REVOKED,
+        PLANK_TRANSPORT_COLLABORATION_VIEW,
+        PLANK_TRANSPORT_COLLABORATION_CONTROL,
+    };
+    for (size_t index = 0; index < 3; ++index) {
+        uint8_t packet[PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE] = {0};
+        size_t size = 0;
+        PlankTransportControlPacket decoded;
+        expected[11] = (uint8_t)index;
+        CHECK(plank_transport_control_encode(
+            PLANK_TRANSPORT_CONTROL_COLLABORATION_PERMISSION, &permissions[index], 1,
+            packet, sizeof(packet), &size) == 0);
+        CHECK(size == sizeof(expected));
+        CHECK(memcmp(packet, expected, size) == 0);
+        CHECK(plank_transport_control_decode(packet, size, &decoded) == 0);
+        CHECK(decoded.type == PLANK_TRANSPORT_CONTROL_COLLABORATION_PERMISSION);
+        CHECK(decoded.payload_size == 4);
+        CHECK(plank_transport_control_read_u32(decoded.payload) == permissions[index]);
+        CHECK(plank_transport_control_decode(packet, size - 1, &decoded) != 0);
+    }
+}
+
 int main(void) {
     check_empty_message();
     check_multiword_message();
     check_session_takeover_reason();
     check_desktop_handoff_notice();
     check_malformed_messages();
+    check_collaboration_permissions();
     return 0;
 }

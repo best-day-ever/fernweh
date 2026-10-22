@@ -103,8 +103,13 @@ typedef struct PlankTransportConfig {
     uint32_t session_mode;
     /*
      * Maximum complete QUIC UDP payload, excluding outer IP/UDP headers.
-     * Zero retains Quinn's default path policy. A nonzero value also limits
-     * the peer through QUIC's max_udp_payload_size transport parameter.
+     * Zero retains Quinn's default path policy. A nonzero client value also
+     * advertises this ceiling in QUIC's max_udp_payload_size parameter.
+     * Native servers share a socket with a larger receive capacity and derive
+     * each connection's fixed send ceiling from that authenticated client
+     * parameter. Before acknowledging the session token, the server requires
+     * the resulting ceiling to equal this endpoint's requested nonzero value.
+     * Different sessions on the same server port may select different values.
      */
     uint32_t max_udp_payload_size;
     /*

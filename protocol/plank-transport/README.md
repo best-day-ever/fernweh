@@ -10,6 +10,24 @@ and destroys it. Rust owns its Tokio runtime and worker threads; it does not
 call back into Host or Client C++ while a C++ lock is held. Error text remains
 owned by the endpoint and is copied into caller-provided storage.
 
+Native server endpoints in the same process share one UDP listener per bind
+address and TLS identity. Each endpoint still has its own unpredictable launch
+token, QUIC connection, rate policy, protocol lanes and bounded queues. The
+listener routes a token once to its registered endpoint before acknowledging
+authentication; unknown, repeated or duplicate registered tokens are rejected.
+Stopping one endpoint closes only its connection. The final endpoint closes
+and drains the listener. TLS identity, idle timeout, keep-alive policy and the
+choice of fixed versus automatic MTU policy must match across endpoints on the
+same address. Fixed UDP ceilings may differ per session: the shared socket
+advertises its receive capacity, while Quinn clamps each connection to its
+client's authenticated `max_udp_payload_size` transport parameter before the
+first server flight. The server checks that resulting ceiling against the
+token's registered ceiling before accepting authentication. A mismatch closes
+only that peer and does not consume the registered token. No collaborator
+inherits the owner's MTU or bitrate policy. Server `start` returns after its token
+admission is registered, so a collaborator cannot race launch setup. A single
+process-wide Tokio runtime supplies four executor threads for all endpoints.
+
 ABI version 7 provides the certificate-gated pre-session boundary. Session
 setup starts with a reliable KyProto data endpoint. The Client receives the
 peer leaf certificate, validates it against

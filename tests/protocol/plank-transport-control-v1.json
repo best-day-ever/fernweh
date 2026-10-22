@@ -7,13 +7,31 @@
       "name": "request-idr",
       "type": 3,
       "values": [],
-      "hex": "5343443100030000"
+      "hex": "504c443100030000"
     },
     {
       "name": "video-bitrate-applied-52.5-mbps",
       "type": 6,
       "values": [52500, 52500, 78750],
-      "hex": "534344310006000c0000cd140000cd140001339e"
+      "hex": "504c44310006000c0000cd140000cd140001339e"
+    },
+    {
+      "name": "collaboration-revoked",
+      "type": 13,
+      "values": [0],
+      "hex": "504c4431000d000400000000"
+    },
+    {
+      "name": "collaboration-view",
+      "type": 13,
+      "values": [1],
+      "hex": "504c4431000d000400000001"
+    },
+    {
+      "name": "collaboration-control",
+      "type": 13,
+      "values": [2],
+      "hex": "504c4431000d000400000002"
     }
   ]
 }

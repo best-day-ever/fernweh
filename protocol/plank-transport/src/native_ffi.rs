@@ -16,6 +16,7 @@ use kymux_types::{
     AVPacket, CodecPacket, CodecPacketHeader, DataPacket, InputPacket, MAX_DATA_PACKET_SIZE,
     MediaPacket, MediaPacketHeader,
 };
+#[cfg(test)]
 use kynet::Server;
 use std::collections::VecDeque;
 use std::ffi::c_char;
@@ -23,7 +24,7 @@ use std::future::Future;
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -67,6 +68,13 @@ mod receive_tests;
 #[cfg(test)]
 #[path = "native_cancellation_tests.rs"]
 mod cancellation_tests;
+
+#[cfg(test)]
+#[path = "native_collaboration_tests.rs"]
+mod collaboration_tests;
+
+#[path = "native_listener.rs"]
+mod listener;
 
 #[path = "native_microphone.rs"]
 mod microphone_lane;
@@ -198,6 +206,7 @@ struct NativeShared {
     peer_certificate_approved: AtomicBool,
     peer_certificate_approved_notify: tokio::sync::Notify,
     setup_mode: bool,
+    server_registered: AtomicBool,
     session_authorized: AtomicBool,
     session_authorized_notify: tokio::sync::Notify,
     queues: Mutex<NativeQueues>,
@@ -245,6 +254,7 @@ impl NativeShared {
             peer_certificate_approved: AtomicBool::new(false),
             peer_certificate_approved_notify: tokio::sync::Notify::new(),
             setup_mode,
+            server_registered: AtomicBool::new(false),
             session_authorized: AtomicBool::new(false),
             session_authorized_notify: tokio::sync::Notify::new(),
             queues: Mutex::new(NativeQueues::default()),
@@ -1258,51 +1268,37 @@ async fn run_server(
     session_token: &str,
     options: super::RuntimeOptions,
 ) -> Result<()> {
-    let Some((certificate, private_key)) = shared
-        .until_shutdown(async {
-            Ok((
-                kynet::cert::load_cert_from_pem_file(certificate_path).await?,
-                kynet::cert::load_private_key_from_pem_file(private_key_path).await?,
-            ))
-        })
+    let Some(mut admission) = shared
+        .until_shutdown(listener::Registration::create(
+            bind_address,
+            certificate_path,
+            private_key_path,
+            session_token,
+            options,
+            shared.rate_policy.clone(),
+        ))
         .await?
     else {
         return Ok(());
     };
-    let server_options = kynet::common::CommonServerOptions {
-        max_idle_timeout: Some(options.idle_timeout),
-        keep_alive_interval: Some(options.keep_alive_interval),
-        max_udp_payload_size: options.max_udp_payload_size,
-        congestion_controller_factory: Some(PlankRateControllerFactory::new(
-            shared.rate_policy.clone(),
-        )),
-    };
-    let server = kynet::Connection::start_server_on_addr(
-        bind_address,
-        vec![certificate],
-        private_key,
-        &server_options,
-    )?;
+    {
+        let _status = shared.status.lock().unwrap();
+        shared.server_registered.store(true, Ordering::Release);
+    }
+    shared.state_changed.notify_all();
     let result = shared
         .until_shutdown(async {
-            let protocols =
-                native::accept_server(&server, session_token, native_options(options)).await?;
+            let mut routed = admission.accept(options.handshake_timeout).await?;
+            let protocols = native::accept_authenticated_server(
+                routed.authentication.take().unwrap(),
+                native_options(options),
+            )
+            .await?;
             hold_server(shared.clone(), protocols).await
         })
         .await;
-    server.close(0, "PLANK native endpoint stopping");
-    // close() only queues CONNECTION_CLOSE. Keep the runtime alive while
-    // Quinn transmits it; dropping the runtime immediately leaves the peer
-    // waiting for idle expiry during a graphical-session handoff. Bound this
-    // drain so an unreachable peer cannot hold Host ownership indefinitely.
-    drain_server(&server).await;
+    admission.close().await;
     result.map(|_| ())
-}
-
-async fn drain_server(server: &impl kynet::Server) {
-    // Deliberately outside the cancellable operation. Cancellation and early
-    // handshake failures must still allow the queued close packet to leave.
-    let _ = tokio::time::timeout(CONNECTION_CLOSE_DRAIN, server.wait_idle()).await;
 }
 
 async fn run_client(
@@ -1329,6 +1325,11 @@ async fn run_client(
         .map(|_| ())
 }
 
+#[cfg(test)]
+async fn drain_server(server: &impl kynet::Server) {
+    let _ = tokio::time::timeout(CONNECTION_CLOSE_DRAIN, server.wait_idle()).await;
+}
+
 async fn run_setup_server(
     shared: Arc<NativeShared>,
     bind_address: std::net::SocketAddr,
@@ -1337,40 +1338,36 @@ async fn run_setup_server(
     setup_marker: &str,
     options: super::RuntimeOptions,
 ) -> Result<()> {
-    let Some((certificate, private_key)) = shared
-        .until_shutdown(async {
-            Ok((
-                kynet::cert::load_cert_from_pem_file(certificate_path).await?,
-                kynet::cert::load_private_key_from_pem_file(private_key_path).await?,
-            ))
-        })
+    let Some(mut admission) = shared
+        .until_shutdown(listener::Registration::create(
+            bind_address,
+            certificate_path,
+            private_key_path,
+            setup_marker,
+            options,
+            shared.rate_policy.clone(),
+        ))
         .await?
     else {
         return Ok(());
     };
-    let server_options = kynet::common::CommonServerOptions {
-        max_idle_timeout: Some(options.idle_timeout),
-        keep_alive_interval: Some(options.keep_alive_interval),
-        max_udp_payload_size: options.max_udp_payload_size,
-        congestion_controller_factory: Some(PlankRateControllerFactory::new(
-            shared.rate_policy.clone(),
-        )),
-    };
-    let server = kynet::Connection::start_server_on_addr(
-        bind_address,
-        vec![certificate],
-        private_key,
-        &server_options,
-    )?;
+    {
+        let _status = shared.status.lock().unwrap();
+        shared.server_registered.store(true, Ordering::Release);
+    }
+    shared.state_changed.notify_all();
     let result = shared
         .until_shutdown(async {
-            let setup =
-                native::accept_setup_server(&server, setup_marker, native_options(options)).await?;
+            let mut routed = admission.accept(options.handshake_timeout).await?;
+            let setup = native::accept_authenticated_setup_server(
+                routed.authentication.take().unwrap(),
+                native_options(options),
+            )
+            .await?;
             hold_setup_server(shared.clone(), setup, options).await
         })
         .await;
-    server.close(0, "PLANK setup endpoint stopping");
-    drain_server(&server).await;
+    admission.close().await;
     result.map(|_| ())
 }
 
@@ -1396,17 +1393,30 @@ async fn run_setup_client(
         .map(|_| ())
 }
 
+fn native_runtime() -> Result<&'static tokio::runtime::Runtime> {
+    // A shared listener must outlive whichever endpoint first bound it. A
+    // process-wide runtime also avoids four executor threads per collaborator.
+    static RUNTIME: OnceLock<std::result::Result<tokio::runtime::Runtime, String>> =
+        OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(4)
+                .thread_name("sc-kyproto")
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| anyhow!("failed to create native KyProto runtime: {error}"))
+}
+
 fn worker(config: EndpointConfig, shared: Arc<NativeShared>) {
     init_crypto_once();
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(4)
-        .thread_name("sc-kyproto")
-        .build()
-    {
+    let runtime = match native_runtime() {
         Ok(runtime) => runtime,
         Err(error) => {
-            shared.fail(format!("failed to create native KyProto runtime: {error}"));
+            shared.fail(error);
             return;
         }
     };
@@ -1762,6 +1772,39 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_start(
         match worker {
             Ok(worker) => {
                 *worker_slot = Some(worker);
+                // A second endpoint shares an already-bound socket. Publish
+                // its token admission before returning the launch response,
+                // so a fast peer cannot be rejected during local key loading.
+                drop(worker_slot);
+                if endpoint.mode == 1 {
+                    let status = endpoint.shared.status.lock().unwrap();
+                    let (status, wait) = endpoint
+                        .shared
+                        .state_changed
+                        .wait_timeout_while(status, Duration::from_secs(5), |status| {
+                            status.state == EndpointState::Starting
+                                && !endpoint.shared.server_registered.load(Ordering::Acquire)
+                        })
+                        .unwrap();
+                    if status.state == EndpointState::Failed {
+                        return PLANK_TRANSPORT_ERROR_RUNTIME;
+                    }
+                    if wait.timed_out()
+                        && !endpoint.shared.server_registered.load(Ordering::Acquire)
+                    {
+                        drop(status);
+                        endpoint
+                            .shared
+                            .fail("timed out registering native KyProto listener");
+                        return PLANK_TRANSPORT_TIMEOUT;
+                    }
+                    if matches!(
+                        status.state,
+                        EndpointState::Stopping | EndpointState::Stopped
+                    ) {
+                        return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+                    }
+                }
                 PLANK_TRANSPORT_OK
             }
             Err(error) => {

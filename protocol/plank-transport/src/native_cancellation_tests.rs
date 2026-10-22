@@ -360,6 +360,7 @@ async fn cancellation_interrupts_real_auth_endpoints_and_promotion() {
                     None,
                     &kynet::quinn::QuinnClientOptions {
                         certificate_hash: Some(hash.clone()),
+                        max_udp_payload_size: options().max_udp_payload_size,
                         ..Default::default()
                     },
                 ),
