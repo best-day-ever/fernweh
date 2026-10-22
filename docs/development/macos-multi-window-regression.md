@@ -12,14 +12,29 @@ also get one local window per selected monitor. Monitors excluded by the
 plan remain local, and each window uses its remote display's source rectangle
 and desktop coordinates for rendering and pointer input.
 
-On macOS, a windowed launch prepares the secondary windows hidden. Entering
-fullscreen through the toolbar or the native green button activates the
-same selection. Native fullscreen events update the session presentation
-state and rebuild the renderer, rather than only updating window geometry.
-Leaving fullscreen hides the secondary windows and returns to one window.
+On macOS, a windowed launch shows a separate window for each selected output.
+Entering fullscreen through the toolbar or the primary window's native green
+button preserves that selection. Native fullscreen events update session
+presentation state and rebuild the renderer. Leaving fullscreen keeps both
+windows visible with their own display crops and correctly sized content.
 Native fullscreen on separate monitors continues to require macOS's
 "Displays have separate Spaces" setting; the planner retains its warning
 and combined-window behavior when that setting is off.
+
+The launch-geometry stage must preserve the planner's presentation targets.
+The older topology counter does not recognize `arrangement`, and the older
+client capability check accepts exactly two connected displays. Reapplying
+those checks after planning incorrectly collapsed arrangements to one window,
+including two selected external monitors with an excluded laptop panel.
+When applying a new profile, move the main window to its newly selected primary
+before creating secondary windows; its previous screen may now be excluded.
+
+During the sign-in-to-desktop handoff the Host worker briefly stops listening.
+Keep connection refusal, pre-TLS closure and timeout as transport errors so
+reconnect can retry. An explicit identity rejection or a successful response
+without TLS validation must still fail before any credentials are accepted.
+The idle-video watchdog allows three seconds of silence: the Host normally
+sends a static desktop at about one frame per second.
 
 macOS startup now enables SDL's automatic mouse capture. A stale SDL2 hint
 disabled it even though the manual capture-on-leave workaround had already
