@@ -10,6 +10,7 @@ use super::*;
 use crate::rate_control::RatePolicyBinding;
 use anyhow::bail;
 use kyproto::UnauthenticatedConnection;
+use quinn::Runtime;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{OnceLock, Weak};
@@ -45,6 +46,7 @@ struct Admission {
 
 struct Listener {
     endpoint: quinn::Endpoint,
+    socket: Arc<listener_socket::ListenerSocket>,
     configuration: quinn::ServerConfig,
     identity: ([u8; 32], [u8; 32]),
     options: super::super::RuntimeOptions,
@@ -190,6 +192,10 @@ impl Registration {
                 task.abort();
                 let _ = task.await;
             }
+            // wait_idle() drains connections; Endpoint drop only schedules
+            // eventual driver cleanup on the process-wide runtime. Release
+            // its actual descriptor before permitting a replacement listener.
+            self.listener.socket.close();
             let mut listeners = registry().lock().unwrap();
             if listeners
                 .get(&self.bind_address)
@@ -214,6 +220,7 @@ impl Drop for Listener {
         if let Some(task) = self.accept_task.get_mut().unwrap().take() {
             task.abort();
         }
+        self.socket.close();
     }
 }
 
@@ -247,14 +254,17 @@ impl Listener {
             // Its capacity cannot be the first owner's potentially smaller MTU.
             endpoint_config.max_udp_payload_size(MAX_QUIC_UDP_PAYLOAD)?;
         }
-        let endpoint = quinn::Endpoint::new(
+        let runtime = Arc::new(quinn::TokioRuntime);
+        let socket = listener_socket::ListenerSocket::new(runtime.wrap_udp_socket(socket.into())?)?;
+        let endpoint = quinn::Endpoint::new_with_abstract_socket(
             endpoint_config,
             Some(configuration.clone()),
-            socket.into(),
-            Arc::new(quinn::TokioRuntime),
+            socket.clone(),
+            runtime,
         )?;
         Ok(Self {
             endpoint,
+            socket,
             configuration,
             identity,
             options,

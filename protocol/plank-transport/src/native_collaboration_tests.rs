@@ -172,6 +172,18 @@ async fn independent_sessions_share_listener_without_cross_authentication_or_tea
     guest.receive(b"guest independent of guest leave").await;
     guest.stop();
     drop(UdpSocket::bind(address).expect("last endpoint retained shared listener socket"));
+
+    // The public stop contract must also permit an immediate fresh launch on
+    // the same fixed workstation port while old client handles still exist.
+    let mut replacement = Endpoint::start(address, true, "replacement-owner-loopback-token");
+    let mut replacement_client =
+        Endpoint::start(address, false, "replacement-owner-loopback-token");
+    wait_state(&replacement.0, EndpointState::Ready).await;
+    wait_state(&replacement_client.0, EndpointState::Ready).await;
+    replacement_client.send(b"fresh session on released port");
+    replacement.receive(b"fresh session on released port").await;
+    replacement.stop();
+    drop(UdpSocket::bind(address).expect("replacement endpoint retained shared listener socket"));
 }
 
 struct WireProxy {

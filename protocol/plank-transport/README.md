@@ -16,7 +16,9 @@ token, QUIC connection, rate policy, protocol lanes and bounded queues. The
 listener routes a token once to its registered endpoint before acknowledging
 authentication; unknown, repeated or duplicate registered tokens are rejected.
 Stopping one endpoint closes only its connection. The final endpoint closes
-and drains the listener. TLS identity, idle timeout, keep-alive policy and the
+and drains the listener, then synchronously releases its UDP descriptor and
+retained runtime pollers before allowing a fresh listener on the same port.
+TLS identity, idle timeout, keep-alive policy and the
 choice of fixed versus automatic MTU policy must match across endpoints on the
 same address. Fixed UDP ceilings may differ per session: the shared socket
 advertises its receive capacity, while Quinn clamps each connection to its
