@@ -18,6 +18,7 @@ use tokio::sync::{Semaphore, oneshot};
 
 const MAX_PENDING_HANDSHAKES: usize = 32;
 const MAX_ENDPOINTS: usize = 32;
+const MAX_QUIC_UDP_PAYLOAD: u16 = 65_527;
 // Matching the pinned Kynet native wire generation; never offer legacy ALPN.
 const NATIVE_ALPN: &[u8] = b"plank-native/2";
 
@@ -39,6 +40,7 @@ struct Admission {
     token: [u8; 32],
     sender: Option<oneshot::Sender<RoutedConnection>>,
     policy: Arc<TransportRatePolicy>,
+    max_udp_payload_size: Option<u16>,
 }
 
 struct Listener {
@@ -93,7 +95,8 @@ impl Registration {
                 if listener.identity != identity
                     || listener.options.idle_timeout != options.idle_timeout
                     || listener.options.keep_alive_interval != options.keep_alive_interval
-                    || listener.options.max_udp_payload_size != options.max_udp_payload_size
+                    || listener.options.max_udp_payload_size.is_some()
+                        != options.max_udp_payload_size.is_some()
                 {
                     bail!("shared native KyProto listener TLS or transport options differ");
                 }
@@ -131,6 +134,7 @@ impl Registration {
                     token,
                     sender: Some(sender),
                     policy,
+                    max_udp_payload_size: options.max_udp_payload_size,
                 },
             );
         }
@@ -238,8 +242,10 @@ impl Listener {
         }
         socket.bind(&address.into())?;
         let mut endpoint_config = quinn::EndpointConfig::default();
-        if let Some(size) = options.max_udp_payload_size {
-            endpoint_config.max_udp_payload_size(size)?;
+        if options.max_udp_payload_size.is_some() {
+            // The socket receives every peer's individually bounded packets.
+            // Its capacity cannot be the first owner's potentially smaller MTU.
+            endpoint_config.max_udp_payload_size(MAX_QUIC_UDP_PAYLOAD)?;
         }
         let endpoint = quinn::Endpoint::new(
             endpoint_config,
@@ -263,10 +269,14 @@ impl Listener {
         let mut transport = quinn::TransportConfig::default();
         transport.max_idle_timeout(Some(self.options.idle_timeout.try_into()?));
         transport.keep_alive_interval(Some(self.options.keep_alive_interval));
-        if let Some(size) = self.options.max_udp_payload_size {
+        if self.options.max_udp_payload_size.is_some() {
+            // Quinn clamps this to the client's authenticated QUIC transport
+            // parameter before its first server flight. Every fixed-MTU client
+            // advertises its selected ceiling, so each connection independently
+            // uses that exact ceiling, even before its PLANK token is received.
             transport
-                .initial_mtu(size)
-                .min_mtu(size)
+                .initial_mtu(MAX_QUIC_UDP_PAYLOAD)
+                .min_mtu(1200)
                 .mtu_discovery_config(None);
         }
         let (factory, binding) = PlankRateControllerFactory::new_routed();
@@ -318,12 +328,22 @@ async fn accept_connections(endpoint: quinn::Endpoint, listener: Weak<Listener>)
                 return;
             };
             let token = digest(authentication.get_auth().token().as_bytes());
+            let peer_mtu = routed.connection.stats().path.current_mtu;
             let admission = listener.upgrade().and_then(|listener| {
                 let mut admissions = listener.admissions.lock().unwrap();
                 admissions
                     .values_mut()
                     .find(|admission| admission.token.ct_eq(&token).unwrap_u8() == 1)
                     .and_then(|admission| {
+                        // Do not consume a valid pending token when a peer
+                        // advertises a different ceiling than its launch. The
+                        // correct client may still complete that admission.
+                        if admission
+                            .max_udp_payload_size
+                            .is_some_and(|expected| peer_mtu != expected)
+                        {
+                            return None;
+                        }
                         admission
                             .sender
                             .take()
