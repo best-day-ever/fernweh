@@ -403,19 +403,28 @@ prepare_hybrid_overlay() {
   ((physical_count >= 1)) || hybrid_fallback "no physical output is connected"
   ((virtual_count >= 1)) || hybrid_fallback "no free DisplayPort head is available"
 
-  local index dfp preferred width edid_file x=0
+  local index dfp preferred native mode width edid_file x=0
   local all_dfps=() metamode_clauses=() custom_edid_items=()
-  # Physical outputs left to right at their preferred modes, as without PLANK.
+  # Auto-select chooses the unfiltered native mode, not the remote 60 Hz
+  # carrier. Older inventories lack native size; select their known carrier
+  # explicitly so the following output starts at the width actually driven.
   for ((index = 1; index <= physical_count; index++)); do
     dfp=${inventory[physical_${index}_dfp]:-}
     preferred=${inventory[physical_${index}_preferred]:-}
+    native=${inventory[physical_${index}_native]:-}
     [[ $dfp =~ ^DFP-[0-9]+$ ]] || hybrid_fallback "the display inventory is malformed"
-    width=1920
-    if [[ $preferred =~ ^([0-9]+)x([0-9]+)$ ]]; then
-      width=${BASH_REMATCH[1]}
+    mode=nvidia-auto-select
+    width=0
+    if [[ $native =~ ^([1-9][0-9]{0,4})x([1-9][0-9]{0,4})$ ]]; then
+      width=$((10#${BASH_REMATCH[1]}))
+    elif [[ $preferred =~ ^([1-9][0-9]{0,4})x([1-9][0-9]{0,4})$ ]]; then
+      width=$((10#${BASH_REMATCH[1]}))
+      mode=$preferred
+    elif ((index < physical_count)); then
+      hybrid_fallback "a physical output has no known width for positioning its neighbour"
     fi
     all_dfps+=("$dfp")
-    metamode_clauses+=("${dfp}: nvidia-auto-select +${x}+0")
+    metamode_clauses+=("${dfp}: ${mode} +${x}+0")
     x=$((x + width))
   done
   # Virtual heads carry distinct PLANK EDIDs and start switched off.
