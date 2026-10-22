@@ -654,6 +654,55 @@ async fn host_occupancy_is_advisory_and_never_bypasses_pinning() {
 }
 
 #[tokio::test]
+async fn collaboration_users_keep_independent_relay_leases_on_a_busy_host() {
+    let h = harness();
+    h.prober.busy.lock().unwrap().insert(WS1.into(), Some(true));
+    // Both users may be behind the same NAT. A host's coarse busy status is
+    // advisory: only the authenticated Host can ask its desktop owner for consent.
+    let owner = h.login().await;
+    let guest = h.login_from(IP, "bob", "hunter2", "654321").await.unwrap();
+    let owner_route = h.b.connect(IP, &owner, WS1, "remote.example.org").await.unwrap();
+    let guest_route = h.b.connect(IP, &guest, WS1, "remote.example.org").await.unwrap();
+    assert_ne!(owner_route.port, guest_route.port);
+    assert_eq!(owner_route.host_cert_sha256, guest_route.host_cert_sha256);
+    assert_eq!(owner_route.username, "anna");
+    assert_eq!(guest_route.username, "bob");
+    assert_eq!(h.b.lease_count(), 2);
+
+    // Transport reachability never extends the guest's HBAC assignment.
+    assert_eq!(h.b.connect(IP, &guest, WS2, "remote.example.org").await.unwrap_err(), ApiError::Denied);
+    h.b.logout(&guest).await.unwrap();
+    assert_eq!(h.b.lease_count(), 1);
+    assert!(h.relay_calls().contains(&RelayRequest::Close {
+        client: Ipv4Addr::new(203, 0, 113, 7), port: guest_route.port, flush: true,
+    }));
+    assert!(!h.relay_calls().contains(&RelayRequest::Close {
+        client: Ipv4Addr::new(203, 0, 113, 7), port: owner_route.port, flush: true,
+    }));
+    assert!(h.b.keepalive(IP, &owner, WS1).await.is_ok());
+    assert_eq!(h.b.keepalive(IP, &guest, WS1).await.unwrap_err(), ApiError::Unauthorized);
+}
+
+#[tokio::test]
+async fn collaboration_users_keep_independent_direct_grants() {
+    let h = harness_direct();
+    h.prober.busy.lock().unwrap().insert(WS1.into(), Some(true));
+    let owner = h.login_from(LAN, "anna", "secret", "123456").await.unwrap();
+    let guest = h.login_from(LAN, "bob", "hunter2", "654321").await.unwrap();
+    for token in [&owner, &guest] {
+        let route = h.b.connect(LAN, token, WS1, "remote.example.org").await.unwrap();
+        assert_eq!(route.route, "direct");
+        assert_eq!(route.port, 28989);
+    }
+    assert_eq!(h.b.direct_count(), 2);
+    h.b.logout(&guest).await.unwrap();
+    assert_eq!(h.b.direct_count(), 1);
+    assert!(h.b.keepalive(LAN, &owner, WS1).await.is_ok());
+    assert_eq!(h.b.keepalive(LAN, &guest, WS1).await.unwrap_err(), ApiError::Unauthorized);
+    assert!(h.relay_calls().is_empty());
+}
+
+#[tokio::test]
 async fn offline_policy_denied_and_unassigned_hosts() {
     let mut k = FakeKerberos::new(&[("anna", "secret123456")]);
     k.policy_denied_hosts = vec![WS2.into()];

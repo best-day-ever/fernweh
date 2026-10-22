@@ -21,6 +21,8 @@ Requires:       libXext
 Requires:       logrotate
 Requires:       xorg-x11-server-Xorg
 Requires:       xorg-x11-server-utils
+Requires:       python3-gobject
+Requires:       gtk3
 Requires(post): systemd systemd-udev kmod
 Requires(post): openssl
 Requires(post): hostname

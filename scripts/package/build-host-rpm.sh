@@ -134,6 +134,8 @@ install -D -m 0644 "$repo_dir/packaging/README.md" \
   "$payload_dir/usr/share/doc/plank-host/README.md"
 mkdir -p "$payload_dir/usr/share/plank"
 cp -aL "$build_dir/assets/." "$payload_dir/usr/share/plank/"
+install -D -m 0644 "$repo_dir/apps/host/linux/src_assets/linux/assets/collaboration-ui.py" \
+  "$payload_dir/usr/share/plank/collaboration-ui.py"
 
 source_epoch=$(git -C "$repo_dir" log -1 --format=%ct)
 tar --sort=name --mtime="@${source_epoch}" --owner=0 --group=0 \
@@ -183,6 +185,14 @@ rpm -qp --qf '[%{FILENAMES} %{FILEMODES:perms} %{FILEUSERNAME} %{FILEGROUPNAME}\
 }
 echo "host_rpm_log_directory_gate=pass"
 rpm -qpR "$rpm_file" | rg -qx 'logrotate'
+rpm -qpR "$rpm_file" | rg -qx 'python3-gobject'
+rpm -qpR "$rpm_file" | rg -qx 'gtk3'
+rpm -qp --qf '[%{FILENAMES} %{FILEMODES:perms} %{FILEUSERNAME} %{FILEGROUPNAME}\n]' \
+  "$rpm_file" | rg -Fxq '/usr/share/plank/collaboration-ui.py -rw-r--r-- root root' || {
+  echo "host RPM must own its collaboration consent UI as root:root mode 0644" >&2
+  exit 1
+}
+echo "host_rpm_collaboration_ui_gate=pass"
 if rpm -qpl "$rpm_file" | rg -q '/etc/plank/plank\.conf$'; then
   echo "host RPM still contains the ambiguous generic configuration path" >&2
   exit 1
