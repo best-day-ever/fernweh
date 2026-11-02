@@ -34,20 +34,20 @@ echo "$MACOSX_DEPLOYMENT_TARGET"
     def test_one_default_package_requires_new_sdk(self):
         result = self.run_target(None, '27.0')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), '13.0')
+        self.assertEqual(result.stdout.strip(), '15.0')
         self.assertNotEqual(self.run_target(None, '26.2').returncode, 0)
 
     def test_explicit_target_does_not_lower_sdk_requirement(self):
         for sdk in ('27.0', '27.1', '28.0'):
-            result = self.run_target('13.0', sdk)
+            result = self.run_target('15.0', sdk)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), '13.0')
-        self.assertNotEqual(self.run_target('13.0', '26.2').returncode, 0)
-        self.assertNotEqual(self.run_target('13.0', '14.5').returncode, 0)
+            self.assertEqual(result.stdout.strip(), '15.0')
+        self.assertNotEqual(self.run_target('15.0', '26.2').returncode, 0)
+        self.assertNotEqual(self.run_target('15.0', '14.5').returncode, 0)
 
     def test_rejects_unsupported_or_malformed_inputs(self):
         for target, sdk in [('14.0', '27.0'), ('27.0', '27.0'),
-                            ('13;false', '27.0'), ('13.0', 'unknown')]:
+                            ('13;false', '27.0'), ('15.0', 'unknown')]:
             self.assertNotEqual(self.run_target(target, sdk).returncode, 0)
 
     def test_all_client_entrypoints_share_target_policy(self):
@@ -60,12 +60,14 @@ echo "$MACOSX_DEPLOYMENT_TARGET"
             self.assertIn('\nplank_macos_client_target\n', script, entrypoint)
             self.assertNotIn('PLANK_MAC_CLIENT_MIN_MACOS:-27.0', script, entrypoint)
 
-    def test_host_target_is_not_lowered(self):
+    def test_host_default_is_independent_of_client_policy(self):
         host = (ROOT / 'scripts/build/build-macos-host.sh').read_text()
-        self.assertIn('-mmacosx-version-min=27.0', host)
+        self.assertIn('plank_macos_host_target', host)
         self.assertNotIn('macos-client-target.sh', host)
         transport = (ROOT / 'scripts/build/build-macos-transport.sh').read_text()
-        self.assertIn('MACOSX_DEPLOYMENT_TARGET=27.0', transport)
+        self.assertIn('plank_macos_host_target', transport)
+        policy = (ROOT / 'scripts/build/macos-host-target.sh').read_text()
+        self.assertIn('PLANK_MACOS_HOST_MIN_OS:-26.7', policy)
 
 
 @unittest.skipUnless(platform.system() == 'Darwin' and platform.machine() == 'arm64',

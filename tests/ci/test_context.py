@@ -48,12 +48,15 @@ class ContextTests(unittest.TestCase):
             env = dict(os.environ, GITHUB_WORKSPACE=str(source), RUNNER_TEMP=str(base),
                        GITHUB_SHA=sha, EXPECTED_SOURCE_SHA=sha,
                        BUILD_REF='feature/check', GITHUB_ENV=str(env_file))
+            # This fixture checks the default, regardless of the caller's target.
+            env.pop('REQUESTED_MACOS_HOST_MIN_OS', None)
             subprocess.run(['python3', str(ROOT / 'scripts/ci/context.py')], env=env, check=True,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             values = dict(line.split('=', 1) for line in env_file.read_text().splitlines())
             worktree = base / 'plank-ci/source'
             self.assertEqual(values['PLANK_SOURCE_ROOT'], str(worktree))
             self.assertEqual(values['PLANK_BUILD_BRANCH'], context.branch_name('feature/check'))
+            self.assertEqual(values['PLANK_MACOS_HOST_MIN_OS'], '26.7')
             self.assertEqual(subprocess.check_output(['git', '-C', str(worktree), 'rev-parse', 'HEAD'], text=True).strip(), sha)
             # Reusing a scratch root must fail instead of trusting stale outputs.
             self.assertNotEqual(subprocess.run(['python3', str(ROOT / 'scripts/ci/context.py')], env=env,
@@ -97,6 +100,17 @@ class ContextTests(unittest.TestCase):
         self.assertIn('if: always()', after)
         self.assertIn('path: ${{ env.PLANK_ARTIFACT_ROOT }}/', after)
         self.assertNotIn('RUNNER_TEMP', after)
+
+    def test_host_floor_input_is_available_before_either_mac_build(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        self.assertIn("options: ['26.7', '27.0']", workflow)
+        self.assertIn("REQUESTED_PRODUCT: ${{ inputs.product || 'all' }}", workflow)
+        self.assertIn("REQUESTED_MACOS_HOST_MIN_OS: ${{ inputs.macos_host_min_os || '26.7' }}", workflow)
+        for job in ('macos', 'macos-signed'):
+            body = workflow.split('  ' + job + ':\n', 1)[1].split('\n  macos-signed:', 1)[0]
+            self.assertLess(body.index('python3 scripts/ci/context.py'),
+                            body.index('Restore and verify dependencies'))
+        self.assertIn("${{ inputs.product || 'all' }}-${{ inputs.macos_host_min_os || '26.7' }}", workflow)
 
     def test_all_root_workflows_use_current_node_actions(self):
         for path in (ROOT / '.github/workflows').glob('*.yml'):

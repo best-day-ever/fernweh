@@ -1,0 +1,648 @@
+# Ubuntu Qt-owned session
+
+## Mainline promotion — 1.2.00
+
+The operator approved merging this frontend, subsequent USB Wacom recovery,
+and the independent CUDA Host candidate. Qt now replaces the ordinary Ubuntu
+Client; it is not a separate product. Preserve the existing PLANK application
+and desktop identity, bookmarks, trust, administrator policy and log locations.
+That Ubuntu promotion retained the macOS SDL/Metal frontend. The later
+[macOS Qt session integration](macos-qt-session.plan) is now merged separately;
+Mac playback remains SDL/CoreAudio and Ubuntu playback remains PipeWire.
+
+Use the ordinary hosted `linux-client` build. It runs the Qt/PipeWire/Wacom,
+sanitizer, compositor, launcher and package-upgrade gates, builds the full
+Client once and packages that exact binary. Source and binary checks require
+the Qt runtime, and the package gate rejects a second experimental namespace.
+The earlier candidate and coexistence details below are historical evidence,
+not current build instructions. Hardware/session qualification remains separate.
+Do not overwrite existing normal settings with the retired test app's profile.
+
+## Windowed sizing and first exposure
+
+The operator accepts .051's toolbar spacing and requests a useful windowed
+size instead of the fixed 960x600 restore size. Prepare an aspect-matched size
+within 80% of the target screen's available logical area, using the authenticated
+desktop topology. Unknown topology falls back to that available-area ratio.
+Use resize(), leaving top-level placement to Wayland, rather than pretending
+that setGeometry() can force GNOME to center the window. Retain subsequent
+user content sizes across fullscreen toggles; do not add a competing resize loop,
+per-resize aspect constraint, persistent preference or Host mode request.
+Existing presentation/input geometry keeps the image proportional and uses
+letterboxing when the freely resized window has a different aspect ratio.
+
+Create native resources while hidden in normal state to record the intended
+restore size, then request fullscreen before showing either native surface.
+Reapply the selected screen after native creation, which can otherwise select
+a virtual sibling containing the default position. Verify that choice with a
+separate two-monitor GNOME fixture, including different monitor dimensions.
+GNOME can send an initial normal configure before the fullscreen configure.
+Exposure alone is therefore insufficient. Initial raster drawing and child
+showing wait for the selected screen's actual logical fullscreen dimensions;
+native resize delivery then triggers the queued child show. Recheck geometry
+and visibility/exposure when it runs. The gate retires after that first show,
+so manual sizing remains free-form. This is
+not a guessed delay, hardcoded resolution, private API or resize loop.
+Explicit hide/minimize still unmaps it; merely covering the parent does not.
+Visibility changes also queue the show for an already-exposed parent (not all
+platform backends generate a new expose when leaving minimized state).
+Keep the .050 exposure policy and exact ten-bit surface checks unchanged.
+Qt Wayland's decoration transition can shrink its normal restore dimensions.
+Save the content size before requesting fullscreen; on exit, restore it once
+after the native normal-state event, when Qt has recreated decorations. Do not
+guess border dimensions, resize continuously or overwrite the saved size with
+the fullscreen/maximized size. Startup and runtime toggles use the same shell
+API; reconnect re-showing an ordinary window preserves its current state.
+Tests cover aspect/size defaults, fractional-scale logical units, first-show
+geometry, free-form manual resizing, repeated fullscreen restore, hide/restore
+and existing covered-parent/minimize/input/precision behavior. Qualify on the
+hosted GNOME compositor at 100%/125% and with sanitizers, then hand the candidate
+to the operator for visual startup/windowed acceptance. Both Hosts, ordinary
+Client, native PipeWire and transport behavior are unchanged.
+
+Candidate .052 passes hosted run39490258526: 55 window/UI cases at both scales,
+the separate two-monitor fixture, sanitizer/component checks, both complete
+Client builds and package isolation. First-fullscreen geometry and repeated
+normal content-size retention are checked without relaxing the assertions.
+The exact DEB is downloaded and checksum/provenance verified. See HANDOFF for
+sources and evidence; operator visual/live-session acceptance is still pending.
+
+## Compact toolbar follow-up
+
+Keep the accepted borderless vector icons, 32x32 click targets and 39px toolbar
+height. Group the five microphone/camera/window controls with 4px gaps instead
+of 8px, preserving the 8px separation from Encoder Target. Narrow RTT to whole
+milliseconds with a stable three-digit-plus-over-range field; values over 999ms
+display `>999 ms`, not a falsely capped measurement. Do not move slider/control
+positions as telemetry changes or leave slots for unsupported capture controls.
+Existing Material, rendered-glyph, hit-target, hide/fullscreen and scale gates
+remain; new tests cover RTT boundaries and microphone/camera visibility.
+
+Candidate .051 passes hosted run39475946222, including 43 compositor cases
+at both scales, sanitizer/component checks, both full builds and package
+isolation. Final screenshots are inspected and the exact DEB is collected.
+See HANDOFF for source/hash provenance; the operator accepts the compact
+spacing in a live session. No Host, ordinary Client or audio behavior changes.
+
+## Covered-parent exposure correction
+
+Candidate .049 exposed a Wayland lifecycle issue independent of audio.
+On the authorized Intel Client, the opaque video subsurface fully covers the
+raster shell. The compositor supplies child frame callbacks but omits those
+for the covered parent, as permitted by the protocol. Qt 6.10.2's callback
+timeout marks the parent inexposed and propagates this to the otherwise
+visible child. Hardware decoding succeeds, but no further scene synchronization,
+draw or swap occurs; exact-profile qualification correctly fails after 2s.
+
+Repeated standalone presenter qualification reproduces this without any
+network session and with audio disabled. A top-level scene without the parent
+passes all 12 generations, with and without silent PipeWire. Keeping the parent
+and setting `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0` also passes all 12. Threaded
+rendering and requesting an alpha channel did not resolve the native-child
+failure; do not layer either into the implementation.
+
+The .050 correction applies that process-local policy before QGuiApplication
+creates surfaces, only in the experimental Qt Client and its test harness.
+It disables Qt's missing-callback exposure heuristic, not compositor pacing
+or actual hide/minimize notifications. Explicit environment overrides remain
+for A/B diagnostics. The shell explicitly hides its child on hide/minimize,
+and shows it on restore, symmetrically with its existing show ownership.
+Wayland unmapping the parent alone can leave Qt's child exposed flag stale;
+the new compositor test caught this and requires both to retire correctly.
+The native child is still necessary to avoid the RGB8
+decoration intermediate; exact-format validation and its deadline stay intact.
+Regression gates include continued swaps after the old timeout, repeated
+fullscreen/windowed and hide/minimize/restore cycles, plus repeated actual
+HEVC VA-API qualification with silent audio setup/teardown on hardware.
+Real-session and acoustic acceptance remain separate.
+
+The .050 hosted candidate now passes all gates, including 41 window/input
+cases on GNOME at 100%/125%, offscreen/sanitizer coverage, both complete builds
+and package isolation. The final hosted probe passes 24 actual HEVC VA-API
+startup generations on the authorized Intel Client, split between fullscreen
+with silent PipeWire and windowed without audio. GPU precision/import and 120
+Vulkan/GL ownership handoffs pass through fullscreen/windowed transitions.
+An earlier same-binary A/B reproduces the failure when the old timeout is
+explicitly restored. No Host update or package installation was performed.
+See HANDOFF for exact sources, hashes and remaining live-session/listening gates.
+
+Primary references:
+
+- https://raw.githubusercontent.com/qt/qtbase/v6.10.2/src/plugins/platforms/wayland/qwaylandwindow.cpp
+- https://cgit.freedesktop.org/wayland/wayland/tree/protocol/wayland.xml
+- https://raw.githubusercontent.com/qt/qtbase/v6.10.2/src/plugins/platforms/wayland/plugins/hardwareintegration/wayland-egl/qwaylandeglwindow.cpp
+
+## Native PipeWire audio follow-up
+
+The operator authorizes replacing SDL playback in the Qt experiment only.
+A finite read-only trace of .048 confirmed eleven short output reads in 45s,
+with continuous source timestamps and no packet-concealment samples in that
+interval. This proves output starvation, not the exclusive cause of arrival
+jitter. The common-epoch phase loop repeatedly accelerated while its queue
+reserve depleted. A backend substitution alone is insufficient.
+
+Candidate .049 uses a native PipeWire stream, following the OS-selected output
+and volume policy. Its realtime callback only fills mapped output buffers from
+a preallocated single-producer/single-consumer ring and publishes atomic timing
+and shortage counters. No decoding, resampling, allocation, logging, blocking,
+Qt/video-clock mutex, or SDL audio device/stream runs in that callback.
+Producer-side FFmpeg resampling retains source-phase sync for common-epoch
+Hosts and relative-rate sync for independent epochs. PipeWire's graph/hardware
+delay, queued frames and resampler delay replace the fixed device-buffer guess.
+A captured read cursor keeps ring/device accounting consistent across callbacks.
+
+Startup/recovery primes one actual graph request plus 12ms of reserve, covering
+the 512-frame/48k capture batch. The minimum post-pull reserve over one second
+limits acceleration and gently restores headroom using the same resampler.
+This is a small bounded latency tradeoff, not a guarantee against arbitrary WAN
+stalls. PCM capacity is 200ms plus one source block. Producer backpressure begins
+at the larger of 50ms or one graph quantum plus reserve, and fails/reinitializes
+after a bounded 100ms stall. This lets large graph requests prime without a
+fixed high-water limit deadlocking startup. No oldest/newest item eviction.
+Actual shortages are counted; 2.5ms fades only at startup/interruption edges
+avoid hard sample discontinuities and do not conceal the counters.
+
+Gates: ring order/overflow/concurrency, atomic clock snapshots, latency units,
+stale clocks, bounded stall/recovery, real FFmpeg compensation under 512-frame
+batching/jitter with three device quanta and +/-400ppm drift, real isolated
+PipeWire playback and repeated teardown, ASan/UBSan, both complete Client builds,
+package isolation. Real HDMI/USB routing, cable recovery and a long listening/
+A/V-sync soak remain hardware gates; a simulated clock or null sink is not
+acoustic acceptance. Both Hosts and the regular Linux/macOS Client are unchanged.
+
+The .049 candidate is built and downloaded. Hosted run 39375933711 passes
+component tests, real null-sink playback at 1024/4096-frame quanta, repeated
+cleanup, ASan/UBSan with leak detection, both complete Client builds and
+co-installation/package gates. Standalone D-Bus cache cleanup is test-only;
+never shut down process-global D-Bus from the playback renderer. Exact sources,
+hashes and evidence are in HANDOFF. Real-output listening/sync acceptance and
+interruption/device-routing qualification remain open.
+
+## Previous accepted checkpoint
+
+Status: the live Qt runtime is integrated. The operator accepted the
+1.1.044-ubuntu-qt-session playback repair and reports working mouse/tablet
+input. That candidate retains the cursor-texture ownership repair, uses
+ordinary 2D textures for the Intel EGLImage import path, and passed the hosted
+compile, component, compositor, sanitizer, launcher and package gates.
+Complete profile, input-recovery and audio/video soak qualification remains
+separate from that acceptance.
+
+The accepted 1.1.045 follow-up improves unpinned toolbar access after switching
+to a window. It uses a twelve-logical-pixel hover strip below the native title
+bar, with the existing one-second dwell and Pin behavior. Fullscreen retains
+its three-pixel trigger. No extra reveal button or custom title bar is added.
+Hosted compilation, compositor tests at 100%/125%, sanitizers and packaging
+passed. The separate Qt DEB is downloaded and the operator confirmed windowed
+reveal works. Candidate 1.1.046 restores stacked stats and stateful
+pin/fullscreen vector icons without changing that interaction. The operator
+also approved continuous automatic recovery with a Disconnect-only status
+dialog, retaining explicit auto-disconnect and terminal security failures.
+The Qt timeout now reveals a notice rather than pausing retry requests.
+Hosted qualification and packaging passed, and the separate .046 DEB is
+downloaded. All 38 window/input cases pass offscreen, with sanitizers and on
+GNOME/Wayland at 100%/125%; both complete Client builds and package isolation
+also pass. Those UI renders used the default style, missing the production
+Material theme's edge padding/insets. The operator reported squeezed icons.
+Current candidate 1.1.047 removes that style dependency from the toolbar buttons:
+centered 24-pixel vectors, 32-pixel invisible hit targets, and hover/press-only
+backgrounds. Minimize/close now match the other vectors. The test/probe style
+matches production Material Dark/Dense, with explicit geometry, rendering and
+hit-target regressions. Hosted run39355378111 passes all40 window/input cases
+offscreen, under sanitizers and on GNOME100/125, both complete app builds and
+package gates. The .047 DEB is downloaded with verified provenance/hashes.
+The test/probe explicitly finalize Fontconfig after Qt teardown; leak detection
+remains enabled without suppressions. Subsequent operator gates remain toolbar
+and cable-interruption testing: restore the network without
+pressing a dialog button and confirm automatic video/input recovery. See
+HANDOFF for exact source, package hashes and remaining hardware gates.
+
+The operator accepted .047's toolbar. Candidate .048 hides the decoder's
+startup test image while preserving the real exact-format draw and swap check.
+Marked qualification frames are cleared to black in the same GPU command
+stream before controls/swap; live frames retain their existing path. The
+connecting message waits for real live presentation, with generation-scoped
+readiness. Controlled-feedback and compositor pixel regressions cover the
+transition, reconnect generation changes and precision rejection. Hosted run
+39358327903 passed both complete builds and the package gates, all nine presenter
+and 40 window/input cases, sanitizers, and 72 compositor conceal/reveal pixel
+checks across 100%/125% and window modes. The separate .048 DEB and reports are
+downloaded with verified hashes/provenance. Neither Host nor ordinary Client is
+changed. The operator reports the startup transition is better and accepts this
+checkpoint for commit/push. Full interruption, profile and audio/video/device
+qualification remains separate; hosted software rendering is not Intel hardware
+qualification.
+
+The longstanding frozen top-left arrow also reproduces with PLANK closed:
+local pen movement clears it, and opening a standard GNOME dialog restores it.
+Disabling Qt's tablet interface did not help. No input workaround is shipped;
+the exact local compositor/driver defect remains unproven.
+Implementation started on `ubuntu-qt-session`, from parent
+`1572c09e26d6ce7db20d9d1feefe11a3155963b8` / Client
+`58f4df097c1cdf11bf6b4b429701f156e2b10109` (`client-session-recovery`).
+Refreshed with main `38e00a557670df063926af1ef3466156145302ae`, the 1.1.039
+release baseline. The .036 Wacom and .037 lifecycle repairs and persistent-tablet
+Host integration are retained. The independent CUDA candidate is not included.
+This does not merge the Qt experiment into main or qualify it for shipping.
+
+## Scope and decisions
+
+The operator has no identifiable Development NUC available for this experiment.
+Continue isolated development/testing on GitHub-hosted Ubuntu Actions; record Intel GPU,
+physical input and live-session gates as pending. Do not contact old end-user
+addresses or infer hardware acceptance from software-rendered builder tests.
+When a usable Client candidate is ready, the operator will install and test it.
+
+The experimental DEB must be co-installable with the regular Client. Use a
+distinct `plank-client-qt` package/executable and **PLANK Client Qt** launcher,
+separate desktop/application identity, private library/resource paths, settings,
+bookmarks/trust store and logs. Do not replace or conflict with `plank-client`,
+share mutable settings, overwrite `/etc/plank/client.conf`, or register a second
+handler for the production URL scheme. Package-file overlap, installation and
+removal independence are explicit gates before distributing the experiment.
+This is a testing identity, not a rename of the production product.
+
+Ubuntu 26.04 only. Leave the macOS Client, both Hosts, protocol, decoder policy
+and raw-HID Wacom implementation unchanged. The separately authorized native
+PipeWire follow-up above replaces Qt playback/sync measurement only. Qt owns the
+session window and input on its GUI thread. Workers must not create, destroy or
+dispatch events on that window. Do not wrap a Qt-owned native surface in an SDL
+window or retain two event dispatchers for the same surface.
+
+Use one Qt Quick scene per output: video underlay, Host-authoritative tablet
+cursor, toolbar and recovery prompt. A normal Qt raster top-level owns window
+decorations; the scene is its Qt-owned native child. Video never passes through
+the raster backing store or Qt Wayland's 8-bit decoration framebuffer. Qt owns
+both native lifetimes and their shared input hierarchy; no manual Wayland
+surface/queue dispatch is added. Toolbar input stays in window-local logical
+coordinates, independently of the video viewport and letterboxing. No cursor
+warps, global-pointer polling or second native toolbar window. Remote drag
+ownership lasts through its matching release even when crossing the toolbar;
+local toolbar drags must never reach the Host. Focus loss, geometry replacement,
+disconnect and teardown release held remote input.
+
+The renderer provides its exact source/destination rectangles in pixels. Input
+maps Qt logical coordinates through that same viewport; do not reconstruct a
+second aspect-fit transform from the negotiated Host dimensions. Each output
+uses its actual backing size, including fractional scale. Window resizing must
+not renegotiate Host resolution.
+
+## Ordered implementation gates
+
+The operator requires feature equivalence, not a reduced demonstration. The
+following live-runtime checklist is a completion gate; component tests alone
+do not check these boxes. Reuse the established transport, authentication,
+decoder-policy, audio-clock and tablet implementations behind UI-independent
+boundaries rather than maintaining a second implementation of those contracts.
+
+- [ ] Asynchronous connect, cancel, takeover, disconnect and application exit;
+      Qt continues processing input throughout startup, recovery and shutdown.
+- [ ] Exact-profile hardware-first decode, software fallback, 8/10-bit identity
+      and full-range YCbCr presentation; retained GPU resources and bounded queues.
+- [ ] Fullscreen/windowed, minimize/restore, one or several outputs, native and
+      scaled-span presentation, fractional scale, and one shared input transform.
+- [ ] Complete toolbar: live drag/pin, bitrate acknowledgement, rate/loss/RTT,
+      microphone, camera, fullscreen, minimize, disconnect and stats overlay.
+- [ ] Keyboard and system-shortcut policy, absolute mouse/buttons/wheel,
+      clipboard, Host cursor shapes, and Host-authoritative tablet cursor.
+- [ ] Unchanged raw-HID and normalized Wacom forwarding, focus release,
+      reconnect generations, pressure, tip/buttons and Tablet Margins.
+- [ ] Existing audio playback/synchronization, microphone/camera forwarding and
+      device selection, including hotplug and shutdown without retained devices.
+- [ ] Host timeout/automatic recovery/Disconnect, GDM/desktop handoff, desktop-lock recovery,
+      network interruption and decoder recovery without an unresponsive UI.
+- [ ] Separately installable real Qt Client candidate, production-file/state
+      isolation, GitHub-hosted clean build, regression and package-content gates.
+- [ ] Operator hardware acceptance and moving-video/audio soak; explicitly
+      pending until an authorized physical Client is available.
+
+Do not stop after individual component checkpoints while implementation can
+continue without operator input. Do not remove the packaging guard until the
+live runtime is connected, or describe hosted software-GPU tests as hardware
+acceptance. The ordinary Client remains the behavior and rollback reference.
+
+1. Build the real Qt window/input/toolbar component in an isolated, non-networked
+   qualification executable. Exercise edge reveal (1 second), hide (5 seconds),
+   pinning, live dragging, keyboard/button release, letterbox, fractional scale,
+   mixed output slices and unresponsive-Host UI. No application package changes
+   or fabricated remote-session/performance claims at this stage.
+2. Adapt the existing exact-format GPU presenters to the Qt-owned surface.
+   Prefer direct scene-graph render-node/underlay rendering rather than an extra
+   intermediate image. Preserve VA-API Y410/XR30 identity and software FFmpeg
+   planar precision; qualify all 1024 levels, full range and channel identity.
+   A requested 10-bit surface is not proof that the actual swapchain is 10-bit.
+   Fail qualification on an 8-bit substitution. No video QImage/readback path.
+3. Move Ubuntu session lifecycle to asynchronous Qt GUI orchestration. Retain
+   transport/decoder workers, bounded queues and .037 callback retirement.
+   Reuse SDL/PipeWire audio initially, without SDL video/event ownership. Wire
+   live stats, acknowledged bitrate, microphone/camera, recovery and disconnect.
+4. Attach unchanged raw-HID/normalized tablet transport to the new UI owner.
+   Mouse uses the compositor cursor; tablet uses Host-authoritative position
+   and cursor shape within the same Qt scene. Never infer tablet position from
+   the mouse or send synthetic mouse movement to align a cursor.
+5. Qualify on an unoccupied authorized Development NUC: fullscreen/windowed,
+   100% and 125%, one/two unequal monitors, custom cursor, hover/tip/buttons,
+   pressure and Flame Tablet Margins, network loss, reconnect, Host reboot,
+   minimize/restore, repeated teardown and moving-video/audio soak. Compare
+   CPU, latency and frame-drop behavior against 1.1.039 using identical profiles.
+6. Only after those gates, make the Ubuntu implementation the default and
+   remove superseded Ubuntu SDL-video/manual Wayland UI code. Keep macOS paths.
+   Build a branch-labelled candidate; no merge or release without acceptance.
+
+## Code findings behind this order
+
+`Session::exec()` currently waits for the SDL worker after initial launch,
+blocking normal Qt GUI dispatch for the active Linux stream. The SDL EGL
+renderer can recreate native Wayland surfaces during backend selection. Custom
+toolbar and tablet-cursor objects then need parent-surface rebuilding. Qt
+window ownership cannot be substituted safely by changing one creation call.
+
+The first component deliberately has no transport or decoder dependency. Its
+signals define the UI-to-session boundary, not a new wire protocol. Shipping
+build files must not enable it before the renderer/lifecycle gates. Retain the
+existing production path intact for baseline comparison and rollback.
+
+## References
+
+- https://doc.qt.io/qt-6.10/qquickwindow.html
+- https://doc.qt.io/qt-6.10/qtquick-visualcanvas-scenegraph.html
+- https://doc.qt.io/qt-6.10/qsgrendernode.html
+- https://doc.qt.io/qt-6.10/qwindow.html
+
+Qt documents GUI/render-thread separation and native GPU integration. Those
+APIs enable the approach; they do not establish performance or color fidelity.
+
+## First qualification findings
+
+The following sections retain staged qualification evidence, not the current
+implementation backlog. Early statements that live runtime or packaging was
+not connected describe those checkpoints. Current implementation and package
+state are summarized in `HANDOFF.md` and the final section below.
+
+The isolated component passes 24 QtTest checks on the Ubuntu 26.04 / Qt 6.10.2
+builder, both offscreen and on an isolated GNOME/Wayland compositor. The same
+24 checks pass with ASan/UBSan and leak detection enabled. Mouse events in this
+suite are injected at Qt's event boundary, not physical seat or Wacom input.
+No remote session or hardware acceptance is implied.
+
+The precision gate deliberately tests the *bound framebuffer*, not just the
+reported OpenGL context format. A directly decorated Qt Quick window reports a
+10-bit context but uses an R8/G8/B8 content framebuffer on the test compositor.
+That gate fails as intended. The initial fullscreen test inspected the first
+frame before compositor configuration settled; a later-frame test correctly
+finds an R10/G10/B10 fullscreen framebuffer. Do not repeat the earlier inference
+that settled fullscreen also uses the 8-bit content buffer.
+
+The proposed `QtSessionShell` preserves ordinary window decorations around a
+native Qt Quick child. Windowed and fullscreen tests, including four mode
+transitions before readback, retain every code in all four 1024-level
+red/green/blue/gray ramps. The windowed gate also checks that the top-level title
+bar still has a nonzero frame margin. These checks pass at 100% and with forced
+`QT_SCALE_FACTOR=1.25`, without a Qt patch, HDR, or disabling window decorations.
+The 24 component checks also pass under that forced scale. This is not a real
+compositor fractional-scale or mixed-monitor hardware acceptance test.
+
+The virtual builder uses Mesa llvmpipe; these are precision/lifecycle feasibility
+checks, not GPU throughput, panel or decoded-video qualification. No decoded
+video frame has traversed the new component. The EGL/VA-API adapter described
+below compiles but its real import/decoder path remains unqualified. Vulkan
+presenter integration remains pending; Qt Quick's graphics-API selection must
+not silently remove one of those qualified paths or add a CPU frame copy.
+
+Qt 6.10.2's `QWaylandEglWindow::contentFBO()` creates a default-format content
+FBO for decorated windows; its EGL window setup also requests 8-bit alpha when
+decoration support is enabled. The native-child arrangement avoids that content
+FBO rather than hiding the loss by logging only `QOpenGLContext::format()`.
+
+Do not ship a global disable-decoration environment override, remove window
+controls, enable HDR, or patch Qt silently to make this gate pass. The separate
+`QT_WAYLAND_DISABLE_WINDOWDECORATION=1` diagnostic confirmed the direct-window
+problem but is not part of the proposed design. The ordinary main window remains
+unchanged. This is still an Ubuntu-only experiment, disabled in shipping builds.
+
+Source references for this finding:
+
+- https://github.com/qt/qtbase/blob/v6.10.2/src/plugins/platforms/wayland/plugins/hardwareintegration/wayland-egl/qwaylandeglwindow.cpp
+- https://github.com/qt/qtbase/blob/v6.10.2/src/plugins/platforms/wayland/plugins/hardwareintegration/wayland-egl/qwaylandglcontext.cpp
+- https://github.com/qt/qtbase/blob/v6.10.2/src/plugins/platforms/wayland/qwaylanddisplay.cpp
+
+Reproduce component tests on the Ubuntu builder with
+`PLANK_QT_SESSION_TEST_BUILD=<dedicated-shadow-build> scripts/test/run-qt-session-tests.sh`.
+The standalone probe is built in that directory's `probe/` subdirectory. It
+does not connect, capture microphone/camera/tablet input, or require credentials.
+`scripts/test/run-qt-session-compositor.sh` runs a separate headless compositor
+with a private runtime directory/session bus and in-memory settings; it never
+attaches to the user's desktop. Set `PLANK_QT_CHECK_PRECISION=1` to include the
+fail-closed native-child framebuffer and title-bar gates. The standalone probe's
+`--precision-check` without `--native-child` remains the direct-window comparison;
+it is expected to fail in decorated mode on the current Qt/GNOME combination.
+Use `--native-child` for the proposed arrangement, and `--roundtrip` with a
+precision check for repeated fullscreen/windowed transitions.
+
+## Packed video and delivery checkpoint
+
+Validated parent `5d19f9cd371a2e6c5ba7e9c3a2c2ba010dca77b3` / Client
+`f816851f7f8088a397a1bfafd2083f0dedb750b2` adds `qtvideo.pri` to the isolated
+probe, not the live Client session:
+
+- `QtVaapiVideoFrame` retains the decoder's AVFrame while its exported DMA-BUF
+  is sampled. It validates exact packed format, bit depth, range, matrix,
+  object/plane layout and linear-buffer bounds. Surface synchronization is
+  bounded to 100 ms on the decoder worker, never the Qt GUI thread.
+- `QtEglVideoItem` imports that DMA-BUF into a scene-graph render node. At most
+  three GPU leases are retained. Fences retire completed sampling without a
+  per-frame `glFinish`, CPU pixel map or readback. Real Intel driver behavior,
+  multi-output delivery and device-loss recovery are still pending gates.
+- The shared packed-format interpretation is also used by the existing VA-API
+  renderer, without changing its channel mapping. Other shipping renderer and
+  transport paths remain intact.
+- `QtVideoMailbox` coalesces frames to one pending frame and one queued GUI
+  notification. Connection generations reject late callbacks; closing the
+  session from a delivery is safe. A worker does not wait for GUI dispatch.
+
+Twelve component checks pass normally and with ASan/UBSan/leak detection.
+They use wrapped VA-API exports, not a real decoder/device. The separate shader
+probe uses test-only CPU-generated GPU textures and readback; neither is part
+of the proposed runtime. With `--video-precision-check`, all 1024 native RGB/gray
+levels and crop/offset remain exact. Eight-bit expansion retains every original
+code; legal adjacent-integer UNORM rounding is not mistaken for loss of source
+precision. Full-range BT.709 gray and linear downscale also pass. An 8-bit
+intermediate must fail the 10-bit gate.
+
+All eight native-child framebuffer/shader configurations pass at 100% and forced
+125% on the isolated compositor, including repeated fullscreen/windowed changes.
+The same 24 input/window tests pass there and under sanitizers. This does not
+qualify physical fractional-scale outputs, hardware decoding, GPU throughput or
+live video/audio synchronization.
+
+`run-qt-session-tests.sh` now needs `PLANK_CLIENT_FFMPEG_WORK` pointing to the
+canonical patched private FFmpeg 9.0.1 tree. It verifies both patch application
+and the qualified resulting source hash; do not bootstrap a second copy.
+Use a separate shadow build with `PLANK_QT_SESSION_SANITIZERS=1`,
+`ASAN_OPTIONS=detect_leaks=1` and `UBSAN_OPTIONS=halt_on_error=1` for sanitizers.
+No ThreadSanitizer or Intel hardware acceptance is implied.
+
+## Reusable software-frame pool checkpoint
+
+Parent `cf34d49de312a6587c929fb9fdccc612c5e42860` / Client
+`6e34e649a390bcb3a723edaa51f6a4399e40caa9` extracts the existing Vulkan
+software-frame allocator into `PlVkFramePool`, with no Qt/SDL window dependency.
+The normal renderer delegates to it; the Qt runtime is not connected yet.
+The cacheable host-memory import policy and mapped/system fallbacks remain.
+No extra CPU pixel upload or per-frame GPU finish is introduced.
+
+An imported buffer must not return to FFmpeg for writing until its Vulkan plane
+transfer completes. Completion callbacks only set an atomic flag: they may run
+inside `pl_buf_create` while `av_buffer_pool_get` holds FFmpeg's pool mutex.
+Actual AVBuffer release occurs outside GPU calls and allocator locks. Shutdown
+drains GPU work before retiring pools, and a device-lifetime token lets external
+AVFrame leases outlive the pool. The existing renderer uses its established
+decoder-before-GPU destruction order. Future Qt teardown must run the drain on
+its rendering owner, not the GUI thread.
+
+Eighteen tests pass normally and under ASan/UBSan/leak detection. They include
+forced delayed/reentrant completion, eight decoder threads, retained frame
+clones, allocation/upload errors and malformed/inverted plane bounds. Six
+tests perform actual software decoding of the existing H.264 8/10-bit 4:2:2 and
+4:4:4 plus HEVC 8/10-bit identity fixtures, followed by Vulkan transfer/readback.
+Every visible sample matches the system-memory reference decode. The test-frame
+bytes are unchanged; they now live in shared `ffmpeg-testframes.h` instead of a
+CPP included into the decoder. Fixtures and readback are qualification inputs,
+not a runtime pixel-copy path. lavapipe explicitly serves this isolated test;
+production must still qualify the real GPU and exact profile.
+
+Both identity variants, 24 input/window and 12 delivery/lifetime checks still
+pass under sanitizers. All eight scene/framebuffer/shader configurations still
+pass at 100% and forced 125% in the isolated compositor. The ordinary renderer
+and decoder translation units pass a syntax-only check. The earlier local
+builder lacked PipeWire headers; the operator has now explicitly required
+GitHub-hosted Actions instead. Its normal Client dependency installer already
+includes those headers and the independently verified private SDL build. This does
+not qualify Vulkan-to-Qt interop, real VA-API, live sessions or throughput.
+
+Next remains decoder-to-Qt presentation (including explicit cross-API ownership),
+then asynchronous Session integration. Do not enable packaging until those are
+wired. See HANDOFF for current hosted validation state.
+
+## Hosted software-conversion work
+
+The `linux-client-qt-tests` dispatch target builds from the exact pushed branch
+on Ubuntu 26.04 / Qt 6.10.2, reusing the normal verified Client bootstrap/cache.
+It installs no product and uploads only isolated-test reports. Do not resume
+builds on the retained Ubuntu VM for this experiment.
+The job also compiles/links the complete ordinary Client with its existing
+preflight tests because the extracted frame pool is shared with that renderer.
+This regression binary is not packaged or uploaded as the experimental Client.
+Software-only GPU selection is explicit; leak detection remains enabled.
+
+`QtSoftwareVideoConverter` reuses the pooled decoder allocations, uploads the
+planes without another CPU pixel copy, and performs full-range identity or
+BT.709 conversion into an exact RGB10_A2 Vulkan image. The output must match the
+decoded dimensions: Qt's final presenter owns scaling/cropping once. No HDR,
+transfer-function conversion, dithering or silent 8-bit target is accepted.
+Tests cover all RGB code values, channel order, full-range YCbCr gray/color,
+actual encoded fixtures and rejection of format/range/size substitutions.
+This conversion is not yet connected to the Qt scene or a network session.
+Plane uploads explicitly select R8/R16 storage. The converter uses the decoded
+bit depth for full-range normalization/neutral chroma and the same explicit
+BT.709 matrix as the packed hardware path. The ordinary renderer retains its
+existing automatic plane selection. The 19 conversion tests pass normally and
+under ASan/UBSan with leak detection on the hosted software GPU, including odd
+dimensions and inverted strides. The complete ordinary Client also compiles/links
+and passes its standard preflight and runtime-dependency checks. See HANDOFF for
+the exact source and hosted run; none of this establishes live Qt session or
+Intel GPU acceptance.
+
+The probe also inventories Vulkan/OpenGL external-memory and semaphore support
+and compares device/driver identities without logging their UUIDs. A capability
+report is not successful interop. Opaque handles must come from matching
+devices/drivers; DMA-BUF export with an implicit modifier must not be assumed to
+work across drivers. The eventual GPU handoff must explicitly synchronize both
+directions without a per-frame CPU readback or global GPU finish.
+The hosted Mesa software driver exposes external memory but no external
+semaphores. Its framebuffer/conversion results therefore cannot qualify the
+proposed cross-API handoff. Keep that gate distinct from component compilation.
+
+Primary interop references:
+
+- https://registry.khronos.org/OpenGL/extensions/EXT/EXT_external_objects.txt
+- https://registry.khronos.org/OpenGL/extensions/EXT/EXT_external_objects_fd.txt
+- https://github.com/haasn/libplacebo/blob/v7.360.0/src/include/libplacebo/vulkan.h
+
+## Co-installation contract
+
+| Resource | Ordinary Client | Qt experiment |
+| --- | --- | --- |
+| DEB / executable | `plank-client` | `plank-client-qt` |
+| Display name | PLANK Client | PLANK Client Qt |
+| Desktop ID | `la.instinctual.Plank.Client` | `la.instinctual.Plank.Client.Qt` |
+| QSettings application | `PLANK` | `PLANK Client Qt` |
+| Administrator policy | `/etc/plank/client.conf` | `/etc/plank/client-qt.conf` |
+| Private libraries | `/usr/lib/plank` | `/usr/lib/plank-client-qt` |
+| Logs below XDG state home | `plank/logs` | `plank-client-qt/logs` |
+
+The distinct Qt application name also separates bookmarks, Host trust, caches
+and application data. There is no automatic import or shared mutable state.
+Portable-mode markers are ignored by the experiment. Both apps may be installed;
+concurrent live streams using the same physical input devices are not qualified.
+Both packages grant the same Wacom device access using separately owned udev
+files. Removing either package must not remove the other's files or rules.
+
+The `PLANK_CLIENT_VARIANT=qt` scaffolding selects the names and private RPATH;
+default production naming is unchanged. The experimental package may not claim
+`Conflicts`, `Replaces`, `Provides`, production URL handlers or autostart. The
+package collector only accepts it as a branch-labelled Ubuntu candidate.
+`scripts/test/check-client-qt-package.py` audits the built DEB and can compare
+its file list with the actual production DEB before delivery.
+
+All fourteen `tests/packaging/test-client-qt-package.py` checks pass on Ubuntu.
+Its synthetic install/purge test uses a disposable dpkg root, verifies production
+binary/library/configuration preservation and never installs product software on
+the builder. Both compiled application-identity test variants pass and verify
+separate bookmark/trust namespaces. The actual 1.1.043 candidate also passes
+the payload comparison against the published 1.1.039 production DEB.
+
+A source/linkage gate now requires the actual Qt lifecycle, renderer, input and
+Wayland policy owners in the binary. It replaces the earlier blanket prohibition
+once live-runtime integration was complete. Do not distribute a renamed SDL
+Client or the non-networked probe as a completed Qt Client. The hosted
+`linux-client-qt` target runs the complete qualification before building the
+branch-labelled DEB under
+`artifacts/packages/candidates/<version>-ubuntu-qt-session/linux/`.
+No merge, release or remote installation is authorized by this testing request.
+
+## Integrated candidate scope
+
+The Qt session now uses the existing launch/authentication, takeover, media,
+profile selection, reconnect and asynchronous teardown paths. Qt owns display
+enumeration, windows, toolbar, cursor and keyboard/mouse dispatch; even launcher
+decoder probing no longer initializes SDL video. Exact-format qualification
+runs on the real session surface instead. SDL audio remains intentionally reused.
+
+The complete toolbar includes bitrate acknowledgement, shared video/loss/RTT
+telemetry, microphone/camera, stats, pin/drag, fullscreen, minimize and disconnect.
+Keyboard shortcut policy and idle/pointer inhibition use Qt's Wayland connection.
+Raw and normalized tablet readers retain their current recovery implementation.
+Mouse input uses the same render viewport, including cross-output drags.
+Primary-output presentation feedback continues driving the existing audio clock.
+
+Hosted gates include real shader precision checks, P010/packed imports using
+synthetic surfaces, all current exact-profile fixtures, generation/lease tests,
+tablet-lifecycle test doubles, ordinary-Client regression builds and Qt launcher
+smoke tests. They do not simulate a physical GPU or prove a real network session.
+Hardware acceptance remains the next mandatory gate after candidate delivery.
+
+Hosted run 39333288277 built and packaged parent
+`fa9ff666fb1c9292ae19ff4711671be157e55777` / Client
+`16f99202fde2942692d2acc5ac26bc96eda9aad7`. It passes 32 window/input cases
+offscreen, at 100% and forced 125% on GNOME/Wayland, and under ASan/UBSan.
+The new rendered test replaces the tablet cursor texture 24 times, then covers
+clear/recreate, mouse/tablet visibility changes and final destruction. The node
+alone owns and retires its textures; no manual pre-deletion is permitted before
+`setTexture()`. Raw-HID forwarding and Host tablet lifetime are unchanged.
+Startup/released-input/timeout Disconnect uses the same keyboard-layout
+resolver as active-stream shortcuts. Three full launcher cycles pass with
+SDL video deliberately unavailable. The separate DEB is in the normal package
+catalog; it has not been deployed, merged, released or physically accepted.
+The software runner cannot qualify Vulkan/GL external semaphore interop; that
+test remains explicitly skipped rather than converted into a pass.

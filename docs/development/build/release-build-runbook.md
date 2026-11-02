@@ -1,9 +1,10 @@
 # PLANK Release Build Runbook
 
 For disposable GitHub-hosted workers, see [GitHub-hosted builds](github-builds.md).
-Hosted jobs reuse exact-input dependencies, never application objects
-or signing state. Use the dispatch helper's `--clean-bootstrap` third argument
-to bypass both cache restore and save when qualifying a fresh bootstrap.
+Hosted jobs reuse exact-input dependencies; Ubuntu also uses a separately
+validated compiler-output cache. Never reuse build trees, packages or signing
+state. Use the dispatch helper's `--clean-bootstrap` third argument to bypass
+all cache restore and save when qualifying a fresh bootstrap.
 Those workflows establish the same OS, dependency, clean-source and package
 contracts through `scripts/ci/`; they do not deploy or replace hardware gates.
 
@@ -14,8 +15,9 @@ have exact-input dependency caches. Linux Host retains prepared FFmpeg and
 Boost sources, Ubuntu Client retains patched FFmpeg and SDL, and macOS Client retains
 prepared libraries and Qt. The other three products also retain the pinned
 Rust toolchain and downloaded Cargo inputs; macOS Host uses native Apple media
-frameworks, so has no separate FFmpeg/Qt dependency build to cache. Application
-and transport objects, tests, packaging and signing always run fresh. See
+frameworks, so has no separate FFmpeg/Qt dependency build to cache. Ubuntu may
+reuse compiler results, but tests, linking and packaging always run afresh.
+The other products still compile their application/transport objects fresh. See
 `github-builds.md` for cache boundaries and cold/warm qualification status.
 
 This is the canonical, repeatable procedure for producing PLANK host
@@ -108,6 +110,20 @@ home-directory exemption. They are not operator metadata; do not rebuild Qt or
 edit its runtime strings solely to remove public upstream diagnostics.
 
 ## Classify failures correctly
+
+The macOS Host requires FileVault off for access after restart. A native Installer
+Requirements page runs a bounded read-only check and presents the reason and
+Settings location before installation begins. A failed check is reported
+separately. Continue requires a confirmed off result; Check Again repeats the
+check. The preinstall guard remains for CLI installs and changed state,
+before any service shutdown or state initialization. Earlier packages checked
+only in preinstall, so Installer could show a generic failure; inspect Installer
+Log for the FileVault message rather than treating it as a signing/build defect.
+Do not disable encryption automatically to work around this requirement.
+The 1.2.06 candidate's deprecated external-JavaScript hook was replaced by this
+temporary signed Installer pane. It is never installed as a service or helper.
+Verify actual Installer loading as described in the macOS build runbook; a
+bundle-load fixture alone does not cover Apple's Installer extraction path.
 
 macOS Finder's prohibited icon / "damaged or incomplete" can be inaccessible
 bundle metadata, not a corrupt binary or rejected notarization. Host 1.0.103
@@ -306,9 +322,69 @@ assumed the bundle advertises `HEAD`; use the exact ref printed by
 
 ## Client DEB — linux-client-builder only
 
+From 1.2.00, Qt is the ordinary Ubuntu Client. The operator requires GitHub-hosted
+builders, not the retained VM. From the clean, pushed source named in
+`HANDOFF.md`, run `bash scripts/ci/dispatch.sh linux-client false`.
+The ordinary job runs component/sanitizer/compositor/launcher gates, compiles
+one complete Client, and packages that exact `plank-client` binary.
+No production package is installed on a builder; the upgrade fixture uses
+synthetic payloads in a disposable dpkg root. The finished-package identity
+gate rejects the retired separate Qt namespace. Existing ordinary Client
+settings, trust and policy are retained. Do not copy the experimental profile
+over them; quit/remove the old `plank-client-qt` test package separately.
+
+Ordinary hosted builds reuse exact prepared dependencies and a separate bounded
+sccache store for C/C++/Rust results. They still configure clean build trees,
+run every qualification gate, link and package afresh. The compiler-cache report
+is in `qt-session-reports/compiler-cache.{txt,json}`. Use `--clean-bootstrap`
+only when deliberately qualifying an uncached build; it bypasses both caches.
+See `github-builds.md` for invalidation inputs and trusted-save boundaries.
+
+The job is named `linux-client`. Inspect the failed step and its evidence before describing a
+failure as a live Qt runtime defect. Two .053 failures established these checks:
+
+- `wacom.log` and `wacom-asan.log` cover the real Linux raw-HID adapter with
+  link-wrapped device I/O. Fortified builds may call `__read_chk`/`__poll_chk`
+  instead of `read`/`poll`; preserve both wrapper paths and their bounds checks.
+  The runner prints the object's unresolved I/O symbols for diagnosis. Do not
+  disable fortification, sanitizers or assertions to bypass a fixture failure.
+- Renaming a production input function also requires updating the package
+  preflight and its positive/negative fixtures in `tests/ci/test_qt_session.py`.
+  Run `python3 -m unittest discover -s tests/ci -v` before dispatch. A stale
+  function-name guard is a packaging failure, not evidence that the preceding
+  Wacom tests failed; correct the guard rather than removing it.
+
+Normal and sanitized Wacom coverage includes stable USB interface ordering,
+complete descriptor inventory, pen evdev readiness, I/O loss and reconnects.
+These tests do not prove that Flame retains its tablet registration after an
+actual USB rebind; that remains a separate hardware acceptance step.
+
+The Ubuntu Client uses direct PipeWire playback. Its hosted job installs
+PipeWire/WirePlumber for a private null-sink test daemon, not on the retained VM
+or any user's desktop. It runs PCM/clock/drift tests and real stream lifecycle
+tests normally and under sanitizers. The Ubuntu build must contain
+`app/release/pipewire.o`, not
+`app/release/sdlaud.o`. Preserve the
+shared private SDL dependency for the remaining non-playback uses. Neither
+daemon tests nor simulated clock drift qualify audible playback/A/V sync:
+require the operator's real-output listening test and long soak afterward.
+
+Qt candidate .050 disables Qt Wayland's missing-parent-frame-callback exposure
+heuristic within that process. A fully covered raster shell can receive no
+callbacks while its visible native video child still does; Qt 6.10.2 otherwise
+marks both inexposed. Failure signature: decoded test frame delivered, no
+synchronization/draw/swap, and `delivery_exposed=0`. The hosted standalone
+presenter lifecycle probe reproduces this on Intel hardware independently of
+audio or Host connectivity. Preserve normal hide/minimize behavior and the
+two-second exact-format gate; never mask this by increasing the deadline or
+accepting an RGB8 intermediate. An explicit
+`QT_WAYLAND_FRAME_CALLBACK_TIMEOUT` environment value is diagnostic-only and
+overrides the Qt Client's default zero.
+
 The Host/Client base version is packaging/VERSION. Increment it for new package
-bytes. Starting with **1.1.001**, retain a three-digit, zero-padded patch component
-(1.1.002, 1.1.003, and so on) in the product version and package filenames.
+bytes. Starting with **1.2.00**, retain a two-digit, zero-padded patch component
+(1.2.01, 1.2.02, and so on) in the product version and package filenames.
+Earlier 1.1.x packages used three digits; their artifacts remain unchanged.
 This is the operator-facing product numbering convention, not strict SemVer;
 do not parse the padded component as octal or strip its leading zeroes.
 Internal dependency/crate versions and protocol negotiation are separate.
@@ -377,28 +453,15 @@ CARGO_TARGET_DIR="$cargo_preflight" \
     --manifest-path "$root_worktree/protocol/plank-transport/Cargo.toml"
 ```
 
-The SDL3 candidate uses the prepared, patched private SDL3 and the system's
-SDL3_ttf. It links directly to `libSDL3.so.0` and `libSDL3_ttf.so.0`; do not
-introduce `sdl2-compat`. Audio uses SDL3's PipeWire driver and device-stream
-API rather than libsoundio or a PulseAudio compatibility renderer. Set
-`PKG_CONFIG_PATH="$PLANK_CLIENT_SDL_WORK/install/lib/pkgconfig"` for standalone
-builder probes; on an installed target, load `/usr/lib/plank/libSDL3.so.0` rather
-than accidentally qualifying the unpatched system SDL.
+Ubuntu session playback is direct PipeWire, not SDL's audio renderer or a
+PulseAudio compatibility path. The hosted `linux-client` job exercises the
+real PipeWire renderer against an isolated null sink, along with clock/drift
+and sanitizer fixtures. Live validation must still use the actual output
+device, audible playback and an extended A/V synchronization soak.
 
-After installing an SDL3 candidate on the Client hardware-test target, validate
-the same native output API without requiring a Host session:
-
-```bash
-root_worktree=${PLANK_ROOT_WORKTREE:?set the exact installed-candidate root worktree}
-g++ -std=c++17 -O2 -o /tmp/plank-sdl3-audio-probe \
-  "$root_worktree/probes/client-sdl3-audio-probe.cpp" \
-  $(pkg-config --cflags --libs sdl3)
-LD_LIBRARY_PATH=/usr/lib/plank /tmp/plank-sdl3-audio-probe
-```
-
-The probe must print `audio_driver=pipewire` and a real output device. This is
-a focused transport gate; the real session still needs audible output and A/V
-synchronization validation.
+Retain the prepared, patched SDL3 dependency for remaining non-playback
+consumers and SDL3_ttf. Do not restore libsoundio, `sdl2-compat`, or qualify
+the Ubuntu playback path with the retired SDL audio probe.
 
 For a non-interactive diagnostic screenshot of the Client hardware-test target
 under GNOME Wayland, do not retry `gnome-screenshot` over SSH: GNOME rejects
@@ -666,6 +729,16 @@ decode/import and live playback acceptance; see
 `docs/architecture/vaapi-bt709-presentation.md`.
 
 ## Host RPM — linux-host-builder only
+
+Host candidates require CUDA 13.2 Update 2 (NVCC 13.2.86), with the exact RPM
+component set in `scripts/build/host-cuda.sh`. Run its verifier before costly
+work; packaging repeats it. The operator reports 1.1.039 working on the new
+595.104.02 driver baseline, but the rebuilt CUDA candidate still requires
+hardware color/scaling/capture/encode qualification. Preserve the full CUDA
+architecture list and NVENC API 13.0.19 headers. No encoder settings change.
+The dependency cache already fingerprints NVCC and installed RPM versions, so
+old Host FFmpeg cache entries cannot be reused with the new toolchain; Rust,
+Cargo and Boost cache groups are independent.
 
 Host packaging selects `PLANK_TRANSPORT_CARGO_FEATURES=quinn-telemetry` by
 default. The application datagram pacer and platform-specific fast-send switches

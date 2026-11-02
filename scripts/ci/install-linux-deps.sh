@@ -5,6 +5,7 @@ source /etc/os-release
 case "$role:$ID:$VERSION_ID" in
   host:rocky:9.7)
     test "$(id -u)" = 0
+    source "$(dirname -- "${BASH_SOURCE[0]}")/../build/host-cuda.sh"
     # Freeze the Rocky minor release rather than following the moving 9 mirror.
     for pair in baseos:BaseOS appstream:AppStream crb:CRB extras:extras; do
       repo=${pair%%:*}; directory=${pair#*:}
@@ -23,14 +24,14 @@ case "$role:$ID:$VERSION_ID" in
       autoconf automake clang cmake curl-minimal git libtool make nasm ninja-build patch \
       pkgconf-pkg-config ripgrep rpm-build cpio wget xz tar gzip python3 python3-jinja2 \
       gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
-      cuda-compiler-13-0 cuda-cudart-devel-13-0 cuda-driver-devel-13-0 \
-      cuda-nvml-devel-13-0 cuda-nvrtc-devel-13-0 \
+      "${PLANK_HOST_CUDA_PACKAGES[@]}" \
       glib2-devel libcap-devel libdrm-devel libevdev-devel libva-devel \
       libX11-devel libxcb-devel libXcomposite-devel libXcursor-devel libXfixes-devel \
       libXi-devel libXinerama-devel libXrandr-devel libXtst-devel libxkbcommon-devel \
       mesa-libgbm-devel mesa-libGL-devel numactl-devel openssl-devel opus-devel \
       krb5-devel pam-devel pipewire-devel pulseaudio-libs-devel python3-devel systemd-devel \
       vulkan-loader-devel wayland-devel wayland-protocols-devel
+    plank_verify_host_cuda
     /usr/local/cuda/bin/nvcc --version
     python3 -c 'import jinja2' # Fail before the long FFmpeg bootstrap.
     rpm -qa | sort
@@ -39,10 +40,10 @@ case "$role:$ID:$VERSION_ID" in
     sudo apt-get update
     sudo apt-get install -y --no-install-recommends \
       build-essential cmake curl git make nasm ninja-build openssl patch \
-      pkg-config python3 python3-venv ripgrep xz-utils dpkg-dev \
-      qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-svg-plugins qt6-wayland \
+      pkg-config python3 python3-venv ripgrep xz-utils dpkg-dev sccache iputils-ping \
+      qt6-base-dev qt6-base-private-dev qt6-declarative-dev qt6-svg-dev qt6-svg-plugins qt6-wayland qt6-wayland-dev \
       libsdl3-dev libsdl3-ttf-dev libpipewire-0.3-dev libdecor-0-dev libdrm-dev libinput-dev \
-      libasound2-dev libpulse-dev libegl-dev libgles-dev libxkbcommon-dev \
+      libasound2-dev libpulse-dev libegl-dev libgles-dev libxkbcommon-dev libfontconfig1-dev \
       libxcursor-dev libxrandr-dev libxfixes-dev libxi-dev wayland-protocols \
       libopus-dev libplacebo-dev libssl-dev libudev-dev libva-dev libvdpau-dev \
       libwayland-dev libx11-dev zlib1g-dev

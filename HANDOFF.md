@@ -4,13 +4,1977 @@ Read `AGENTS.md` and the relevant build runbook first. Machine-specific access,
 credentials, captures and operational evidence belong in the external private
 notes, never in Git.
 
-## Current baseline — persistent tablet and Client recovery integrated
+## Merged — macOS Qt session; mainline 1.2.13 built
+
+The operator authorized `macos-qt-session`, then explicitly approved merging the
+current integration and building from main. Both canonical checkouts are on
+main. Package source is root `34ea2629494470eba18ad6cf277c3aa791b9f06c`, Client
+`7edb5c3b1d50765afeca2d93c9dca6293d54606c`. The Client differs from the previously
+tested `365506fd8550b410eb1fa66da7ee439c3713ef6e` only in its README. Both
+integrations were clean fast-forwards from root `21a253a` / Client `2ed1c5f`;
+Host, protocol and dependency pins are unchanged. Later notes/runbook commits
+do not change the packaged source. See [the plan](docs/development/plans/macos-qt-session.plan).
+
+Main now selects the shared Qt scene/controls and a worker-driven native Metal
+window on Mac, with retained VideoToolbox imports, Mac key/Wacom/clipboard
+adapters and asynchronous rendering teardown. Mac playback remains
+SDL/CoreAudio; PipeWire is Linux-only. Ubuntu includes the shared Qt window/frame
+refactoring, so do not call all source changes Mac-only. Its Linux decoding,
+GPU presentation and PipeWire paths remain in use without intended behavior changes.
+
+Both GitHub-hosted mainline builds passed using verified dependency caches:
+
+- [Signed Mac run 41268713184](https://github.com/instinctual/plank/actions/runs/41268713184),
+  artifact `13067739407`: full Client, Qt controls/key mapping, production
+  Metal/CVPixelBuffer and software-plane rendering, native Cocoa window lifecycle,
+  existing keyboard/Quit/clipboard/audio/permission checks, Developer ID signing,
+  notarization, stapling, Gatekeeper and package/deployment-target checks.
+- [Ubuntu run 41268712777](https://github.com/instinctual/plank/actions/runs/41268712777),
+  package artifact `13068786795`, qualification artifact `13068911318`: full
+  Client/DEB build, Qt/PipeWire/Wacom, sanitizer, compositor, two-monitor,
+  launcher and package-upgrade checks. Isolated daemon/compositor cases pass
+  in their dedicated suites. The hosted GL driver lacks external semaphores;
+  the live GPU-handoff gate remains unqualified.
+
+Collected and checksum-verified under `artifacts/packages/releases/1.2.13/`:
+
+- `macos/plank-client_1.2.13_arm64.pkg`, 73,047,427 bytes, SHA-256
+  `97c29bb82360156d741ff6e1d013b51e72c9a4ec49154f2b554abcb33bdde03d`.
+  One Apple Silicon package, macOS15 minimum, built with SDK27.
+- `linux/plank-client_1.2.13_amd64.deb`, 17,202,264 bytes, SHA-256
+  `6d3db71e74dcd9ce9611c37d32f4bee5e50cd1ebff73eaac31bc40b08263ef4c`.
+  Ordinary Ubuntu26.04 Client identity; no separate Qt app or settings namespace.
+
+Original manifests, run metadata, complete logs, qualification reports and
+captures are in `artifacts/qualification/main-1.2.13/`. Package gates passed;
+functional acceptance remains `not-recorded`. This catalog location denotes a
+mainline build, not a published GitHub release. No package has been installed
+for this task and no Host update is required. Download staging was removed.
+
+Mac Metal fixtures preserve all 1,024 ten-bit identity levels at 4K/5K, 8-bit
+identity and full-range BT.709 4:2:0; crop/letterbox and 2x/16x minification pass.
+These are constructed decoder surfaces, not a real hardware-decoding session.
+Native command-buffer access is captured during Qt's afterRendering callback,
+before Qt clears that resource and commits submission. No private Qt API or
+dependency patch is required. The fullscreen round-trip fixture waits for native
+completion and requires the prior resized normal window; the shell restores its
+saved frame after Cocoa did-exit. The mainline toolbar capture was inspected:
+labels, values, pin/drag/window icons and slider fit the shared layout.
+
+The previous `1.2.13-macos-qt-session` packages and their exact provenance remain
+under `artifacts/packages/candidates/1.2.13-macos-qt-session/`; reports are in
+`artifacts/qualification/macos-qt-session-1.2.13/`. Successful candidate runs were
+Mac `41266907927` and Ubuntu `41266230819`. Earlier fullscreen failures
+`41266228677` and `41266525052` were fixed without weakening the size assertion.
+
+Next: install the mainline Mac package and follow the plan's first-session
+checklist: exact hardware/software decoding, 4K/5K, Retina/Spaces, Wacom, audio
+sync, microphone, clipboard and network recovery against both Host platforms.
+The identical package needs session acceptance on macOS15 and macOS27 before
+release. The old Mac pointer-confinement shortcut is not implemented; resolve it
+before claiming full parity. Mac webcam capture also remains unimplemented, as
+before this port; the shared toolbar does not add a capture backend. Preserve
+the comparison frontend until the relevant acceptance gates are resolved.
+Do not interrupt the operator's active Terminal or other Mac sessions. No
+hardware machine has been accessed for this task.
+
+## Merged — Client ping details
+
+The operator approved making the Internet indicator open a compact summary of
+every configured IPv4 ping target. Root and Client branch `client-ping-details`
+start from main `5d8aaa8` / Client `94f36ce0`; candidate version is
+**1.2.12-client-ping-details**. Both GitHub-hosted packages were built from root
+`ecc3aa2dd5edf42c745b78d2575f5f54b677bf1d` and Client
+`2ed1c5f66e90799659002faed6d8f0961c0d4c6f`. The unchanged Client dependencies are
+common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90` and qmdnsengine
+`920c097ffa742e2968290f15d4dde6693aec02e5`; Linux Host and Kymux pins remain
+`65dc0f1be60fe78d0457364f83813118c70bc8a8` and
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+
+Opening/refreshing checks all targets concurrently using the same fixed OS ping
+utility, validation and bounded asynchronous process mechanism as the background
+check. Rows retain configured order, distinguish timeout/no-route from unavailable
+utility/permissions, and show actual ICMP RTT in whole milliseconds (`<1 ms` for
+faster replies). No subprocess elapsed time is displayed as RTT. The dialog has
+colored statuses, local completion time, keyboard access, Refresh and Close.
+Close/reopen cancels and reaps old children before starting a new round. The
+background first-success check remains independent. No Host, transport,
+configuration schema or dependency change is required.
+
+Successful builds and checksum-verified packages under
+`artifacts/packages/candidates/1.2.12-client-ping-details/`:
+
+- [Ubuntu Client run 41259458222](https://github.com/instinctual/plank/actions/runs/41259458222),
+  artifact `13064259415`: `linux/plank-client_1.2.12-client-ping-details_amd64.deb`,
+  17,198,800 bytes; SHA-256
+  `b1e7d65d4c916f352a9e34b6fa5691156458cab234abd2e86def4d786fcab453`.
+- [macOS Client run 41259455738](https://github.com/instinctual/plank/actions/runs/41259455738),
+  artifact `13064651929`: `macos/plank-client_1.2.12-client-ping-details_arm64.pkg`,
+  72,930,416 bytes; SHA-256
+  `8250b681ec48948a1caca78b47a1cf3a08be48812574fdff40eb5926da9f9d01`.
+
+Both Clients passed all 45 connectivity cases, including 16 real IPv4 loopback
+summary checks, concurrent targets, timing formats, startup errors, deadlines,
+cancellation/reopening, disabled/invalid policy, mouse/keyboard interaction and
+three/eight-target QML layouts. Both platforms' screenshots were inspected: all
+configured rows, columns, timestamps and buttons fit the tested layout. Early
+attempts corrected a test's lookup of visual Repeater children and a timing
+parser that unnecessarily required numeric standard deviation; the latter now
+reads only average RTT, with regression coverage for macOS's NaN deviation.
+No test or package gate was bypassed.
+
+Ubuntu also passed its existing Qt, PipeWire, sanitizer, compositor, launcher and
+package/upgrade gates. The Mac installer passed Developer ID signing,
+notarization, stapling and Gatekeeper; its target remains macOS15+ with SDK27.
+Original manifests, run metadata, logs, screenshots and Ubuntu qualification
+artifact `13064488859` are retained under
+`artifacts/qualification/client-ping-details-1.2.12/`. The local collector verified
+original checksums/provenance and removed download staging.
+
+The operator accepted the candidate and authorized commit, push and merge.
+Client main now includes `2ed1c5f66e90799659002faed6d8f0961c0d4c6f`; root main
+includes candidate tip `4854afd` and its exact Client pin. Both integrations are
+fast-forwards, preserving the tested code and history without conflict edits.
+The canonical root and Client checkouts are back on main. This acceptance covers
+the reported feature test, not unreported qualification across every supported
+macOS version. No new package build, installation or release was performed for
+the merge. Candidate artifacts retain their original names and provenance; a
+future mainline package must be rebuilt rather than relabeled. Later handoff
+commits do not change the tested source.
+
+## Built — mainline 1.2.11 Host and Clients
+
+The operator requested signed mainline macOS Host packaging, then a larger,
+colored Internet indicator in the Client toolbar. All three packages were built
+on GitHub-hosted Actions from main
+`e9fcb5f834178559f1f880dbbba96662fb8c664d`, with Client
+`94f36ce0d6f0fda663b772dbf3d0f12ccab5ce92`. The indicator uses 12-point semibold
+text, a matching larger dot,
+green Reachable, red No response, amber Unavailable and gray Checking. It retains
+the descriptive text, tooltip and existing IPv4 probe behavior. There is no
+streaming, protocol, Linux Host or dependency change in this presentation update.
+
+Successful builds and checksum-verified packages under
+`artifacts/packages/releases/1.2.11/`:
+
+- [macOS Host run 41251765345](https://github.com/instinctual/plank/actions/runs/41251765345),
+  artifact `13062310013`: `macos/plank-host_1.2.11_arm64.pkg`, 7,034,609 bytes;
+  SHA-256 `38c6158e997fffb340e72e6069c9d4617739a1146c16eef33cfca99a394f5ce1`.
+- [macOS Client run 41251777336](https://github.com/instinctual/plank/actions/runs/41251777336),
+  artifact `13061626916`: `macos/plank-client_1.2.11_arm64.pkg`, 72,914,352 bytes;
+  SHA-256 `ad70480fc4c2923ec0763d015da79904642d7756e9e30fe476f3cdc72a15baca`.
+- [Ubuntu Client run 41251771330](https://github.com/instinctual/plank/actions/runs/41251771330),
+  artifact `13062136633`: `linux/plank-client_1.2.11_amd64.deb`, 17,197,332 bytes;
+  SHA-256 `1ea7765660050853cc35c9849473c9325ad81dafae69b8ecdd68db82a08609ce`.
+
+Both Mac installers passed Developer ID signing, notarization, stapling,
+Gatekeeper and package checks. SDK27 targets remain Host26.7 and Client15.0.
+The Host repeated all nine readiness scenarios (289 assertions), 247 layout
+assertions, Installer preflight and existing regression gates. Both Clients
+passed 33 connectivity cases, including the actual IPv4 loopback utility and
+QML layout checks. The larger green/red indicators were visually inspected in
+both platforms' 720-pixel-wide fixture captures. That fixture uses a static old
+version label; package/visible application version gates passed for 1.2.11.
+Ubuntu also passed its existing Qt, PipeWire, sanitizer, compositor, launcher
+and package/upgrade gates. No required checks were bypassed.
+
+Original manifests, run metadata, logs, focused results, indicator captures and
+Ubuntu qualification artifact `13062067313` are retained under
+`artifacts/qualification/main-1.2.11/`. Collection preserved original package
+bytes/provenance; final catalog checksums passed and download staging was removed.
+No build remains active. No package was installed and no GitHub release was
+published. Installed Client UI/network and Host headless/physical acceptance,
+including the identical packages on their supported Mac OS versions, remain
+pending. Main is current; subsequent documentation commits do not change the
+built source.
+
+## Merged — macOS display readiness and headless regressions
+
+The operator approved integrating PR33's two newer commits on October 31,
+including explicit coverage for headless Macs with no physical monitors or
+dummy plugs. `macos-display-readiness` started from main `7ad4f39` and integrates
+PR head `712a4759783e5d8b9b637e48cf973b239bca8063`, preserving author history.
+Package version is **1.2.11**. The readiness integration itself changed no Client,
+Linux Host or dependency pins; the Client presentation follow-up is noted above.
+
+The reviewed `cf31832` correction adopts a newly created output's UUID inside
+existing bounded preparation, after online visibility and before selecting modes
+or mirroring. It introduces no fixed delay; readiness completes immediately when
+satisfied. Cancellation and timeout retain the worker-retirement requirement
+for an unidentified output. `712a475` corrects earlier physical-trial reporting:
+Chris's default-off macOS26.7 trial worked, but enabled mirroring did not connect.
+The correction was not part of the 1.2.08/1.2.09 signed candidates.
+
+Integration retains `mirror_host_displays` / `mirrorHostDisplays`, resolves the
+new test's old property name and names it `macos-display-readiness.m`. Its nine
+synthetic scenarios cover physical delayed readiness/reconnect/replaced identity,
+cancellation, timeout and default mode; plus headless default/reconnect,
+headless mirroring/reconnect, LoginWindow, headless timeout and cancellation.
+Headless fixtures begin with zero displays, introduce only PLANK's owned output,
+and require reconnect to reuse it. Default-off and LoginWindow perform no UUID
+adoption or mirror transactions. The fixture substitutes Quartz, virtual-display
+classes and power calls; it cannot modify a real desktop.
+
+Review verified Chris's latest unsigned hosted run
+[41241150325](https://github.com/cnoellert/plank/actions/runs/41241150325), including
+150 readiness and 247 layout assertions. That evidence belongs to his pre-rename
+branch, not this integration.
+
+Combined source `b6a9839ce79ae157a4c221f100b74a9a664f8d0b` passed
+[unsigned hosted macOS Host build 41250675727](https://github.com/instinctual/plank/actions/runs/41250675727)
+on SDK27 with minimum26.7. All nine readiness scenarios passed (289 assertions),
+alongside 247 layout assertions, existing Host/transport regressions, 31 native
+Installer preflight assertions and final app permission checks. The policy job
+passed all 114 CI-policy and 16 package-catalog tests. Two portable Installer
+preflight checks and shell/whitespace checks also passed locally. Production
+readiness code matches the reviewed PR implementation with only our existing
+names retained; Client, Linux Host, protocol and dependency trees are unchanged.
+Original run metadata, full Host log and focused results are retained in
+`artifacts/qualification/macos-display-readiness-1.2.11/`.
+
+The tested implementation is integrated into main; PR33's current head is
+included in its history. Subsequent documentation updates do not change the
+tested source. Exact-source signing approvals were not broadened. No build
+remains active. That original run was an unsigned compile/regression gate;
+the signed mainline follow-up is recorded above. Installed headless/physical
+and macOS26.7/27 acceptance remain pending.
+No Mac session was interrupted and no package was installed or released.
+
+## Merged — Client connectivity and macOS display mirroring
+
+On October 31 the operator authorized integrating `client-connectivity` and
+`macos-display-mirroring` into main and retiring `macos-session-displays`.
+Client main is `23cc988154ea62688c83aeac7ff15f21a2962d90`. Parent main combines
+connectivity tip `7451e659a6be9988b85710c75bb79b6ad70b1a8c` with mirroring tip
+`39e7ca900e8b322cd1d996c5196228204f5c7819`; package version stays **1.2.10**.
+Only the version and handoff notes needed merge conflict resolution. Production
+source changes are the previously built candidates described below. No combined
+mainline package was built, installed or published; published 1.2.05 is unchanged.
+
+**At that merge PR33 was incomplete.** Its original reviewed commit `696815c` was
+included, but GitHub reported head `712a4759783e5d8b9b637e48cf973b239bca8063` with two
+later commits: `cf31832` (virtual-display identity readiness) and `712a475`
+(correction of unaccepted physical-trial status). The section above now records
+their completed review and integration.
+They are not part of either tested mirroring candidate. Exact-source signing
+approvals remain unchanged.
+
+Mirroring defaults to false; installed physical-display and headless regression
+gates remain pending. The Client indicator is IPv4-only and informational;
+installed policy-upgrade/UI/network checks remain pending. No live sessions
+were interrupted. The abandoned independent-display probes are not merged;
+findings remain in `docs/development/investigations/macos-display-mirroring.md`.
+Unfinished `native-builds` and unrelated branches remain separate.
+
+Merge validation passed: 114 CI-policy tests, 16 package-catalog tests, six
+Client policy-upgrade tests, two macOS Installer preflight tests, changed Host
+shell syntax checks and whitespace checks. Source comparisons confirmed the
+merged Host runtime and Client source/packaging match their respective tested
+candidates. Native macOS and installed-session tests were not rerun for this merge.
+
+## Client connectivity — candidate evidence and pending acceptance
+
+The **1.2.10-client-connectivity** Ubuntu and signed macOS Client candidates
+were built from root `a8912517683e7a2abb8b1909cac69da751c74529` and Client
+`23cc988154ea62688c83aeac7ff15f21a2962d90`. Both branches are now integrated
+into their respective `main` branches. The following evidence describes those
+original candidate packages, not a combined mainline rebuild.
+
+The operator approved an informational main-window Internet indicator, with
+**IPv4 only**: ordered ICMP probes of configured public resolver addresses,
+stopping at the first reply, one second per target and a 15-second repeat
+interval. Administrator policy controls enabled/targets/interval/timeout in
+`[network]` of `/etc/plank/client.conf`. Numeric IPv6 and DNS entries are rejected.
+The monitor cannot change Host status, block login or influence recovery.
+No response is not proof of an Internet outage; unavailable utility/configuration
+is reported separately. Checks use fixed OS ping executables without a shell,
+bounded asynchronous processes and native network notifications when available.
+See `docs/user/client-internet-connectivity.md` for operation and limitations.
+
+The operator also approved adding missing connectivity keys/comments during
+both Client upgrades while preserving every existing value. Ubuntu's root
+package helper and the existing native macOS configurator make bounded, atomic,
+idempotent additions. Existing administrator policy, bookmarks and Host trust
+are retained. Ubuntu packages include `iputils-ping`, Python3, the installer-only
+`/usr/libexec/plank-client-update-policy`, and the complete policy example under
+`/usr/share/doc/plank-client/`. The finished-DEB gate verifies helper/template
+contents. No application daemon or autostart is added. The macOS streaming move
+to Qt/Metal was explicitly deferred to another branch; its SDL/Metal session
+frontend is unchanged.
+
+GitHub-hosted builds passed:
+
+- [Ubuntu Client 41244211684](https://github.com/instinctual/plank/actions/runs/41244211684):
+  33 connectivity cases, 6 policy-upgrade cases, 15 package/upgrade fixtures,
+  and the existing Qt/PipeWire, Wacom, sanitizer, compositor, launcher and final
+  package gates. Actual IPv4 loopback ping ran as the ordinary runner account.
+- [Signed macOS Client 41244214246](https://github.com/instinctual/plank/actions/runs/41244214246):
+  33 connectivity cases, native configuration/installer regressions and existing
+  Client component gates; Developer ID signing, notarization, stapling and
+  Gatekeeper passed. SDK27, deployment target15.0. Actual IPv4 loopback ping passed.
+- Both runs passed 114 CI policy tests. Indicator screenshots from the QML
+  fixture were inspected in reachable/no-response states; these are not live
+  installed-session screenshots. Dependency caches were reused. Early attempts
+  caught a Qt integer-overload error and new fixture/build-wiring errors, all
+  corrected before these successful runs; no required checks were bypassed.
+
+Both original packages are checksum-verified in
+`artifacts/packages/candidates/1.2.10-client-connectivity/`:
+
+- `linux/plank-client_1.2.10-client-connectivity_amd64.deb` — 17,199,108 bytes;
+  SHA-256 `7dab5e521cd5a9fbb53a0c5a5adb9fbe472d2d70b82da8bab3360104a495c127`;
+  GitHub artifact `13058966713`.
+- `macos/plank-client_1.2.10-client-connectivity_arm64.pkg` — 72,912,728 bytes;
+  SHA-256 `519f61c7be9633f634caad2cb335098037ffc52a989b879065c88fa40d33ef8e`;
+  GitHub artifact `13058556969`.
+Original manifests, logs, screenshots and Ubuntu qualification reports are under
+`artifacts/qualification/client-connectivity-1.2.10/`. Downloaded package copies
+were moved through the catalog collector, preserving original build provenance.
+The exact `client-connectivity` branch is allowed in `macos-signing`; no reviewer
+or wait timer was added. No build remains active.
+
+Unchanged dependency provenance: Client common-C
+`437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`, qmdnsengine
+`920c097ffa742e2968290f15d4dde6693aec02e5`, Linux Host
+`65dc0f1be60fe78d0457364f83813118c70bc8a8`, Kymux
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`. Other recursive pins remain those
+recorded in the baseline provenance below and in the retained Ubuntu source report.
+
+The candidate download links have been delivered to the operator. Integration
+was authorized on October 31; installed test results are still pending. Resume
+on `main`. The original candidate artifacts retain their build-source identities.
+
+Next: manually install the exact Client candidate, confirm customized policy
+retains its values and gains missing comments/keys, then verify the indicator
+through a real network interruption/recovery. Confirm a normal session still
+connects independently of the ping result. Installed UI/network and macOS15/27
+session acceptance remain pending; hosted compilation does not establish them.
+No live session was interrupted or test machine accessed for this work.
+
+## macOS display mirroring — candidate evidence and pending acceptance
+
+The operator chose PR33's simpler mirroring approach over the separate
+independent-virtual-display investigation. `macos-display-mirroring` combines
+main `d9e0ca5339f205c1f06bf6c811bb4b6eebb8812d` with reviewed PR33 head
+`696815c3bc33598f4401a21d95749c369d0f92a6`, preserving the author's history.
+The configuration and internal names now say `mirror_host_displays`,
+`MirrorHostDisplays` and `mirrorHostDisplays`. The setting remains under
+`[general]`, defaults to false, and uses the same session/Quartz lifecycle.
+Physical screens show the PLANK workspace; they are not disabled. The existing
+single virtual workspace and capture path remain. The Host candidate itself
+changed no Client, Linux Host, transport or dependency pins. Its historical
+package version is **1.2.09**; combined main is **1.2.10**.
+
+This branch is separate from Chris's approved `macos-host-test` source and its
+signed 1.2.08 artifact below. Those approvals and the exact-source registry are
+unchanged. The pre-release `single_display` key is not retained as an alias;
+testers who enabled it must replace it with `mirror_host_displays`. Released
+Host configurations without the new key keep their existing behavior.
+
+Portable preparation passed 114 CI-policy tests, 16 package-catalog tests,
+two Installer preflight tests, shell syntax and whitespace checks. Reviewing
+the Host source against the exact PR head confirms only configuration/internal
+renaming, comments and the diagnostic text changed beyond that implementation.
+
+Candidate source `4dbe000d71229d5d8b97ce9ec92e0f1014502386` passed
+[signed hosted build 41235998822](https://github.com/instinctual/plank/actions/runs/41235998822)
+on macOS 27/SDK 27 with minimum 26.7. The native parser and configuration fixtures,
+247 synthetic Quartz layout assertions, actual TLS/QUIC display-release tests
+for disconnect/failed/60-second-abandoned preparation, and 767 session assertions
+across 24 scenarios passed. Ordinary Host/input/audio regressions, 31 native
+Installer preflight assertions, package checks, Developer ID signing,
+notarization, stapling, Gatekeeper and signing-material cleanup passed. Both
+Rust/Cargo dependency caches were reused; the run took about ten minutes.
+The exact branch alone was added to `macos-signing`; Chris's approved test
+branch, request registry and repository access remain unchanged.
+
+Original signed PKG, 7,030,516 bytes:
+`artifacts/packages/candidates/1.2.09-macos-display-mirroring-macos26.7/macos/plank-host_1.2.09-macos-display-mirroring-macos26.7_arm64.pkg`.
+SHA-256: `f4d90ba15cd936c9a2cca3cf3cf40cf0936584fcbd3226d9e0d524a4882d954a`.
+The downloaded original and local catalog manifests/checksums match.
+[GitHub artifact 13056375888](https://github.com/instinctual/plank/actions/runs/41235998822/artifacts/13056375888)
+contains the same installer. Build logs, original manifest and run metadata are
+retained under `artifacts/qualification/macos-display-mirroring-1.2.09/`;
+download staging is removed. No build remains active. The operator authorized
+integration into main on October 31. No new package, release or installation
+was performed for the merge. Terminal and the existing Mac session were untouched.
+
+Next: installed physical display mirroring, restoration on disconnect/crash,
+hotplug, login/logout and takeover remain qualification gates. Also check
+headless/default-off session behavior because preparation/release code is shared.
+Chris owns 26.7 validation; ordinary 27 qualification also remains required.
+The authorized merge does not convert hosted fixtures into installed acceptance.
+
+The operator retired the independent-display approach and authorized deleting
+local and remote `macos-session-displays` (former tip
+`7bfbb1665a4e8318780b825a4b2e827ebf4c03c4`). Its findings are preserved in the
+investigation document below; its temporary probes are not product code. The
+currently authorized Mac has no physical display. Keep Terminal and the existing
+user/Host session alive;
+do not log out, reboot, terminate WindowServer or restart the Host for testing.
+Private deployment notes record the authorization and restored machine state.
+See `docs/development/investigations/macos-display-mirroring.md` for the decision
+and the bounds of the earlier evidence.
+
+## Discussed — protecting main, not yet enabled
+
+GitHub was checked on October 31: `main` is unprotected and the repository has
+no rulesets. The operator requested an explanation, not a settings change.
+Recommendation: block force pushes/deletion, require PRs and appropriate
+automated checks, initially without mandatory second-person approval. Preserve
+an administrator exception through PRs for exceptional recovery. Select required
+checks carefully so documentation edits do not require all package builds and
+skipped workflows cannot leave merges waiting indefinitely.
+The usual authorized commit/push/merge work can be handled through PRs without
+extra operator approval clicks. Chris's approved signed-build command remains
+independent. Details are in the proposed-main-protection section of
+`docs/development/build/github-builds.md`. No branch/signing permissions were
+changed during this discussion; wait for implementation authorization.
+
+## Ready — approved contributor macOS Host test builds
+
+The operator authorized signed test requests for `cnoellert` without granting
+repository write access. Automation was merged to main at `be507cd` and adds a
+default-branch `/build-macos-host` PR-comment controller and exact-commit approval
+registry.
+Only Chris and the owner are allowlisted by immutable GitHub IDs. The controller
+receives no Apple secrets and never checks out PR code. Changed PR heads or
+candidate branches require renewed maintainer approval; fixed dispatch inputs
+select the existing protected signing workflow, minimum26.7 and cache reuse.
+See `docs/development/build/github-builds.md` for operation and retirement.
+
+The separately pushed `macos-host-test` candidate is **1.2.08**, source
+`ba454f8713675e54e189e1d748ca00f94fbdffa4`: main at preparation, `ab92c12`, plus reviewed
+PR33 `696815c3bc33598f4401a21d95749c369d0f92a6`. It includes the native Installer
+requirements change. Client, Linux Host and dependency pins are unchanged.
+PR33's reviewed commits are now in main through the renamed, default-off
+mirroring implementation and readiness follow-up. Review and pending hardware
+tests are in
+`docs/development/reviews/macos-single-display-pr33-review.md`.
+The candidate passed 98 portable policy tests and two Installer preflight tests.
+All 114 policy tests pass on automation main, including 16 new request tests.
+The owner exercised the actual command on PR33:
+[request 41223843546](https://github.com/instinctual/plank/actions/runs/41223843546)
+passed and the bot dispatched
+[signed build 41223854554](https://github.com/instinctual/plank/actions/runs/41223854554)
+at the approved source. It passed on the first run in approximately eight
+minutes, reusing the Rust/Cargo caches. The exact `macos-host-test` branch is allowed in
+`macos-signing`; no reviewer or wait timer was added. Chris retains read access.
+The bot's reply and the maintainer's instructions are on PR33. Hosted macOS27
+checks passed: 247 synthetic Quartz layout assertions, the actual TLS/QUIC
+disconnect/failure/abandoned-preparation fixture, 767 session assertions across
+24 scenarios, and the ordinary Host regressions. Native Installer preflight,
+Developer ID signing, notarization, stapling, Gatekeeper and temporary-keychain
+cleanup passed. No installed display/Installer UI acceptance is implied.
+
+The original signed PKG is hash-verified at
+`artifacts/packages/candidates/1.2.08-macos-host-test-macos26.7/macos/plank-host_1.2.08-macos-host-test-macos26.7_arm64.pkg`
+(7,030,038 bytes), SHA-256
+`e2c00abb9f329f226724fef760e3cff891f5410fdad58e74186b8fa0b3785aa1`.
+GitHub artifact ID is `13051455737`, name `signed-macos-host-41223854554-1`.
+Original manifests, policy results and request/build logs are retained under
+`artifacts/qualification/macos-host-test-1.2.08/`; download staging is removed.
+No build remains active. Next: Chris tests this exact signed candidate on 26.7,
+with the ordinary 27 regression gate also pending. The command does not authorize
+release publication or installation. PR33's later commits are now integrated as
+recorded above; unfinished `native-builds` stays separate. Published 1.2.05 is unchanged.
+
+## Merged — native macOS Installer requirements
+
+The operator authorized merging `macos-installer-preflight` on October 31.
+Canonical `main` fast-forwarded from `72f8132` to the branch tip `e02eee7`.
+The signed **1.2.07** candidate was built from
+`ce2c2e4d63ad58aa0e622d085311309592942a06`; subsequent branch changes were
+documentation only. Source comparisons confirm the merged packaging, tests,
+Host, Client and dependency trees match that successful candidate exactly.
+The operator requested replacing the deprecated external-JavaScript preflight
+with a non-deprecated method.
+
+The PKG now embeds a temporary native Installer Requirements pane after
+Introduction. Public AppKit/InstallerPlugins provide the UI; Foundation runs
+fixed read-only `fdesetup isactive`. Continue requires confirmed FileVault off.
+Enabled/busy, failed verification and a five-second timeout keep it disabled
+with an explanation and Check Again. Leaving cancels the child; late callbacks
+cannot replace a newer check. No FileVault setting, permanent helper or additional
+installed service is introduced. The final preinstall guard still runs before
+service shutdown or state changes. The external-script option, JavaScript and
+JavaScriptCore test harness are removed. Host runtime, Client, protocol and
+dependency sources remain unchanged.
+
+GitHub-hosted [signed build 41157320963](https://github.com/instinctual/plank/actions/runs/41157320963)
+passed. Native code compiled with deprecated-API diagnostics treated as errors;
+31 lifecycle assertions exercised checks, retries, timeout and cancellation with
+harmless fixture processes. Generated, signed and finished-PKG-extracted bundles
+loaded successfully. Package page-order/signature, ordinary Host/component,
+Developer ID, notarization, stapling and Gatekeeper gates passed. No deprecated
+external-script warning remained. The first attempt had a fixture-only failure:
+it tried reading Installer's Continue button outside Installer. The corrected
+fixture observes the production enable/disable request while calling the framework
+setter and separately checks the actual `shouldExitPane` gate.
+
+The downloaded original is hash-verified at
+`artifacts/packages/candidates/1.2.07-macos-installer-preflight-macos26.7/macos/plank-host_1.2.07-macos-installer-preflight-macos26.7_arm64.pkg`
+(7,021,244 bytes), SHA-256
+`caf55a7da1340c2b8378f811d863d54632d3fa5948edb230f2a4b84e07334fd4`.
+Original manifests and both build logs are retained in
+`artifacts/qualification/macos-installer-preflight-1.2.07/`; duplicate download
+staging is removed. Main now contains the fix; published 1.2.05 is unchanged.
+This merge does not rebuild or relabel the candidate, publish a release, or
+mark pending installed validation as passed. No build remains active.
+
+Next: open this exact PKG in Installer on a supported Mac and confirm the early
+Requirements page, its FileVault explanation and Check Again/Continue behavior.
+An actual Installer session has not been verified. Apple acknowledged plug-in
+extraction/loading issues on 26.7/27 and suggested retesting 27.2 beta 4:
+https://developer.apple.com/forums/thread/842811 . Direct bundle loading is not
+proof of Installer's own extraction path; do not bypass signing protections.
+Chris owns the 26.7 validation. No remote installation, FileVault change or
+session interruption was performed. Private deployment evidence stays outside Git.
+
+The superseded 1.2.06 external-script candidate remains preserved with its original
+source `cbc69b4da19cf84ecc6e45d387094417592b62dd` and successful signed
+[run 41155675552](https://github.com/instinctual/plank/actions/runs/41155675552).
+Its catalog is `artifacts/packages/candidates/1.2.06-macos-installer-preflight-macos26.7/`;
+reports are in `artifacts/qualification/macos-installer-preflight-1.2.06/`.
+It is not the non-deprecated implementation.
+
+## Published — 1.2.05 and one macOS Host package
+
+The operator approved preparing the combined release and moving to one Mac
+Host package for 26.7 and newer. Root `macos-host-unified` and Client
+`release-1-2-05` were pushed and fast-forwarded into main. Exact package source
+is root `a0dc5fae73d7e072d923b5fd499bdd8151313456`, with Client
+`aa4b16cfc945c1831a99bd96953d6e60f1aad8a1`. The Client change over the accepted
+display work is its changelog only. Linux Host and Kymux pins remain those
+listed below; unfinished `native-builds` work is excluded.
+
+The standard Host floor is now 26.7 in CI, build helpers, bundle templates and
+packaging. SDK 27, the macOS 27 hosted runner, dependency pins and native runtime
+code remain unchanged. An explicit 27.0 candidate is retained only for regression
+comparisons. Ordinary mainline packaging produces one Host PKG; historical
+artifacts retain their original provenance. Client minimum 15.0 and Linux
+policies remain independent. The two-line CI fixture correction from Chris's
+baseline branch is included. The release notes cover changes since published
+1.1.039, including Qt/PipeWire, display selection, Wacom recovery, scrolling,
+idle status, CUDA and macOS clicks.
+
+Local preparation passed all 98 CI-policy tests under a 26.7 workflow environment,
+16 catalog tests, five portable Host-target and five Client-target tests.
+Each target suite has one Apple-compiler test skipped on Linux. These results
+do not replace hosted builds or installed acceptance.
+
+GitHub-hosted mainline builds at that exact source:
+
+| Package | Run | Result |
+| --- | --- | --- |
+| Linux Host RPM | [41147067115](https://github.com/instinctual/plank/actions/runs/41147067115) | Passed |
+| Ubuntu Client DEB | [41147072679](https://github.com/instinctual/plank/actions/runs/41147072679) | Passed |
+| Signed macOS Host PKG | [41147081014](https://github.com/instinctual/plank/actions/runs/41147081014) | Passed |
+| Signed macOS Client PKG | [41147086870](https://github.com/instinctual/plank/actions/runs/41147086870) | Passed |
+
+Both Mac packages passed Developer ID signing, notarization, stapling and
+Gatekeeper checks. The Host passed 2,775 Quartz/AppKit checks, 1,537 pen checks
+and 216 native-input checks on the macOS 27 runner, without posting OS input.
+The Ubuntu job passed component/sanitizer, compositor, launcher, upgrade and
+package checks, including two virtual Client displays. The Linux Host passed
+three 900-frame FEC loss trials with zero unrecovered source symbols, RPM
+ownership/dependency checks and input-lifecycle fixtures. Three real-kernel
+tablet cases were unavailable on the builder, not accepted as hardware passes.
+Dependency caches were reused in all four jobs.
+[Privacy](https://github.com/instinctual/plank/actions/runs/41147180348)
+passed at the same source. These are uninstalled build/fixture results.
+
+All four originals are hash-verified in `artifacts/packages/releases/1.2.05/`.
+The Mac Host is `macos/plank-host_1.2.05_arm64.pkg`, target `macos-26.7`, SHA256
+`cd13060f2c3fcd640f21030c5cc406a6be91e3b6cd8455228305dda6ad2905ad`.
+Original per-product manifests, run logs and Qt test evidence are retained in
+`artifacts/qualification/main-1.2.05/`. The catalog records package checks as
+passed and functional acceptance as not recorded; do not conflate those states.
+
+The [1.2.05 release](https://github.com/instinctual/plank/releases/tag/v1.2.05)
+was published on October 30 and is GitHub's latest release. Its `v1.2.05` tag
+resolves to the exact built root SHA. It contains all four unchanged packages,
+a combined manifest and checksums using downloadable filenames. GitHub asset
+digests match the local originals. Release notes are in
+`docs/releases/1.2.05.md`. Later documentation commits do not change that exact
+package provenance; no additional rebuild was needed for publication.
+Next: Chris’s 26.7 test and installed 27 testing must use this identical new
+Host PKG; the older baseline candidate is not equivalent.
+The operator has the package path and Chris's artifact link for that testing.
+The operator will report test results later and subsequently directed proceeding
+with the release. Publication does not mark the outstanding installed tests
+as passed; the release notes and manifests retain that distinction. No package
+was remotely installed and no live session was changed for this publication.
+
+## Merged baseline — Client displays and macOS click pairing
+
+The operator authorized merging `client-displays` and `macos-click-pairing`.
+Canonical root and Client were switched to `main`. The merged Client source was
+`9497bb0ccefe6830cfae21c7608d3f3a082a2bcc`; root includes both feature histories
+and retains package version **1.2.05**. The Client merge is a fast-forward to
+its already-tested source. Parent merge resolutions affect the handoff and
+version file, with no additional runtime changes.
+
+Main now includes per-bookmark Ubuntu fullscreen display selection, the
+session display menu, the shared Native 1:1 bookmark default, and macOS Host
+press/drag/release event pairing. Existing macOS presentation and Linux Host
+code are unchanged. Linux Host remains
+`65dc0f1be60fe78d0457364f83813118c70bc8a8`; Kymux remains
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`. Dependency PRs were not adopted.
+Native Apple development remains on `native-builds`, outside shipping main.
+
+Merged-source verification passed 98 CI-policy tests, 15 package-collection tests,
+four portable Host-target checks, release-version and whitespace checks. The
+Apple-compiler target check is skipped on this Linux checkout. The Client tree
+and macOS input files match their previously tested feature sources exactly.
+Prior exact candidate build evidence is retained below. Merge commits skip
+redundant package workflows; this request does not include a package rebuild,
+installation or release. Existing candidates keep their original names, hashes
+and source manifests; never relabel them as main.
+
+The operator reports no recurrence during the first few minutes after installing
+the macOS click candidate. Continue normal-use observation; this is preliminary
+positive feedback, not conclusive resolution of an intermittent problem. The
+remaining Client display and input hardware checks are listed below. No live
+collector or product session was started or interrupted for the merge.
+
+## Merged — macOS click pairing
+
+Branch `macos-click-pairing` started from main
+`bd75c102d3487c6ee44b0d39a52f09b39b8756a4`; package version is **1.2.05**.
+The signed macOS 27 candidate is
+`1.2.05-macos-click-pairing-macos27.0`. This Host-only candidate predates the
+combined mainline and does not include the Client display changes. Client,
+Linux Host, protocol, dependency pins, input authorization and Quartz posting
+location are unchanged by the Host fix.
+
+Read-only investigation of macOS 27.2 captured first-click activation requests
+that reached WindowServer but remained pending until later clicks. The mapper
+constructed press, drag and release events independently without preserving
+`kCGMouseEventNumber`. It now assigns a number to each press and retains it for
+that button's drags, release and disconnect cleanup. Mouse and normalized-pen
+buttons have independent held identities. Rejected delivery cannot commit a
+new press or erase an accepted one. Double-click counts and modifier/pressure/
+tool information retain their existing behavior.
+
+Apple documents [matching press/release event numbers](https://developer.apple.com/documentation/coregraphics/cgeventfield/mouseeventnumber).
+Chromium's [related macOS drag repair](https://github.com/chromium/chromium/commit/4e33c976af4f92dc0e79b18a0b19dd7f17ed2ee7)
+supports this diagnosis, but does not prove the reported activation failure is
+resolved. The non-posting Quartz/AppKit fixtures now cover all five mouse
+buttons, overlapping presses, multi-clicks, denied releases, cleanup, pen tip/
+eraser/side buttons and mixed mouse/pen sequences. Local validation passed all
+98 CI-policy tests, 15 package-collection tests, release-version checks and
+whitespace checks. The first hosted attempt stopped compiling the expanded
+input fixture: its old `send()` helper conflicted with the socket declaration
+exposed by the new AppKit import. The helper is now `sendInput()`; no product
+change or test removal was needed.
+
+The signed Host-only [build 41140938612](https://github.com/instinctual/plank/actions/runs/41140938612)
+passed from root `ca4903bbfb38fa97cc603a34ea9670942f03b69a`, including **2,775**
+Quartz/AppKit input assertions, **1,537** pen assertions and **216** native-input
+assertions across eight scenarios. Those fixtures do not post OS input. The
+ordinary Host tests, installer gates, Developer ID signing, notarization,
+stapling and Gatekeeper checks also passed. Privacy passed on this exact source;
+clipboard regressions passed on the preceding implementation commit. The
+redundant push-triggered all-product build was canceled; no Client or Linux
+package was requested for this change.
+
+The verified candidate is
+`artifacts/packages/candidates/1.2.05-macos-click-pairing-macos27.0/macos/plank-host_1.2.05-macos-click-pairing-macos27.0_arm64.pkg`
+(7,005,861 bytes), SHA-256
+`56f1df348fa8cadd0356156c32b208ec04d0cc6455cb71115858cbe1fc593adb`.
+Original manifests, Actions metadata and both build logs are retained in
+`artifacts/qualification/macos-click-pairing-1.2.05/`. The manifest retains exact
+root and submodule pins; Kymux remains
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`. The candidate branch has a scoped
+signing permission; remove it when retiring the branch. No build remains active.
+
+The operator reports installing this candidate on the affected macOS 27.2 Host
+and observing no recurrence during the first few minutes. This is a positive
+initial result, not sustained acceptance of an intermittent failure. Installed
+bytes were not independently inspected after the operator's installation.
+
+Next: continue ordinary use and qualify switching between inactive applications,
+title-bar and content dragging, double/triple and modifier clicks, right-click
+menus, tablet pressure and disconnect/reconnect. No input was injected by the
+diagnostics, and no collector remains. The operator authorized merging the fix.
+Sustained hardware acceptance and release remain pending. Private notes contain
+the observed event timelines.
+
+## Merged — Ubuntu Client displays
+
+Root and Client branch `client-displays` started from mainline 1.2.02 and are
+now merged into main. Candidate 1.2.04 added per-bookmark
+current/named/both-monitor fullscreen selection for
+the Ubuntu Qt Client. Match Client uses that selection for Linux and Mac Host
+preparation. A local toolbar menu switches single/span presentation without
+changing the Host or persisted bookmark. Existing bookmarks retain spanning;
+new bookmarks default to the current monitor. macOS presentation, Host and
+transport implementations are unchanged. See
+[the plan](docs/development/plans/client-displays.plan) and
+[user guidance](docs/user/client-displays.md).
+
+Root package source is `a3601f5a728c167f4f3cb0f9c0ff457aa03c259c`; Client is
+`56f84eb6f11dc3a2bf1dd0ed44d14842f98daff2`. These candidate source checkpoints
+are preserved; the complete feature is now merged, without a release.
+[Hosted build41116553672](https://github.com/instinctual/plank/actions/runs/41116553672)
+passed. Local version/catalog checks and 92 CI policy checks pass. The new
+13-case selector suite passes normally and under sanitizers at 100%/125%.
+Both GNOME scale runs report 56 passed, zero failed, one two-output-only skip;
+the dedicated two-output run passes all four cases, including simultaneous
+fullscreen windows on different monitors. Menu input isolation/complete labels,
+10-bit framebuffer precision, component/Wacom/PipeWire, launcher and finished
+DEB gates pass. These are synthetic tests, not live hardware acceptance.
+
+The verified package is
+`artifacts/packages/candidates/1.2.04-client-displays/linux/plank-client_1.2.04-client-displays_amd64.deb`
+(17,178,348 bytes), SHA-256
+`129de4b873bbce7ec5a3c9d2af40011e46470fe1f3b0324fbf9a520d93556184`.
+Packaged executable SHA-256 is
+`a4c6b60c52e12f5477cb28c96d723b174043ca8afbc27bd7f97e826ae888fbfd`.
+Original manifests, reports and screenshots are retained under
+`artifacts/qualification/client-displays-1.2.04/`; download staging is removed.
+The earlier 1.2.03 passed tests but visual review found a clipped menu label;
+its superseded installer was not installed or retained locally. Its evidence
+remains in `artifacts/qualification/client-displays-1.2.03/`.
+Client common-C remains `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`, mDNS
+`920c097ffa742e2968290f15d4dde6693aec02e5`, Host
+`65dc0f1be60fe78d0457364f83813118c70bc8a8` and Kymux
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+
+The operator authorized installation on an Ubuntu hardware-test Client. Both
+previous Client processes closed cleanly before the upgrade. The installed
+version and executable hash match the candidate; existing preferences were
+preserved, the private-library RUNPATH is intact, and no Client user service or
+autostart was introduced. The Qt launcher starts successfully. Deployment
+details are retained privately.
+
+Follow-up root `0a2c77c3de635912edc29b00cc60785202a5c39b` and Client
+`9497bb0ccefe6830cfae21c7608d3f3a082a2bcc` are now included in root and Client
+main: new bookmarks default to Native (1:1 pixels), including repeated Add
+Bookmark dialogs and discovered workstations. This shared default
+also applies to the macOS Client; explicit saved scaling choices are preserved.
+The automatic [build 41128113628](https://github.com/instinctual/plank/actions/runs/41128113628)
+passed policy, Linux Host/Client and unsigned macOS Host/Client jobs; signing
+was skipped. Privacy and clipboard workflows also passed. These later artifacts
+have not been downloaded, installed or accepted on hardware. The installed and
+locally cataloged 1.2.04 above predates the default change. Increment the version
+for the next distributed candidate; do not replace that catalog entry with
+different bytes under the same filename. No further rebuild is needed merely
+to reconfirm the successful automatic run.
+
+Next: assign one named Client display to each of two bookmarks, and test
+simultaneous fullscreen sessions, pixel fit, keyboard/tablet focus,
+single/span/windowed toolbar changes and reconnect. Live-session hardware
+acceptance remains unrecorded; merge authorization does not substitute for
+those checks. No release was published. The separate GPU investigation
+below remains paused.
+
+## Merged — macOS 26.7 Host support
+
+[PLANK PR #32](https://github.com/instinctual/plank/pull/32) merged as
+`19ebedb0eb33686669c9741687a2d20d65075a88`, from reviewed head
+`ef45730c4a231d7aa1b4e469688d5e05df36423a`. The package-identity concern is
+resolved: candidate versions, filenames and catalogs distinguish the selected
+26.7/27.0 minimum while retaining overwrite protection. All seven active checks
+passed, including all four product builds in
+[run 41133563710](https://github.com/instinctual/plank/actions/runs/41133563710).
+PR signing was skipped as intended; the merge tree matches the tested head.
+The automatic mainline merge build
+[41136635392](https://github.com/instinctual/plank/actions/runs/41136635392)
+also passed all four product builds and policy; signing was skipped. Its privacy
+and clipboard checks passed. No packages from that run have been downloaded or
+installed.
+
+Main follow-up `bd75c102d3487c6ee44b0d39a52f09b39b8756a4` removes the experimental
+designation and records Chris (cnoellert) as owner of 26.7 hardware/session
+validation. macOS 27 remains the default; runtime, dispatch and signing rules
+are unchanged by that wording update. Independent checks passed 98 policy,
+15 collector and four portable Host-target tests; one Apple-only check was
+skipped locally. No installation, signing dispatch or release was performed
+during that review.
+See [the review](docs/development/reviews/macos26-host-pr32-review.md).
+
+The operator subsequently authorized Chris's signed qualification build from
+that baseline on `codex/macos26-host-test`. The exact branch was added to the
+protected signing environment. Initial run `41144542527` stopped before
+compilation because a default-target test inherited the dispatch's 26.7 input.
+Candidate commit `a7aed9b98dbf76cb629141a22447aeae91eaceeb` removes that input
+from the default fixture; its only difference from `bd75c102` is two test lines.
+Host/transport sources, dependency pins, packaging and workflows are unchanged.
+This test correction remains on the candidate branch, outside main.
+
+Signed [build 41144764461](https://github.com/instinctual/plank/actions/runs/41144764461)
+passed all policy/component/package gates, Developer ID signing, notarization,
+stapling and Gatekeeper checks. The verified package is
+`artifacts/packages/candidates/1.2.02-codex-macos26-host-test-18e984bf-macos26.7/macos/plank-host_1.2.02-codex-macos26-host-test-18e984bf-macos26.7_arm64.pkg`
+(7,005,323 bytes), SHA-256
+`356a7ecc2e4fc994a27eed47ddd2fe22962735cd8a91b2ef2099589c3c24b69f`.
+Its original manifest, checksums and run logs are retained in
+`artifacts/qualification/macos26-host-test-1.2.02/`. The
+[download artifact](https://github.com/instinctual/plank/actions/runs/41144764461/artifacts/13019399643)
+expires November 6; the local catalog remains retained. This is the requested
+1.2.02 baseline, without the later click-pairing fix. Chris's installed macOS
+26.7 session qualification remains pending; no installation or release was
+performed. Remove the scoped signing permission when retiring this branch.
+
+Canonical root and Client are now on `main`, including the accepted display
+and click-pairing changes. `native-builds` remains separate and preserved.
+
+## Paused investigation — Intel VA-API surface timeout
+
+Read-only inspection of an Ubuntu Client running **1.2.01** found repeated
+`VA-API surface was not ready within 100 ms (38)` errors during exact-format
+HEVC 10-bit 4:4:4 hardware decoding. Matching kernel records confirm i915 video
+engine hangs, decoder-context resets and fence timeouts. Hardware decoding
+initialized again after reconnect. The failure mechanism is established;
+the trigger is not. This does not establish a driver-only defect or a stream
+format mismatch. Version **1.2.02** below fixes idle-status warnings, not this
+GPU failure path.
+
+Status 38 is `VA_STATUS_ERROR_TIMEDOUT`. The Qt surface-retention path treats
+any unsuccessful synchronization as fatal, and session cleanup occurred about
+20 seconds after the reported error. The blocking call was not traced. Simply
+increasing the surface timeout or restoring an unbounded wait is not a fix.
+
+Packet loss remains a plausible trigger through frame gaps, IDR recovery or
+bursts of recovered frames. Shutdown before/after-FEC percentages are rolling
+ten-second peak snapshots, not whole-session totals or a precise record at the
+hang. One earlier connection reported unrecovered FEC symbols; the latest did
+not. Receive-queue drops may follow a stalled decoder. These counters do not
+establish causal order or prove an extreme-loss burst immediately before a hang.
+The native receiver delivers complete frames and requests IDR recovery after
+sequence gaps; loss does not itself turn QUIC payloads into corrupted bytes.
+
+The operator deferred further investigation. No product changes, deployments,
+GPU traces or loss-injection tests were performed for this incident. Private
+notes retain the machine inventory, bounded log snapshot and detailed timeline;
+no remote collector remains active. When the operator resumes this work, use
+an unoccupied test Client to correlate controlled Client-ingress burst loss,
+frame gaps/IDRs, surface ownership and GPU events. Preserve the selected codec,
+bit depth, chroma and range when evaluating bounded decoder recovery. Existing
+mainline package provenance and acceptance limits below remain unchanged.
+
+## Current mainline — idle desktop status
+
+The operator authorized merging `client-idle-health` into root and Client
+`main`, rebuilding the Ubuntu Client and saving the notes. Both repositories
+are merged and pushed. Client main is
+`4e98d8be6bd5cabdb083a06478b96f7d8a388ca0`. Version is **1.2.02**, without a
+branch suffix. Fresh mainline
+[build39992802451](https://github.com/instinctual/plank/actions/runs/39992802451),
+attempt2, passed from root merge `5a96a20241a783470624ac605b47a7c68dcb2ac4`.
+Native Apple work remains separate. No installation or GitHub release
+publication was requested or performed.
+
+Read-only session tracing captured the warning during video-only gaps of
+7–9 seconds while audio continued, RTT remained normal and loss counters did
+not increase. The operator observed that moving the mouse cleared it.
+ScreenCaptureKit may legitimately emit no new complete frame for an unchanged
+desktop. The Client's one-second video-silence indicator therefore did not
+establish that the workstation or connection was unavailable.
+
+The speculative indicator is removed from the Qt and SDL session loops.
+The existing credential-free, certificate-pinned worker-replacement probe is
+retained during video silence. Recovery starts only after confirmed worker
+replacement or transport termination. Existing configured timeout, automatic
+reconnect, authentication failures and disconnect controls are unchanged.
+No Host, transport, capture, codec, input or audio change is required.
+
+Mainline Ubuntu compilation, reconnect/pinned-worker policy checks, normal and
+sanitized component/Wacom/PipeWire tests, both 55-case GNOME scale suites,
+three launcher cycles, 14 package-upgrade fixtures and finished-DEB gates passed.
+The compositor precision gates retained all 1024 RGB/gray levels. Software-runner
+GPU handoff skips remain explicit. No macOS package was built in this run.
+Local version, package-collection and runtime/source guards also pass; all
+92 CI policy tests passed on the hosted source.
+
+The verified mainline package is
+`artifacts/packages/releases/1.2.02/linux/plank-client_1.2.02_amd64.deb`
+(17,162,304 bytes), SHA-256
+`9450b6531421966224fd3939e7fbad22d601e0a0a757e4748a43d971d42334b5`.
+Packaged executable SHA-256 is
+`34d22922382cfcb09690af9aca5738686a6cfcc02cd2ef58b925258890b480be`.
+Original manifests, exact recursive source inventory, test reports, compiler
+cache statistics and package verification are in
+`artifacts/qualification/main-1.2.02/`. The earlier qualified branch package
+and reports remain under `candidates/1.2.02-client-idle-health/` and
+`artifacts/qualification/client-idle-health-1.2.02/`; it was not relabelled.
+Client common-C remains `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`, mDNS
+`920c097ffa742e2968290f15d4dde6693aec02e5`, Host
+`65dc0f1be60fe78d0457364f83813118c70bc8a8` and Kymux
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+
+Attempt1 was canceled during prerequisite installation: the runner's Ubuntu
+mirror downloads slowed to roughly 50 KB/s, with a retried download. No product
+compile ran. Attempt2 used identical source and passed that step in 57 seconds.
+The successful job took 25m27s: bootstrap 7m58s, application/tests/package
+15m39s. All four dependency groups and the compiler cache were initially cold
+on main; all were saved successfully. sccache recorded 2 hits and 453 misses.
+The default-branch caches are now populated. Do not rerun this successful build
+just to measure cache warmth. Both attempts' logs are retained with the reports.
+
+Exact-package live acceptance remains unrecorded: idle desktop with and without
+audio, resumed desktop motion, temporary network interruption, Host restart
+and login/logout recovery. Source guards and hosted gates are not those live
+tests. Merge authorization does not establish that those tests were performed.
+No build, SSH session, capture or remote sampler remains active.
+
+## Previous qualification — Ubuntu CI cache reuse
+
+The operator authorized merging `ci-cache-reuse` through `8c3fa63` into
+`main`. Merge commit is `74609b8b71c4ccb58a45a6df9d35edc5f5264198`; resume in
+the canonical checkout on `main`. Product submodules remain at their accepted
+mainline pins. There are no application, Host or macOS behavior changes.
+Native Apple work remains separate and untouched. No installation, new package
+build or release accompanies this merge.
+
+Ubuntu dependency fingerprints now ignore runner image dates and unrelated OS
+packages, retaining compiler/tools, native development headers and ABI
+inputs because FFmpeg/SDL auto-detect optional libraries. Existing exact cache
+receipts and patch/runtime checks remain mandatory. Linux Host and Mac toolchain
+policies are unchanged. A separate Ubuntu sccache store covers C/C++ and Rust
+compilation; clean checkouts, linking, every test and package validation still
+run. Only successful trusted builds save compiler data; PRs cannot write it.
+
+Hosted qualification is complete at root
+`d8c355f8ca8d3b6847edb2215755f4bb20802ad5`. The successful
+[cold run39831624229](https://github.com/instinctual/plank/actions/runs/39831624229)
+and unchanged
+[warm run39835534954](https://github.com/instinctual/plank/actions/runs/39835534954)
+provide the measured comparison:
+
+| Ubuntu job stage | Cold | Warm |
+| --- | --- | --- |
+| Dependency bootstrap | 7m55s | 2s |
+| Application, tests and package | 16m06s | 8m38s |
+| Complete job | 25m25s | 10m35s |
+
+The warm run restored all four dependency groups and reused 424 of 455
+cacheable compilations (93%): 344 C/C++, 66 Rust and 14 assembler hits.
+All cacheable Rust compilations hit. Normal/sanitized input, Wacom and PipeWire
+tests, both 55-case GNOME scale suites, launcher checks, 14 package fixtures
+and finished-package gates passed. Software-runner GPU skips remain explicit;
+this is build qualification, not physical GPU or live-session acceptance.
+Logs, timing records, manifests and cache statistics are retained under
+`artifacts/qualification/ci-cache-reuse/{cold-fixed,warm}/`.
+
+The first attempt exposed double compiler wrapping in Cargo's ring/cc-rs build.
+cc-rs recognizes `RUSTC_WRAPPER` itself, so its `HOST_CC`/`HOST_CXX` now name
+the real compilers. Early smoke checks cover both invocation forms. No
+failed-run compiler outputs were saved. Actual runner inventories also exposed
+an unrelated PHP SDK update invalidating native library keys. The final
+cache-policy refinement excludes those unused PHP headers; 92 local policy
+tests pass, including its regression. This refinement does not change compiler
+commands or product sources and was not followed by another package build.
+
+The verified warm candidate is
+`artifacts/packages/candidates/1.2.01-ci-cache-reuse/linux/plank-client_1.2.01-ci-cache-reuse_amd64.deb`
+(17,163,452 bytes), SHA-256
+`110221cbe2cfc8586482f3575ca6a39aaa50555d59c7d03752cbb069234d5474`.
+Executable SHA-256 is
+`e082bb23cc363c8b60577d16aaa924c2a7f4bc73e157e748b7f350004bb3c243`.
+It records the exact d8c355f source, not the later policy/documentation commit.
+Cold and warm output hashes differ; byte-reproducible packaging is not claimed.
+The cache branch is merged, and all 92 CI policy tests pass on the merged tree.
+No installation or release was performed; existing packages retain their exact
+source provenance. The merge and documentation commits use `[skip ci]` to avoid
+repeating the completed package qualification. No further build is running or
+needed for this task. GitHub cache branch scoping means the next requested
+mainline build must populate its own new caches before warm reuse there.
+
+## Previous qualification — Qt wheel scrolling
+
+The operator accepted `1.2.01-qt-wheel-scroll` and authorized merging it into
+root and Client `main`, then rebuilding the Ubuntu Client on GitHub Actions.
+The mainline Client is
+`c0fdc2deaa7b67a487c3317678db617078948eed`. Version is **1.2.01**, under the
+ordinary `plank-client` identity, without a branch suffix. The fresh mainline
+package is complete; the accepted candidate was not relabelled. No release
+publication or further installation is authorized. Native Apple work remains
+separate.
+
+Mainline [run39822530300](https://github.com/instinctual/plank/actions/runs/39822530300)
+passed from root `7082a967ccaac8e80c18bdce46cf0404b4c6d6b7`, with the Client pin
+above and unchanged Host/Kymux pins below. The verified DEB is
+`artifacts/packages/releases/1.2.01/linux/plank-client_1.2.01_amd64.deb`
+(17,162,820 bytes), SHA-256
+`25f0268b2c277fb80f1d8b1ea492ee6b86a1e805a8ebe51529131e0d75c22657`.
+Executable SHA-256 is
+`e3c65a5ed98881d9b81e4f94974d41b51ba7f253b524da9cb4c17088cb5bb583`.
+Exact recursive sources, Qt6.10.2/toolchain evidence and all reports are in
+`artifacts/qualification/main-1.2.01/`. Normal/sanitized input, Wacom and
+PipeWire tests, both 55-case GNOME scale suites, launcher and package gates
+pass. Software-runner GPU skips remain explicit. The new mainline package has
+not been installed; live wheel acceptance applies to the source-equivalent
+candidate below. Root privacy and clipboard checks also pass.
+
+This mainline run missed all four dependency caches despite unchanged recipes:
+the former fingerprints included the runner image and whole installed-package
+inventory, and application objects were not cached. Bootstrap took about8m25s,
+followed by about15m of application/tests/package work. The subsequent repair
+and measured warm-run results are documented above.
+
+Read-only diagnosis found that physical wheel deltas reach the Linux Host's
+virtual mouse and XInput, while Qt injects an unchanged absolute position before
+every wheel event. Linux uses XTEST for that position and uinput for the wheel;
+GTK resets smooth-scroll baselines when the source device changes. The macOS
+Host does not use that mixed Xorg input path. The operator confirmed that the
+candidate fixes the reported scrolling failure on the affected hardware.
+
+The window now sends the mapped position with the wheel event instead of
+unconditionally emitting another motion event. The Qt input owner positions
+only when needed, remembering successful wire-pixel coordinates and stream
+dimensions. Focus/input release, reconnect and tablet-to-mouse handoff invalidate
+that position. Real motion and button ordering are unchanged. No Host, transport,
+Wacom forwarding or macOS Client source changes are included.
+
+New regression coverage checks stationary and high-resolution wheel sequences,
+horizontal scrolling, failed positioning, viewport/stream changes, focus and
+reconnect invalidation, raw/normalized tablet handoff and local toolbar isolation.
+Client implementation is `c0fdc2deaa7b67a487c3317678db617078948eed`.
+All 81 local CI-policy checks, package collection/version tests and available
+Qt package checks pass; ten DEB fixtures require the Ubuntu runner and are
+explicit local skips. Hosted [run39806775871](https://github.com/instinctual/plank/actions/runs/39806775871)
+passed from root `c870ea92a9cbac02d1a4f9fdb398f7a97f3bc4ec`. All 16 input-runtime
+cases pass normally and under sanitizers, including the new wheel regression
+cases. The 55-case session suite passes in GNOME at 100% and 125%; Wacom,
+PipeWire, three launcher cycles, all 14 package fixtures and final DEB gates pass.
+Software-only runner GPU handoff skips remain explicit; this is not hardware
+or live-session acceptance. Recursive dependency pins match the 1.2.00 baseline
+below; only the Client pin changes.
+
+The verified package is
+`artifacts/packages/candidates/1.2.01-qt-wheel-scroll/linux/plank-client_1.2.01-qt-wheel-scroll_amd64.deb`
+(17,163,484 bytes), SHA-256
+`9f382cb61d9a00f2975ec2810d72d10c9ff413c3b6e95e65925d97d7076cd7d2`.
+Installed/extracted executable SHA-256 is
+`26f64a7547dc36462b33f7d9391219d1650848bc48917b136020cd51c92a6ef0`.
+Reports and exact source/toolchain evidence are retained in
+`artifacts/qualification/qt-wheel-scroll-1.2.01/`. Dependency caches missed and
+were rebuilt and saved; application, sanitizer and package checks were not skipped.
+
+The operator-authorized installation on the designated test Client is complete.
+No Client was running, no stream was interrupted, and no Host was modified.
+Package version, binary checksum and offscreen runtime version match; the
+administrator configuration checksum is unchanged. The older optional Qt test
+package was left alone. Launch the ordinary Client for testing.
+
+The operator confirms scrolling works after this exact Client update. This
+accepts the reported wheel failure, not a separately measured soak or complete
+hardware regression matrix. Focus/tablet/reconnect transitions and macOS-Host
+scrolling remain useful follow-up checks. Private capture/deployment evidence
+remains outside Git; all SSH/capture tasks are closed and temporary package
+transfer staging is removed. Both accepted feature branches are merged into
+main. No release has been published.
+
+## Main baseline — Ubuntu Qt Client, Wacom recovery and CUDA
+
+The operator authorized merging `wacom-usb-recovery` (including
+`ubuntu-qt-session`) and `cuda-13-2` into main. Continue in the canonical
+checkout on `main`, with Client and Linux Host at its exact submodule pins.
+Native Apple Client development remains separate in
+`build/worktrees/native-builds`; do not merge it as part of workspace cleanup.
+
+The operator authorized retiring redundant local checkouts. PKG-only edits
+already exist in main, the SDL upstream-status clarification is retained in
+the dependency patch inventory, and the old Kymux review regression is already
+committed in the native transport dependency. Native-build notes are preserved
+on their own branch. Recovery copies of loose edits stay outside Git. Packages,
+dependency caches and the shipping Kymux pin are unchanged. Historical paths in
+candidate records below identify past evidence, not active resume locations.
+
+Cleanup is complete: the only root worktrees are the canonical `main` checkout
+and `build/worktrees/native-builds`. Client and Linux Host main checkouts now
+live under the canonical `apps/` paths, not retired recovery folders. Merged
+root/Client/Host feature branches were deleted locally and remotely; the native
+Apple coordination branches remain preserved. Local dependency URLs no longer
+refer to removed worktrees. This changes no product source or package pins.
+
+The additional build-folder cleanup removed 44 obsolete download, test and
+review directories, reducing `build/` from about 12 GiB to 29 MiB. Only the
+active native-builds source worktree remains there before new build staging.
+Prepared dependencies, package catalogs and qualification reports are untouched;
+old loose review edits and source metadata have a checksum-verified private
+recovery archive outside Git. Canonical and initialized dependency Git
+connectivity checks and documentation-link checks pass after removal.
+
+Ubuntu's Qt frontend is to replace the SDL session frontend under the ordinary
+`plank-client` package, launcher, settings, administrator configuration and log
+identity. It is no longer a separately installable product. macOS retains its
+existing Client implementation. Version advances to **1.2.00** for this
+combined integration; previous candidate artifacts are not relabelled.
+
+Client main is `67a94f94d711e81f470b985001ca3eae37f5abad`; the root ancestry
+merge is `88778d4`. The promotion commit containing this handoff pins that
+Client, sets 1.2.00 and consolidates Ubuntu CI into the ordinary `linux-client`
+job. Qt/PipeWire, sanitizer, compositor and launcher checks remain mandatory;
+one full Client build replaces the previous two-build experimental job.
+The package-upgrade fixture preserves administrator configuration and user
+state. Do not copy the retired test app's profile over existing normal PLANK
+settings or trust. Remove that optional old test package manually if installed.
+
+Local validation passes 81 CI-policy tests, package collection/version checks,
+runtime/identity source checks, reconnect/MTU and Mac frontend/permission wiring
+checks, shell syntax, documentation links and new-content privacy checks.
+Ten DEB fixtures require the hosted Ubuntu toolchain; one Mach-O test requires
+macOS. They are local skips, not acceptance passes. The Mac fullscreen source
+guard was updated for the external-renderer initialization signature and still
+requires the unchanged null-presenter SDL initialization on macOS.
+
+Root main promotion `3bff6b4fcde9b5b1f665d1b3c8e3c2950c5e57dd` and Client main
+are pushed. Both requested Client branches and all three requested root branches
+are ancestors of main. [Hosted run39685022784](https://github.com/instinctual/plank/actions/runs/39685022784)
+passed Linux Host, Ubuntu Qt Client and unsigned macOS Host. The macOS Client
+stopped at an outdated uninstaller source assertion: it expected an inline
+application-name literal instead of the shared, unchanged identity constant.
+The check now verifies that constant, and the executable Qt path fixture uses
+the actual application constant rather than duplicating it. Local uninstall,
+install, fullscreen, quit, Metal-overlay, keyboard/permission checks and all
+81 CI-policy tests pass. This is a test correction, not a runtime change.
+
+The operator requested a full rebuild from cleaned-up main: fresh application,
+transport and package outputs for all four products on GitHub Actions, reusing
+only verified dependency caches. macOS packages must be signed/notarized.
+No installation or release publication is authorized by this rebuild request.
+Rebuild source is `dfc2984662e3f144e630759fee0dee142edea5e8`, with the same
+Client/Host/Kymux pins as the promotion. Explicit hosted runs:
+
+- Linux Host: [39691129894](https://github.com/instinctual/plank/actions/runs/39691129894).
+- Ubuntu Client: [39691129968](https://github.com/instinctual/plank/actions/runs/39691129968).
+- Signed macOS Host: [39691129867](https://github.com/instinctual/plank/actions/runs/39691129867).
+- Signed macOS Client: [39691129794](https://github.com/instinctual/plank/actions/runs/39691129794).
+
+**All four 1.2.00 builds passed.** Their original packages are downloaded and
+checksum-verified in `artifacts/packages/releases/1.2.00/`, with a combined
+manifest and SHA256SUMS. This directory denotes mainline artifacts, not a
+published GitHub release. Both macOS installers passed signing, notarization,
+stapling and Gatekeeper; Client remains macOS15+, Host macOS27+. Detailed
+hosted logs and the Qt test reports are retained under
+`artifacts/qualification/main-1.2.00/`. Ubuntu's synthetic/component, sanitizer,
+55-case compositor suites at 100%/125%, launcher, audio and package gates pass;
+real GPU handoff is explicitly skipped on the software-only runner. The Mac
+Client's updated uninstaller check and executable Qt path test both pass.
+
+Linux Host passes its pinned CUDA 13.2 Update2/NVCC13.2.86, patched dependency,
+transport, RPM and repeated input-lifecycle gates. The production RPM still
+uses BUILD_TESTS=OFF; the separate test build and mocked UHID fixture are not
+packaged. Real-kernel UHID cases remain explicit skips on the hosted builder.
+The RPM owns `/var/log/plank` as root:root0700, independently checked after
+download. Linux dependency caches were restored and verified; the macOS jobs
+had cache misses and successfully bootstrapped their pinned dependencies.
+
+Next: manual installation and hardware/session qualification when requested.
+No release was published and no package was installed by this rebuild. The
+temporary download staging directory is removed after verified collection.
+The retained candidate sections below are historical evidence, not instructions
+to resume an old branch or proof of new mainline hardware acceptance.
+
+<details>
+<summary>Exact recursive source provenance for the 1.2.00 rebuild</summary>
+
+Root: `dfc2984662e3f144e630759fee0dee142edea5e8`. Paths below are relative to
+the root.
+Initialization records include inherited platform/documentation submodules;
+their presence is not a claim that they are Linux runtime dependencies.
+
+```text
+apps/client 67a94f94d711e81f470b985001ca3eae37f5abad
+apps/client/moonlight-common-c/moonlight-common-c 437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90
+apps/client/qmdnsengine/qmdnsengine 920c097ffa742e2968290f15d4dde6693aec02e5
+third_party/kyber-kymux 3f7a9d8618978287186e5d6ce0eaa067743cb06c
+apps/host/linux 65dc0f1be60fe78d0457364f83813118c70bc8a8
+apps/host/linux/packaging/linux/flatpak/deps/flatpak-builder-tools ac5a296ac6111aa2319daf532f609a067b88d8a9
+apps/host/linux/third-party/Simple-Web-Server 546895a93a29062bb178367b46c7afb72da9881e
+apps/host/linux/third-party/TPCircularBuffer cc520397504bb72bc6df79ff03eb72988a6dc50d
+apps/host/linux/third-party/ViGEmClient 8d71f6740ffff4671cdadbca255ce528e3cd3fef
+apps/host/linux/third-party/doxyconfig e552f7c9f00cd0cf24764a37d0905935b3d2c188
+apps/host/linux/third-party/doxyconfig/doxygen-awesome-css d52eafe3e9303399fda15661f3d7bb8fe3d7eabc
+apps/host/linux/third-party/glad 73db193f853e2ee079bf3ca8a64aa2eaf6459043
+apps/host/linux/third-party/googletest 52eb8108c5bdec04579160ae17225d66034bd723
+apps/host/linux/third-party/libdisplaydevice 6e9722f89103320c948dc1199066c9e17a69e88a
+apps/host/linux/third-party/libdisplaydevice/third-party/doxyconfig e552f7c9f00cd0cf24764a37d0905935b3d2c188
+apps/host/linux/third-party/libdisplaydevice/third-party/doxyconfig/doxygen-awesome-css d52eafe3e9303399fda15661f3d7bb8fe3d7eabc
+apps/host/linux/third-party/libdisplaydevice/third-party/lizardbyte-common 06cd442b808f02f1674f3192a84d25b9a503c482
+apps/host/linux/third-party/libdisplaydevice/third-party/lizardbyte-common/third-party/doxyconfig e552f7c9f00cd0cf24764a37d0905935b3d2c188
+apps/host/linux/third-party/libdisplaydevice/third-party/lizardbyte-common/third-party/doxyconfig/doxygen-awesome-css d52eafe3e9303399fda15661f3d7bb8fe3d7eabc
+apps/host/linux/third-party/libdisplaydevice/third-party/lizardbyte-common/third-party/googletest 52eb8108c5bdec04579160ae17225d66034bd723
+apps/host/linux/third-party/libvirtualhid b793fa2f5369218c43e09c58d5b96a0cc638bf05
+apps/host/linux/third-party/libvirtualhid/third-party/doxyconfig 419127bad87f49b2d45fa957ea7302abbb49c01f
+apps/host/linux/third-party/libvirtualhid/third-party/doxyconfig/doxygen-awesome-css 46483f1e5a70ffb9ecd3b82d0a1cd1b24edf13da
+apps/host/linux/third-party/libvirtualhid/third-party/lizardbyte-common f9d91e1d29b7473f58e43acde4579da4e56c4abe
+apps/host/linux/third-party/libvirtualhid/third-party/lizardbyte-common/third-party/doxyconfig b87f7e4e1dcd8a31c9a550cd7702b7420d89efac
+apps/host/linux/third-party/libvirtualhid/third-party/lizardbyte-common/third-party/doxyconfig/doxygen-awesome-css 24c4f966e375ed92e9805e075177d34a9849a43e
+apps/host/linux/third-party/libvirtualhid/third-party/lizardbyte-common/third-party/googletest f8d7d77c06936315286eb55f8de22cd23c188571
+apps/host/linux/third-party/lizardbyte-common f9d91e1d29b7473f58e43acde4579da4e56c4abe
+apps/host/linux/third-party/lizardbyte-common/third-party/doxyconfig b87f7e4e1dcd8a31c9a550cd7702b7420d89efac
+apps/host/linux/third-party/lizardbyte-common/third-party/doxyconfig/doxygen-awesome-css 24c4f966e375ed92e9805e075177d34a9849a43e
+apps/host/linux/third-party/lizardbyte-common/third-party/googletest f8d7d77c06936315286eb55f8de22cd23c188571
+apps/host/linux/third-party/moonlight-common-c 3a97a58f215323753cfd1180af760ec7e3253538
+apps/host/linux/third-party/nvapi cd6918f60b3c9a0476fdfe7e89bb32330602049d
+apps/host/linux/third-party/plasma-wayland-protocols 382dfabda886d3f2f5c067b22e5a22376685ba78
+apps/host/linux/third-party/wayland-protocols 819004adb3ab7e46f3fa3caef05b96e20434b244
+apps/host/linux/third-party/wlr-protocols bf4fc79abc359eea5a0edec0ac6d4a2b2955f82a
+apps/host/linux/third-party/build-deps c29c4822cb96f5bfeb8640e72601c5cf4e3c3137
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/AMF eadd00804d5f7e5cd8c85d540073198312870776
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/FFmpeg 38b88335f99e76ed89ff3c93f877fdefce736c13
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/SVT-AV1 9292ec8e32bce26f781f277ec8739b53426c4300
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/Vulkan-Headers ee2ec5fd83dafce291024683b50dc89219333076
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/Vulkan-Loader b8b96a2862bff1eed468e602d43f706beae89cf1
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/nv-codec-headers e844e5b26f46bb77479f063029595293aa8f812d
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/x264 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
+apps/host/linux/third-party/build-deps/third-party/FFmpeg/x265_git 1d117bed4747758b51bd2c124d738527e30392cb
+```
+
+</details>
+
+## Retained candidate — Wacom USB recovery on the Qt baseline
+
+Branch `wacom-usb-recovery` starts from the complete .052 Qt work:
+parent `a08666b8b8fd820a92d3296ac88a5f7ebae9e3be`, Client
+`ab38aa1fe9264d7440f3f4bad515f98c2c1a4c44`. No Host, macOS or wire-protocol
+change was made in this candidate.
+
+The candidate was built on `wacom-usb-recovery`; current development uses main.
+Root and Client implementation commits are pushed. The post-build documentation
+checkpoint is `44fadb7ac49a6ab7999eb69c3c7ed3727460291c`; the installer remains
+the exact `bc204f6` source recorded below, not a relabelled notes build.
+No build, sampler or debugger remains active for this task. The redundant
+all-products run39510884633 is cancelled; the explicit Qt candidate run passed.
+The operator now reports a successful live USB-recovery test: restart Flame
+once, unplug the tablet for a few seconds, then reconnect it. The tablet worked
+in the still-running Flame after a few seconds, without another restart.
+Confirmation of the installed Client version is pending; do not yet attribute
+this result to the exact .053 package or claim unchanged device IDs were measured.
+
+Read-only live inspection found a client-side USB interface re-enumeration
+followed by Host virtual-tablet destruction/recreation while the application
+was running. A coordinated pen-only sample subsequently confirmed tip presses
+and full pressure reaching the Host virtual device; the application no longer
+selected its current extended-input device IDs. This supports the retention
+fix, not a claim that all similar application failures share this cause.
+No live application, device, service, configuration or package was changed.
+The bounded sampler is stopped; operational evidence remains outside Git.
+
+The shared Linux raw-HID adapter now uses the existing SUSPEND path for USB
+I/O loss, preserving Host endpoints and releasing held contacts. Wire interface
+ordering uses USB interface numbers, not hidraw names. Descriptor-driven
+completeness checks reject a temporarily partial tablet during driver rebind.
+Discovery also requires a pen-capable evdev node, because the kernel can expose
+hidraw before registering pen input; a surviving touch node is not readiness.
+Genuinely different device metadata/descriptors still reach the Host's existing
+replacement policy. First-generation normalized fallback is unchanged.
+
+New link-wrapped production-adapter tests cover renumbering, partial/malformed
+interface inventory, missing pen evdev readiness, polling/read failures,
+transient I/O interruptions, stale generation controls, reconnect barriers and
+handle cleanup. Normal and ASan/UBSan/leak runs pass. The unchanged Host's
+retained lifecycle fixture also passes 25 shuffled repetitions normally and
+under sanitizers (eight cases per repetition), using its retained component
+build, not a fresh Host package or real-kernel qualification.
+
+**1.1.053-wacom-usb-recovery is ready for manual testing.** Hosted run39508923505
+passes both full Client builds, 55 window/UI cases at 100% and 125%, offscreen
+and sanitizer coverage, two-monitor selection, synthetic precision gates,
+isolated PipeWire tests, three launcher/shutdown cycles, 14 package fixtures
+and finished-DEB checks. Live GPU handoff remains explicitly skipped on the
+software-only runner. These hosted checks are not hardware acceptance; the
+operator's separate live USB result and its provenance limit are recorded above.
+
+Exact candidate provenance:
+
+- Parent `bc204f6de2509d2557394084e209750bb095f7e3`.
+- Client `3b92fb419a1ea9c83f974a681efe57c0dc68e538`.
+- Client common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`; qmdnsengine `920c097ffa742e2968290f15d4dde6693aec02e5`.
+- Unchanged Linux Host `65dc0f1be60fe78d0457364f83813118c70bc8a8`; kymux `3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+- [Successful hosted run39508923505](https://github.com/instinctual/plank/actions/runs/39508923505).
+- Package: `artifacts/packages/candidates/1.1.053-wacom-usb-recovery/linux/plank-client-qt_1.1.053-wacom-usb-recovery_amd64.deb`.
+- Size: 17,165,256 bytes; SHA-256 `acc8c9eaa2609fc3ece94b1b18567ca0d1a10c246016af69f0ae741cd1ea363f`.
+- Packaged executable SHA-256 `b4e3b31b938d8571da6ba13c1c8f005709bf7031a8af56c5497913add1fd0097`.
+- Reports: `artifacts/qualification/wacom-usb-recovery-1.1.053/final/`.
+
+The downloaded package checksum, metadata, source provenance and executable
+hash are independently verified. Earlier run evidence is retained in attempt-1
+and attempt-2: the first caught fortified libc entry points bypassing fixture
+I/O injection; the second passed those tests and caught a stale packaging
+function-name check. Both are corrected with coverage, not suppressed. Neither
+failed run produced an installer. Privacy and clipboard checks also pass.
+
+Next: confirm the installed version for that live result. Continue from the
+working Flame session rather than restarting it again: qualify normal-tip
+clicks, pressure, eraser and Tablet Margins, repeated same-port USB recovery
+and network recovery. Host input IDs must remain unchanged for the same
+metadata/descriptors; the operator's successful recovery alone does not measure
+that invariant. See `protocol/wacom-hid.md` for the acceptance sequence.
+No Host update is required. The shared adapter also compiles for
+the ordinary Linux Client, but only the separate Qt package was produced.
+No remote installation, live application restart, merge or release was performed.
+
+## Previous Qt baseline
+
+### .052 ready for manual testing — windowed size and fullscreen restore
+
+The operator accepts .051's spacing and requests a useful normal window,
+retention of manual resizing across fullscreen toggles and no small-window
+preview before initial fullscreen. The Qt shell prepares an aspect-matched
+normal size within 80% of the available logical width/height; GNOME controls
+placement. Manual resizing is free-form with proportional video/letterboxing,
+not a hard window-shape constraint or a new Host resolution request.
+
+Hidden native creation retains the selected output. Initial raster painting
+and child showing wait for that output's actual fullscreen geometry: GNOME
+can expose a normal configure before its separate fullscreen configure.
+Normal content size is saved before entering fullscreen and restored once
+after the native normal-state event recreates decorations. Qt Wayland's own
+restore could otherwise subtract the border/title-bar dimensions each time.
+No fixed border offsets, timing delay, resize loop or private Wayland API.
+Explicit hide/minimize cleanup and .050's covered-parent policy remain.
+
+Hosted run39490258526 passes 55 window/UI cases at both 100% and 125%, separate
+two-monitor selection, offscreen and ASan/UBSan/leak checks, isolated PipeWire
+tests, all synthetic precision/import gates, both complete Client builds,
+three launcher/shutdown cycles, 14 package fixtures and finished-DEB checks.
+Real GPU handoff remains explicitly skipped on software-only drivers; this is
+not fresh Intel decode, live stream, input or acoustic acceptance. The windowed
+snapshot has no live frame and is not a visual-session qualification.
+
+Exact **1.1.052-ubuntu-qt-session** candidate:
+
+- Parent `aaa1482aa58c9650653750e12595c91c79afd97e`.
+- Client `ab38aa1fe9264d7440f3f4bad515f98c2c1a4c44`.
+- Client common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`; qmdnsengine `920c097ffa742e2968290f15d4dde6693aec02e5`.
+- Unchanged Linux Host `65dc0f1be60fe78d0457364f83813118c70bc8a8`; kymux `3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+- [Successful hosted run39490258526](https://github.com/instinctual/plank/actions/runs/39490258526).
+- Package: `artifacts/packages/candidates/1.1.052-ubuntu-qt-session/linux/plank-client-qt_1.1.052-ubuntu-qt-session_amd64.deb`.
+- Size: 17,159,020 bytes; SHA-256 `61218d071c0f39d82fbd031aac13c3adf366ed6c9422670528aa64bb2496f697`.
+- Packaged executable SHA-256 `2488062947b2adc4d7f6d80e7cb08f0982d2e79ca6edaa4864fbbd09b2292711`.
+- Reports: `artifacts/qualification/ubuntu-qt-session-1.1.052/final/`.
+
+Package checksum, metadata, provenance and executable hash are independently
+verified after download. Earlier failed-run evidence remains in `attempt-1/`
+through `attempt-6/`; no failing run produced an installer. Those runs caught
+initial configure ordering, normal-size restoration and minimize behavior, plus
+fixtures that needed to await real glyph/input-event delivery. The final tests
+retain those assertions. Dependency caches were used; no checks were relaxed.
+
+Next: manually test initial fullscreen, first windowed exit, arbitrary resize,
+repeated toggles, toolbar and input alignment. Position is GNOME-controlled;
+video must remain proportional and the Host mode unchanged. This remains the
+separately installable Qt Client; ordinary Client, both Hosts and native PipeWire
+behavior are unchanged. No remote installation, merge or release was performed.
+
+### .051 accepted — compact toolbar
+
+The operator approved reducing gaps between microphone, camera, fullscreen,
+minimize and disconnect from 8 to 4 logical pixels. The controls retain their
+32x32 click targets and 24x24 artwork. A nested controls row leaves all other
+column spacing, the slider, toolbar height, reveal and input handling unchanged.
+The RTT reserve is narrowed to three-digit whole milliseconds, including a
+fixed `>999 ms` over-range indication. Unknown/unavailable RTT remains a dash.
+Changing telemetry must not move the slider or control hit regions.
+
+Hosted run39475946222 passes both complete Client builds, 43 window/input
+cases on GNOME at 100%/125%, offscreen and ASan/UBSan/leak coverage, isolated
+PipeWire tests, three full-launcher cycles, 14 package fixtures and finished-DEB
+checks. The Wayland-only case is skipped offscreen and run on the compositor;
+the PipeWire daemon cases run separately, not silently skipped. Software-only
+GPU qualification does not replace real hardware or audible A/V acceptance.
+Final compositor screenshots visually confirm unclipped icons/readouts.
+New coverage checks RTT boundaries, stable hit regions and all four
+microphone/camera visibility combinations. The first run failed only a fixture:
+QVariant compares UINT_MAX and signed -1 equal; the distinct negative case now
+uses -1.0. No assertion or product validation was weakened.
+
+Exact **1.1.051-ubuntu-qt-session** package:
+
+- Parent `51f9afd14da244d38602d1ff230e3f01332127ec`.
+- Client `396ef6dc0678cfd8488c197c0a34d3050013e312`.
+- Client common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`; qmdnsengine `920c097ffa742e2968290f15d4dde6693aec02e5`.
+- Unchanged Linux Host `65dc0f1be60fe78d0457364f83813118c70bc8a8`; kymux `3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+- [Successful hosted run39475946222](https://github.com/instinctual/plank/actions/runs/39475946222).
+- Package: `artifacts/packages/candidates/1.1.051-ubuntu-qt-session/linux/plank-client-qt_1.1.051-ubuntu-qt-session_amd64.deb`.
+- Size: 17,154,440 bytes; SHA-256 `2bfd6f48c358c67b6f327ad4b5fa73d50ab0804f80c4ebe87268040a5b658533`.
+- Packaged executable SHA-256 `766e9b0fc4aac11cbecdbbec1c4c89c4347722ba8cfb7f6bc88938f92c66ffda`.
+- Reports: `artifacts/qualification/ubuntu-qt-session-1.1.051/final/`; first-run fixture evidence in `attempt-1/`.
+
+Downloaded package/provenance/checksums are verified. Read-only archive
+inspection independently confirms no payload-file overlap with ordinary1.1.039.
+Both Hosts, ordinary Client and native PipeWire behavior are unchanged.
+The operator accepts the compact toolbar in a live session. The separate
+real-output audio/A/V-sync soak remains pending. No remote
+installation, merge or release was performed.
+
+### .050 ready for manual testing — covered-parent presentation repair
+
+The .049 failure is reproduced on the authorized Intel Client without a Host
+connection, including with no audio stream. Exact-format decoding succeeds,
+but the opaque native video child completely covers its raster parent.
+Wayland continues delivering child frame callbacks while omitting callbacks
+for the covered parent. Qt 6.10.2's timeout heuristic marks that parent hidden
+and propagates the state to the child, stopping rendering and the bounded
+decoder qualification. This is not an HEVC-support, PipeWire or Host failure.
+
+The standalone hosted probe reproduces the failure on repeated native-child
+starts, with and without silent PipeWire. Removing the parent passes 12 starts;
+retaining it and setting process-local `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0`
+also passes all 12, including audio setup/teardown. Actual Wayland tracing
+confirms the parent/child callback distinction. Raw traces and machine state
+remain in private notes, not Git. No installed package or Host was changed.
+
+Candidate .050 sets that policy before creating Qt surfaces, only in the
+experimental Qt Client and its probes. Explicit diagnostic overrides remain.
+It disables the timeout heuristic, not frame callbacks or swap pacing; normal
+hide/minimize handling and the two-second exact-format gate remain. The
+native-child design still avoids Qt's RGB8 decoration framebuffer. New tests
+exercise sustained rendering, fullscreen/windowed changes and hide/restore.
+The first two hosted runs caught a stale child exposed flag after hiding its
+parent, then an incorrect assumption that programmatic minimize delivers a
+WindowStateChange event. The final shell uses QWindow's public visibilityChanged
+signal for show/hide/minimize/restore, with the child as connection-lifetime
+context. Both offscreen visibility and real-compositor swap assertions remain.
+Neither failed run produced an installer; their evidence is retained.
+
+Hosted run39385477049 passes both complete Client builds, all component tests,
+ASan/UBSan/leak checks, 41 compositor cases at 100%/125%, ten-bit precision and
+RGB8-rejection gates, three full-launcher cycles, 14 package fixtures and the
+finished-DEB checks. The Wayland-only swap test is explicitly skipped offscreen
+and under offscreen sanitizers, not counted as passed there. Real isolated
+PipeWire daemon tests pass separately from the deterministic audio tests.
+Downloaded archive/provenance/checksums are verified. Read-only archive
+inspection independently confirms no payload-file overlap with ordinary1.1.039.
+
+The final hosted standalone probe also passes 12 fullscreen HEVC VA-API starts
+with silent PipeWire and 12 windowed starts without audio on the authorized
+Intel Client, with no timeout environment override. Fullscreen/windowed
+roundtrips pass all nine shader/import/conceal cases, RGB8 rejection and 120
+real Vulkan/GL ownership handoffs. Earlier diagnostic A/B also verifies all1024
+RGB/gray framebuffer levels. These are hardware component checks, not a live
+Host connection or audible A/V soak. The temporary probe is removed and SSH
+closed; no package or system setting was installed/changed.
+
+Exact **1.1.050-ubuntu-qt-session** package:
+
+- Parent `eb6d33690df388666b852455f8a51152f63269c5`.
+- Client `730acdd5d6808f7efe9fedf3b7b74db28b40386a`.
+- Client common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`; qmdnsengine `920c097ffa742e2968290f15d4dde6693aec02e5`.
+- Unchanged Linux Host `65dc0f1be60fe78d0457364f83813118c70bc8a8`; kymux `3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+- [Successful hosted run39385477049](https://github.com/instinctual/plank/actions/runs/39385477049).
+- Package: `artifacts/packages/candidates/1.1.050-ubuntu-qt-session/linux/plank-client-qt_1.1.050-ubuntu-qt-session_amd64.deb`.
+- Size: 17,154,160 bytes; SHA-256 `9c788ad5c8031aa5bbbed9b5ea462c90e9c8f987470360e04e3a4d09aff64ac3`.
+- Packaged executable SHA-256 `9ef85983f78741f91de8689088350c3956d2fbc6f670b8b0f7d4d9feb140feff`.
+- Reports: `artifacts/qualification/ubuntu-qt-session-1.1.050/final/`; earlier failed gates in `attempt-1/` and `attempt-2/`.
+- Final standalone probe SHA-256 `94270f0a54293e9a80f1f74f2f10ebe563d17271cbcd32e84b4444825eec9cf0`.
+
+The operator has installed .050; the subsequent authorized toolbar screenshot
+shows a live session. The .051 toolbar candidate above supersedes the installer
+handoff, not the remaining real-output crackle and long A/V-sync gates. Native
+PipeWire is retained; ordinary Client and both Hosts are unchanged. No merge or
+release.
+
+### Candidate ready — direct PipeWire playback in Qt only
+
+The operator authorized direct PipeWire integration after read-only inspection
+confirmed actual short output reads in Qt .048: 11 shortages over 45 seconds,
+4289 missing stereo output frames, 8999 audio transport callbacks and zero
+concealed samples. This identifies output starvation; it does not prove that
+Host batching/arrival jitter is irrelevant. Machine access and raw evidence
+remain outside Git. The trace and SSH session are closed.
+
+Candidate .049 replaces Qt's SDL audio stream with native PipeWire playback,
+measured graph/device timing, a bounded SPSC PCM queue and producer-side smooth
+FFmpeg compensation. A rolling post-pull headroom guard prevents repeated phase
+catch-up from draining the reserve. Startup/recovery primes one graph quantum
+plus 12ms; this is a bounded continuity/latency tradeoff, not free buffering.
+No ordinary Client, Host, microphone, transport or video policy change. See
+the Qt plan for design and tests. Candidate **1.1.049-ubuntu-qt-session** is
+downloaded and package-verified; hardware/audio-soak acceptance remains open.
+Successful run 39375933711 passed all 19 audio component cases, including nine actual-FFmpeg
+drift/batching combinations and large-quantum startup. Real isolated PipeWire
+playback, repeated destruction and unavailable-server handling passed normally
+and with ASan/UBSan at 1024/4096 frames. Reported playback underruns were zero.
+All existing component/compositor gates, both complete Client builds, three
+full-launcher cycles, 14 package fixtures and the finished-DEB gates passed.
+The earlier run's backend-object check used the wrong qmake path; the corrected
+gate checks `app/release/pipewire.o` and absence of `app/release/sdlaud.o`, with
+explicit error messages. This is a regression-build gate, not proof of live
+Intel hardware decoding or real-output acoustic behavior.
+
+Early leak-check failures came from libdbus globals being unloaded with the
+standalone test's PipeWire modules. The test now retains the library and calls
+its documented `dbus_shutdown()` only after all renderers/threads are gone.
+The sanitized rerun passes with leak detection enabled and no suppressions.
+Never move that global shutdown into the real renderer; other GUI components
+use D-Bus. Stream destruction itself stays synchronized with the live PipeWire
+loop and balances initialization. Producer high-water follows graph quantum
+plus reserve when larger than 50ms, so large devices can actually prime.
+Before/after evidence is retained under the .049 qualification directory.
+
+Exact package sources and retained evidence:
+
+- Parent `239044961b01576ebfbc8358835b0bf128ee33ba`.
+- Client `0e177030034c4e02cbcfa64c0e2f7d3be7153ea1`.
+- Client common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`; qmdnsengine `920c097ffa742e2968290f15d4dde6693aec02e5`.
+- Unchanged Linux Host `65dc0f1be60fe78d0457364f83813118c70bc8a8`; kymux `3f7a9d8618978287186e5d6ce0eaa067743cb06c`.
+- [Successful hosted run 39375933711](https://github.com/instinctual/plank/actions/runs/39375933711).
+- Package: `artifacts/packages/candidates/1.1.049-ubuntu-qt-session/linux/plank-client-qt_1.1.049-ubuntu-qt-session_amd64.deb`.
+- SHA-256: `996fc09f29ea828d3d0d9474334d64bab1b5f92090b4ef8a06c5ad6a76b9f094`.
+- Packaged executable SHA-256: `fe9e806920deafc9e480312472aeb44a7a1b5bf80d65465645fbf1b0d1fe9129`.
+- Reports: `artifacts/qualification/ubuntu-qt-session-1.1.049/final/`; earlier lifecycle/gate evidence is alongside it.
+
+The downloaded archive and binary hashes match the builder. Read-only `ar`/`tar`
+inspection on the Rocky coordinator independently confirms no payload-file
+overlap with the retained ordinary 1.1.039 DEB; Ubuntu's full dpkg namespace and
+disposable-install/purge tests ran in CI. Do not install DEBs on the builder.
+The operator installed .049 but encountered the startup issue described above.
+After .050 fixes startup, verify brief crackles, A/V sync over a long real-output soak,
+OS-selected output routing and interruption recovery. Log `PLANK PipeWire
+playback` provides actual shortages, missing frames, headroom and correction.
+No merge, release, remote installation or real-output listening acceptance.
+
+### Accepted follow-up — hide startup decoder test images
+
+The operator accepts .047's icons, then reports a momentary light-blue screen
+during connection. Source inspection finds that decoder qualification fills
+the visible output with its test frame; both window backgrounds already use
+black. Candidate **1.1.048-ubuntu-qt-session** explicitly marks qualification
+frames and clears their pixels to black after the existing exact-format GPU
+draw, before Qt draws controls and swaps. No hidden window, extra framebuffer,
+timer, readback or per-live-frame clear is added. The check still validates
+actual import, shader, target precision and swap feedback. Live frames are not
+concealed. The immutable marker stays with retained frames, including any
+older surface still being sampled during a decoder transition.
+
+The connecting message now waits for actual live-frame swap feedback, not
+test-frame presentation or mere live submission. Each decoder generation has
+fresh readiness, so old feedback cannot end a new startup notice. Automatic
+recovery, input, transport, codecs and both Hosts are otherwise unchanged.
+New controlled-feedback tests exercise qualification, live readiness,
+cancellation and generation replacement; the compositor's exact-pixel fixture
+checks black concealment and immediate unchanged live rendering for all nine
+existing format/crop/filter cases. Concealment must still reject an RGB8
+substitution for a ten-bit target. Hosted run 39358327903 passed on its first
+attempt. All nine presenter cases passed normally and with ASan/UBSan; all
+40 window/input cases passed offscreen, with sanitizers and on GNOME/Wayland
+at 100%/125%. The compositor passed 72 conceal/reveal pixel scenarios across
+both scales and window modes, retaining the ten-bit target rejection gates.
+Both complete Client builds, ordinary Client preflight, three Qt launcher
+cycles, 14 package fixtures and finished-package gates passed. The downloaded
+DEB has no file overlap with the retained ordinary 1.1.039 Client. Hosted Mesa's
+external-memory/semaphore handoff is still an explicit skip, not Intel hardware
+acceptance. Dependency restore/verification/bootstrap took 21 seconds; the
+combined component and complete-build step took 14m29 of the 17-minute job.
+
+Exact **1.1.048-ubuntu-qt-session** package sources and evidence:
+
+- Parent `e3ef63836b470ce248c90a3e038bfdb73b7ba668`.
+- Client `68cabc025b8f0d4a0a741ab0d0c9a46e5180b299`.
+- Successful [GitHub-hosted run 39358327903](https://github.com/instinctual/plank/actions/runs/39358327903).
+- Package: `artifacts/packages/candidates/1.1.048-ubuntu-qt-session/linux/plank-client-qt_1.1.048-ubuntu-qt-session_amd64.deb`.
+- SHA-256: `acd7fe7ad61a82133a43e8bf70d59b43a6895087c536a5bce3f02a229b341dc4`.
+- Packaged executable SHA-256: `6563b41c087926c15db0c73a86726710c8e7f4ccebb3b2764193ef424c4ef205`.
+- Retained reports: `artifacts/qualification/ubuntu-qt-session-1.1.048/`.
+
+The operator tested .048, reports the startup transition is better, and
+authorized committing/pushing this checkpoint. This accepts the startup
+improvement, not the remaining full interruption, profile, audio and
+camera/microphone qualification gates. Both source commits are pushed on
+`ubuntu-qt-session`; no remote installation, Host update, merge or release
+was performed.
+
+### Retained follow-up — borderless, consistently sized toolbar icons
+
+The operator reports that .046's icons, including minimize/close, look squeezed
+inside small boxes. Read-only inspection found that the real app's Material
+style supplies edge-specific padding/insets despite the custom button's generic
+`padding: 0`. The earlier isolated UI tests used the default style, so their
+successful SVG renders did not exercise this production layout. This is not
+evidence of another video-import or cursor defect.
+
+Candidate **1.1.047-ubuntu-qt-session** uses Qt's unstyled Button template for
+the existing toolbar controls: 32-pixel invisible click targets, centered
+24-pixel SVGs, no idle box, and subtle hover/press feedback. Minimize and close
+now use the same vector dimensions, color and line weight as the other icons.
+The microphone/camera also use centered vector artwork; supported/active states
+still come from existing telemetry. Toolbar height remains 39 logical pixels.
+No window, input, video, audio, transport, Host or ordinary Client policy changes.
+
+The isolated probe and Client tests now use the production Material Dark/Dense
+style. Added regressions require actual 24-pixel content geometry, zero style
+insets, wide rendered glyphs, transparent idle backgrounds, hover/press feedback
+and all six controls activating from outside their artwork without remote click
+leakage. First hosted run 39354381789 passes all 40 window/input cases offscreen,
+on GNOME at 100%/125% and under ASan, but LeakSanitizer stops afterward on a
+320-byte Fontconfig configuration allocation reached through Material startup.
+The standalone test/probe now finalize Fontconfig after Qt teardown; leak
+detection remains enabled, without suppressions or a production cleanup change.
+The final Material screenshots show correctly sized, borderless icons at both
+scales. Hosted rerun 39355378111 passed: all 40 window/input cases offscreen,
+on GNOME/Wayland at 100%/125% and under ASan/UBSan with leak detection; both
+complete Client builds, ordinary Client preflight, three Qt launcher cycles,
+14 package fixtures and the finished-package gates also passed. The downloaded
+DEB has no file overlap with the retained ordinary 1.1.039 Client. Hosted Mesa's
+Vulkan/GL semaphore handoff remains an explicit skip, not hardware acceptance.
+
+Exact **1.1.047-ubuntu-qt-session** package sources and evidence:
+
+- Parent `f9ad67b704e7e9900c7304a49f6a8c86c91dc811`.
+- Client `ba0d2227288eb055c17bf144518b5a4c42c295c7`.
+- Successful [GitHub-hosted run 39355378111](https://github.com/instinctual/plank/actions/runs/39355378111).
+- Package: `artifacts/packages/candidates/1.1.047-ubuntu-qt-session/linux/plank-client-qt_1.1.047-ubuntu-qt-session_amd64.deb`.
+- SHA-256: `0445aeab306697628d489ef776cb0c484ff8016209ff0c35cc35643bcde46522`.
+- Packaged executable SHA-256: `b3e9eac0ff9fe8a32576225c3e84d7c13d17ce4dd48a3eea4c77f17c25010f9c`.
+- Retained reports: `artifacts/qualification/ubuntu-qt-session-1.1.047/`.
+
+The successful job took about 18 minutes: 5m17 dependency bootstrap, 10m39
+component/full-build validation, and the remainder setup/packaging. The first
+test-harness cleanup failure required a separate attempt. No build-speed change
+or reduced test policy was made. Build only through the explicit GitHub-hosted
+`linux-client-qt` job. No end-user installation, merge or release was performed.
+The operator subsequently accepted the toolbar appearance. Automatic recovery
+after a cable interruption and full live-profile/audio/camera/microphone gates
+remain separate.
+
+### Retained toolbar labels, icons and automatic recovery
+
+The operator accepts .045's windowed toolbar interaction. They request the
+regular Client's two-row stats layout and recognizable pin/fullscreen icons.
+Candidate **1.1.046-ubuntu-qt-session** stacks labels above FPS, Video Mbps,
+Loss and RTT values, reserves text widths to avoid control movement, and keeps
+the 39-pixel toolbar height. Encoder Target remains above its slider. Loss
+colors and three-decimal precision are unchanged.
+
+Bundled SVG resources replace the repaint-dependent Canvas pin and literal
+square fullscreen character. Pin changes between upright/slashed; fullscreen
+corners point outward or inward based on the top-level shell's actual state.
+Qt SVG support is already a package dependency. No hover, video, Wacom or Host
+policy changes are added. New tests check actual rendered
+icon pixels, resource/state changes, hide/reveal, native window transitions,
+stacked label geometry, stable control positions and no remote click leakage.
+Hosted build/package qualification passed; the candidate is downloaded and
+checksum/provenance-verified. Earlier attempts caught a read-only QML Image
+size assignment, an overly strict antialiased-icon test and the standalone
+probe's obsolete Keep Waiting callback. These were corrected without relaxing
+the behavioral gates; none of those attempts produced a package. A fixed-size
+Item owns each vector image, load guards protect the new tests, and the icon
+fixture checks foreground contrast against the dark button background.
+Continue on the existing `ubuntu-qt-session` branches; no deployment is claimed.
+
+The operator also authorized automatic recovery after a cable interruption.
+Read-only inspection confirmed that .045's Ask deadline paused retry requests,
+even after the network returned. The Qt frontend now treats that timeout as a
+notice deadline, not a retry deadline. It shows a Disconnect-only status dialog
+while continuing the established bounded/delayed recovery loop. Successful
+reconnection clears the notice and restores current input geometry without a
+button press. Explicit auto-disconnect still uses its deadline. Authentication
+denial, changed Host identity and active-session takeover remain terminal; no
+new password retry policy or silent takeover is introduced. The regular Client
+and macOS keep their current policy. Qt preferences describe the new behavior.
+Added checks cover continuous/bounded request gating, revocation, terminal
+errors, a single local Disconnect action, cursor visibility and automatic
+notice removal/input restoration. Live cable-loss acceptance remains pending.
+
+Exact **1.1.046-ubuntu-qt-session** package sources and evidence:
+
+- Parent `967de834d1d23ffe76ee99de31559355ee169544`.
+- Client `44b6c4f470f7eaa7cd1e3634eaa3d274e44986ca`.
+- Successful [GitHub-hosted run 39350839732](https://github.com/instinctual/plank/actions/runs/39350839732).
+- Package: `artifacts/packages/candidates/1.1.046-ubuntu-qt-session/linux/plank-client-qt_1.1.046-ubuntu-qt-session_amd64.deb`.
+- SHA-256: `67be549b55a082d807e4be75c612281733f6df9a69858d12aebf4a4781dc6de1`.
+- Packaged executable SHA-256: `91dc3dbfad8bd754f2edd34d7385d6cb92d519cf05fe1f9422091040ca40ef14`.
+- Retained reports: `artifacts/qualification/ubuntu-qt-session-1.1.046/`.
+
+All 38 window/input cases pass offscreen, under ASan/UBSan with leak detection,
+and on isolated GNOME/Wayland at 100% and 125%. The restored icons, stacked
+stats and Disconnect-only notice were also visually inspected in the actual
+test renders. Both complete Client variants compiled; the ordinary Client's
+preflight, continuous/bounded reconnect policy, three Qt launcher cycles,
+14 package fixtures, production payload non-overlap and package/runtime gates
+passed. Hosted Mesa still lacks the Vulkan/GL external semaphore capability;
+that hardware-sensitive gate is skipped, not accepted. Microphone and camera
+reuse the existing capture/transport and are wired into the Qt toolbar for
+compatible macOS Hosts, but real-device Qt acceptance remains pending.
+No Host update, remote installation, merge or release was performed. The
+later production-style sizing issue above supersedes the earlier visual
+acceptance of these default-style test images. No SSH or trace is active.
+
+### Accepted windowed toolbar access and separate ghost-cursor investigation
+
+The operator accepted the 1.1.044 video repair and reports working mouse and
+tablet input. They also report a longstanding duplicate arrow at the physical
+screen's top-left, outside the now-windowed session. Do not treat that as a
+Host-video or coordinate-mapping defect without evidence. Controlled tests now
+reproduce it **without PLANK running**: closing the app leaves the arrow; local
+pen movement clears it; launching a standard native GNOME dialog brings it
+back. Merely launching PLANK also reproduces it before any stream/tablet grab.
+Temporarily disabling Qt's Wayland tablet interface did not help and is not a
+product change. The launch-only process had no input/hidraw devices open.
+Investigate the local GNOME/Wayland cursor lifecycle, not remote input mapping.
+The precise compositor/driver defect remains unproven. No OS update, reboot,
+Host change or permanent runtime setting was applied. Private machine evidence
+and unsuccessful screenshot captures remain outside Git.
+
+The operator refined the windowed solution: **no additional Show Toolbar
+button**. Use a wider, twelve-logical-pixel activation strip below the native
+title bar. Fullscreen retains its three-pixel physical-edge trigger. The
+one-second dwell, five-second hide and Pin policy are unchanged. Mode follows
+the top-level shell rather than the native child. Qt owns all hit testing;
+no new popup/native surface or decoration implementation is added. Remote
+drags suppress reveal. Added regressions cover dwell/cancellation, shell
+fullscreen transitions, recovery, Pin and released-input fullscreen controls.
+Hosted compositor runs save synthetic UI screenshots at both scales.
+
+Candidate **1.1.045-ubuntu-qt-session** passed the hosted build and package
+gates and is downloaded below. All 35 window/input cases pass offscreen, under
+ASan/UBSan with leak detection, and on isolated GNOME/Wayland at 100% and 125%.
+The new hover cases cover cancellation, repeated native fullscreen/windowed
+transitions, recovery, Pin and released-input controls without Host click leakage.
+Earlier attempts stopped in new test fixtures and produced no packages. The
+final fixture waits for actual compositor geometry, exposure and rendering;
+it does not incorrectly require keyboard activation in a headless input seat.
+The original behavioral assertions remain. Synthetic screenshots were inspected
+at both scales. The operator subsequently confirmed the windowed toolbar works.
+
+### Retained hardware presentation repair
+
+The operator reports that 1.1.043 connects and its toolbar responds, but the
+remote image does not update normally. With permission, short thread snapshots
+were collected from the already-affected Qt process and it was immediately
+resumed. No package was installed, input injected, or Host process changed.
+There is no captured deadlock: GUI/decoder threads were waiting normally and
+presentation counters show some frames delivered. The log does show repeated
+hardware presentation failure, software fallback and decode queue overflow.
+
+An independent surfaceless EGL probe under the desktop user's account confirms
+that the actual Intel desktop OpenGL driver rejects `GL_TEXTURE_EXTERNAL_OES`
+with `GL_INVALID_ENUM`, while `GL_TEXTURE_2D` succeeds. The Qt importer chose
+the unsupported target for packed Y410/XR30 and XYUV/XR24 images. The repair
+imports all already-reinterpreted RGB/R/RG planes as ordinary 2D textures; it
+does not change color mapping, decoding policy, transport or input. The unused
+external-sampler variant is removed from this Qt-only renderer. Import failures
+now report the failed operation and graphics error, once per failed generation.
+
+The compositor precision regression now creates real EGLImages and uses the
+same import helper as the renderer before checking packed 8/10-bit and planar
+P010 values, crop and filtering. The former direct-texture fixture skipped the
+failing operation. This remains synthetic qualification, not a substitute for
+hardware VA-API DMA-BUF/live-session testing. Candidate 1.1.044 passed the hosted
+gates and is downloaded below. The operator subsequently confirmed that it
+fixed playback; complete profile/soak qualification remains separate. The
+production Client and both Hosts are unchanged.
+SSH is closed and no debugger remains attached. Private backtraces stay outside Git.
+
+### Retained Wacom crash repair
+
+The 1.1.043 cursor-texture ownership repair remains included. The prior
+1.1.042 tablet crash resolved to double deletion in
+`QSGSimpleTextureNode::setTexture()`. Qt now owns that texture's retirement.
+The rendered 24-replacement/clear/visibility/destruction regression passes
+again under normal, sanitizer and 100%/125% compositor tests. Do not recommend
+1.1.042. The operator now reports working tablet/mouse input; pressure, margins
+and interruption/reconnect qualification remain separate gates.
+
+Continue in `build/worktrees/ubuntu-qt-session`, on matching parent/Client
+`ubuntu-qt-session` branches, based on main
+`38e00a557670df063926af1ef3466156145302ae` (1.1.039).
+The persistent-tablet and Client session-recovery fixes are included.
+The independent CUDA candidate and canonical checkout's unrelated PKG edits
+remain untouched. Read [the plan](docs/development/plans/ubuntu-qt-session.plan).
+
+The operator requires full feature equivalence and continued work until their
+input is necessary. No Development NUC is currently available. Build/test only
+on GitHub-hosted Ubuntu Actions; do not request VM prerequisite installation or
+contact stale hardware addresses. The **PLANK Client Qt** /
+`plank-client-qt` DEB must co-install without sharing production configuration,
+bookmarks, trust, logs, libraries or executable/application identity.
+
+### Previous candidate — accepted windowed toolbar access
+
+**1.1.045-ubuntu-qt-session** is built, downloaded and checksum/provenance
+verified. Exact package sources:
+
+- Parent `2a792fd389eef3344adc40cbbcf2bf57a59c60c1`.
+- Client `95e426587fb79913eee779cefe2b95a1a98c7baa`.
+- Successful [GitHub-hosted run 39345546408](https://github.com/instinctual/plank/actions/runs/39345546408).
+- Package: `artifacts/packages/candidates/1.1.045-ubuntu-qt-session/linux/plank-client-qt_1.1.045-ubuntu-qt-session_amd64.deb`.
+- SHA-256: `ba697979c967a34847e6d527a09996fb1fe99952bb9c3296a4f9162637742aae`.
+- Packaged executable SHA-256: `2fc03cf0eaf027c6f0f53ac1805ac74cd9793aecdb26ec377dcaba8885ea3ceb`.
+- Retained reports: `artifacts/qualification/ubuntu-qt-session-1.1.045/`.
+
+Both complete Client variants compiled and linked; ordinary Client preflight,
+three Qt launcher/shutdown cycles, all 14 package fixtures, actual production
+payload non-overlap, runtime/dependency/RPATH/version/no-autostart gates passed.
+The 73 root CI-policy tests passed. The retained EGLImage/precision tests pass
+again at both scales. Hosted Mesa still lacks the Vulkan/GL external semaphore
+capability: that hardware-sensitive gate remains explicitly skipped. Sources
+and recursive Client/transport pins match the downloaded report and BUILD-INFO.
+No Host/macOS package was built, no candidate was remotely installed, and no
+merge or release was performed. The normal installed Qt launcher was restored
+without the temporary diagnostic environment; SSH and all diagnostics are closed.
+
+### Previous candidate — accepted playback repair
+
+**1.1.044-ubuntu-qt-session** is built, downloaded and checksum/provenance
+verified. Exact package sources:
+
+- Parent `ebbc237aad6e11b490dea427423da687a2cd97f9`.
+- Client `bb7d75a8f232cf02c33b03a687ef8369f7df06b3`.
+- Successful [GitHub-hosted run 39337612932](https://github.com/instinctual/plank/actions/runs/39337612932).
+- Package: `artifacts/packages/candidates/1.1.044-ubuntu-qt-session/linux/plank-client-qt_1.1.044-ubuntu-qt-session_amd64.deb`.
+- SHA-256: `6e2b6d69b015cfb77b0d686249095cea4502fb708d3bc52e0d277a0fb2c7dc10`.
+- Packaged executable SHA-256: `e726d5c5bba0daa15c48808667fc5b579ce1b46a11130032ff57fb953f6302a6`.
+- Retained reports: `artifacts/qualification/ubuntu-qt-session-1.1.044/`.
+
+Both full application builds passed: the experimental Qt app and the ordinary
+Client regression build/preflight. Component tests, ASan/UBSan with leak
+detection and isolated GNOME/Wayland 100%/forced-125% tests passed, including
+32 window/input cases at each scale. All 14 package-fixture checks passed.
+The actual candidate and published 1.1.039 production DEB have no overlapping
+non-directory payload paths. The synthetic install/purge test preserves the
+production fixture; neither real package was installed on the builder.
+Runtime dependencies, private FFmpeg/SDL, RPATH, version, actual Qt linkage,
+no-autostart and package metadata gates passed. Three real launcher cycles
+passed with SDL video deliberately unavailable. Privacy/clipboard regressions
+and all 73 root CI policy tests also passed. These are not real network-session
+or Intel GPU qualification results.
+
+The candidate integrates the asynchronous Qt session owner with existing
+transport, authentication, exact-profile decoder selection, audio synchronization,
+recovery and teardown. Qt owns the windows and event dispatch; no SDL video
+surface or second Wayland event loop is introduced. The same immutable
+VA-API/software frame leases feed a one-slot presenter. Primary swap feedback
+advances the unchanged audio clock. Qualification waits are bounded/cancellable.
+
+All nine EGL-image import/shader cases pass in windowed/fullscreen and mode
+round trips at both scales, including rejection of an 8-bit intermediate.
+The software converter and shader tests preserve all 1024 codes, RGB identity,
+full-range BT.709, crop/offset, downscaling and the unchanged encoded fixtures.
+Current macOS Host profiles require full-range BT.709; the legacy setup-range
+field is not authoritative. Both actual Apple profile fixtures are tested.
+Generic limited-range conversion tests do not imply that macOS streams are limited.
+
+Hosted Mesa does not expose the required Vulkan/OpenGL external semaphores.
+The 120-roundtrip interop qualification correctly reports skipped, not accepted.
+Actual Intel VA-API decoding/export, Vulkan-to-GL delivery, display precision,
+performance, audio/video soak and physical Wacom remain pending hardware gates.
+
+### Implemented scope / remaining acceptance
+
+The current Client additionally connects toolbar bitrate acknowledgement,
+shared rate/loss/RTT statistics, microphone/camera controls, overlay, Qt physical
+keyboard/mouse input, shared raw-HID and normalized tablet workers, Host cursor
+shapes/positions and Wayland shortcut/pointer policy. The ordinary Client now
+shares its bounded cursor-message parser with the Qt frontend. New input tests
+cover key identities, malformed cursor chunks and reconnect sequence epochs.
+The raw-HID worker includes the .053 USB-retention changes described above;
+the normalized fallback is unchanged.
+The successful hosted checkpoint also exercises retained tablet-reader
+lifecycle, cross-output drag geometry, P010 two-plane GPU conversion, idle
+inhibition, visible-output precision qualification, and stale-generation
+rejection. The earlier incorrectly typed Qt signal sender is corrected, and
+both complete applications compiled and linked successfully.
+
+The launcher now uses Qt display enumeration without an SDL video probe. Exact
+decoder qualification remains on the session surface, not an unknown temporary
+window. Unix termination follows the Qt asynchronous teardown path. A new
+compiled display-enumeration test and three complete launcher smoke cycles run
+with SDL video unavailable. The candidate also keeps Ctrl+Alt+Shift+Q local during startup,
+released input and Host timeout, with tests for repeat suppression, no remote
+key leakage and non-Latin layout fallback. Both local and streaming shortcuts
+use the same layout resolver. All these hosted gates passed. The earlier .041
+run was superseded before packaging; it is not the delivered candidate.
+
+**Next action: .053 live Flame USB/network recovery acceptance**, using the
+sequence at the top of this file and in `protocol/wacom-hid.md`. Earlier .046
+toolbar/recovery instructions are not a request to reinstall that candidate.
+Preserve the accepted toolbar appearance, spacing and windowed reveal behavior.
+During network recovery, the status dialog must recover automatically without
+a Keep Waiting click; separately verify Disconnect and the configured
+automatic-disconnect policy. The desktop ghost is independently reproducible
+without PLANK; do not add input workarounds merely to hide it.
+Keep the ordinary Client closed during Qt testing. Still confirm exact-profile H.264
+High 10 software and HEVC Rext 10-bit hardware paths, toolbar/letterbox and
+window controls, keyboard/mouse, Wacom pressure/Tablet Margins and recovery,
+one/two outputs and scale changes, microphone/camera, and a moving-video/audio
+soak. Capture the Qt app's separate `plank-client-qt/logs` state directory if
+startup fails. No Host update is needed for this experiment. Do not remove the
+ordinary implementation or claim full feature equivalence before acceptance.
+No package was remotely deployed and no merge/release is authorized. Preserve
+the experimental branches and canonical checkout's unrelated edits.
+
+Dispatch from a clean pushed branch with:
+`bash scripts/ci/dispatch.sh linux-client-qt-tests false`.
+That target builds both full application variants and isolated tests, not a package.
+Use `bash scripts/ci/dispatch.sh linux-client-qt false` to run the same gates and
+then package the exact Qt binary with the independent identity. All checks run
+on GitHub-hosted Ubuntu; do not install a package on a builder.
+Warnings include inherited FFmpeg Vulkan queue-callback deprecations, unused
+Quinn telemetry and the existing launcher Back shortcut's multiple bindings;
+do not claim a warning-free build. Minimal headless GNOME lacks optional
+calendar services; its generated warnings did not fail the isolated tests.
+
+Dependency pins remain unchanged: Linux Host `65dc0f1be60fe78d0457364f83813118c70bc8a8`,
+Client common-C `437be9a0a4d164efdf9ed20dc6dd5a2b7b9edc90`,
+qmdns `920c097ffa742e2968290f15d4dde6693aec02e5`,
+Kymux `3f7a9d8618978287186e5d6ce0eaa067743cb06c`,
+build-deps `c29c4822cb96f5bfeb8640e72601c5cf4e3c3137`.
+No Host, macOS-specific session or wire-protocol changes are part of this work.
+
+## Retained candidate — CUDA 13.2 Update 2
+
+Continue in `build/worktrees/cuda-13-2` on `cuda-13-2`, based on main
+`38e00a557670df063926af1ef3466156145302ae`. The operator reports the released
+1.1.039 working without observed issues on NVIDIA 595.104.02 and authorized a
+separate Linux Host toolchain candidate. Version is **1.1.040-cuda-13-2**.
+Do not merge, publish a release, install a package or interrupt a live session
+as part of this build request. The independent Qt Ubuntu prototype stays paused.
+
+Only the Linux Host CUDA build components move to Toolkit 13.2 Update 2
+(NVCC/runtime 13.2.86). Exact RPM pins and a fail-closed component/compiler
+check are shared by hosted installation and package preflight. The existing
+cache fingerprints already include NVCC and installed RPMs; the compiled Host
+dependency tree rebuilds with the new toolchain without weakening cache checks.
+Keep the full GPU architecture set. Host/Client/Kymux and recursive source pins,
+NVENC SDK 13.0.19 headers, encoding settings, transport and macOS are unchanged.
+No new Client package is needed.
+
+The Linux Host-only hosted build passed at exact source
+`c018fb26048cf723d3ba5fc4315dbee562472755`:
+[39186329545](https://github.com/instinctual/plank/actions/runs/39186329545).
+The RPM is downloaded and collected under
+`artifacts/packages/candidates/1.1.040-cuda-13-2/linux/`:
+`plank-host-1.1.040-0.cuda_13_2.1.el9.x86_64.rpm` (8,749,513 bytes), SHA-256
+`5f5ebb2b8e4fa672e8a9df2ce91573512d128f01c66296f07a3cec756ed5ec72`.
+The transferred manifest exactly matches the hosted manifest. The package
+contains visible version `1.1.040-cuda-13-2`, CUDA fatbins, the production
+`BUILD_TESTS=OFF` payload and its owned root:root `0700` log directory. RPM
+runtime requirements match 1.1.039 apart from the self-versioned config entry.
+
+Validation passed: 75 CI-policy tests, 17 local packaging/path/collection
+checks plus the release-version contract, dependency-patch verification,
+Rust/protocol/C ABI gates, and three 900-frame controlled-loss matrices at
+150 Mbps/60 fps over 0/0.5/1/3/5% loss (zero unrecovered source symbols).
+The input lifecycle suites ran 25 shuffled repetitions each: 45 production
+passes with three kernel-dependent skips, and 56 wrapped-UHID fixture passes.
+Both CUDA installation and package preflight verified NVCC 13.2.86. Compilation
+retained architectures `75;80;86;87;89;90;100;103;110;120;121` and NVENC headers
+`e844e5b26f46bb77479f063029595293aa8f812d` (SDK 13.0.19).
+Rust, Cargo and Boost caches were reused; the Host FFmpeg/dependency cache was
+rebuilt, patch-verified and saved for the new compiler. All root and recursive
+source pins remain those of the baseline below.
+
+No build remains running. No merge, release publication or installation was
+performed. Next is manual Host installation with the existing 1.1.039 Client,
+then real capture, identity/color, scaling, NVENC and live performance checks
+on 595.104.02. These hardware gates remain pending; hosted results do not prove
+a performance gain or replace live qualification.
+
+## Inherited main baseline — persistent tablet and Client recovery integrated
 
 The operator authorized merging `wacom-persistent` into main. The parent,
 Linux Host and Client now use `main`; the two changed dependencies use their
 established product branches. All integration is fast-forward, preserving the
-candidate commits and their authorship. Continue in
-`build/worktrees/wacom-persistent` on **main**, not the canonical checkout's
+candidate commits and their authorship. Main remains in
+`build/worktrees/wacom-persistent`, not the canonical checkout's
 separate, dirty `client-pkg-only` branch.
 
 | Component | Integrated source / branch |
@@ -493,6 +2457,11 @@ fixture was not run locally. Local evidence is under
 
 ## Native Apple Client coordination — agreed and kept separate
 
+Current native development and TestFlight automation are on `native-builds`;
+read that worktree's HANDOFF for the accepted imports and current testing gate.
+The original coordination checkpoint below is historical. Its branch is
+retained, but the duplicate `apple-native-integration` worktree is retired.
+
 The published `apple-native-integration` branches were refreshed from the
 consolidated mainline. Parent `b26b84e377522fddacb21617a23c82def66040da`
 contains the product tree from `89e992b` plus updated coordination notes;
@@ -565,8 +2534,9 @@ X11/x264 conversion and Linux Client sizing are unchanged.
 ## Last published release and rollback
 
 [PLANK 1.1.039](https://github.com/instinctual/plank/releases/tag/v1.1.039)
-is the latest published release. Exact source, package hashes and build evidence
-are recorded at the top of this file. [Release notes](docs/releases/1.1.039.md)
+is the recorded published baseline. Exact source, package hashes and build
+evidence are in the **Inherited main baseline** section above, not the current
+Qt candidate section. [Release notes](docs/releases/1.1.039.md)
 compare against 1.1.030 and explicitly preserve the remaining hardware gates;
 publication does not claim that unperformed tests passed. No machines were
 automatically upgraded.
@@ -608,13 +2578,16 @@ Merging does not close hardware acceptance. See
 - Deferred Mac Wallpaper/Screen Saver pointer lag, Linux physical-display
   provenance mismatch and immediate-paste clipboard stress.
 
-Current audio policy uses Host common-clock phase for macOS and separate
+The ordinary Client's audio policy uses Host common-clock phase for macOS and separate
 relative-rate handling for Linux. Smooth resampling is bounded to one percent,
 with SDL output-demand/headroom guards. No extra audio-frame dropping or video
 delay was added; recovering playback reserve can retain a few milliseconds.
 A shortage-request counter is not a measured speaker underrun. See the
 [audio plan](docs/development/plans/audio-sync.plan) and
 [real-world procedure](docs/development/audio-sync-baseline.md).
+The Qt candidate instead uses native PipeWire playback from .049 onward;
+its isolated daemon/clock tests do not replace the pending real-output listening
+and A/V-sync soak. Do not diagnose Qt playback as the ordinary SDL audio path.
 No old sampler is still running merely because a prior note described a soak.
 
 Keep machine identities and private evidence outside Git. Read the private notes

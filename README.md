@@ -19,13 +19,18 @@ transport, packaging, documentation and qualification tests.
 | --- | --- | --- |
 | Linux Host | Rocky Linux 9.7 / RHEL 9 family, x86-64, NVIDIA graphics and X11 | RPM |
 | Linux Client | Ubuntu 26.04, x86-64; Wayland is the qualified desktop path | DEB |
-| macOS Host | macOS 27 or newer, Apple Silicon | Signed, notarized PKG |
+| macOS Host | macOS 26.7 or newer, Apple Silicon | One signed, notarized PKG |
 | macOS Client | macOS 15 or newer, Apple Silicon | Signed, notarized PKG |
 
 Rocky Linux 9.7 is the Linux Host build and qualification baseline. The Mac
 Client uses one package for macOS 15 and newer, built with SDK 27 or newer;
-the Host has a separate macOS 27 minimum. Windows and other platforms are not
+the Host uses one package with a 26.7 minimum and the same SDK27 requirement.
+Windows and other platforms are not
 currently qualified PLANK products.
+
+From 1.2.00, the Ubuntu Client uses Qt-owned streaming windows and direct
+PipeWire playback. It replaces the ordinary `plank-client` package, retaining
+bookmarks, settings and trusted Hosts. The macOS Client implementation is unchanged.
 
 PLANK is in late integration and production hardening. Use the
 [release notes](https://github.com/instinctual/plank/releases) for the version

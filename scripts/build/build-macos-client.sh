@@ -33,8 +33,30 @@ python3 "$source_root/tests/packaging/test-macos-app-icons.py"
 # installer, so its install/uninstall package gates do not apply here.
 python3 "$source_root/tests/packaging/test-macos-fullscreen.py" "$source_root"
 mkdir -p "$build/tests"
+run_shared_client_test() {
+    local suite=$1
+    mkdir -p "$build/tests/$suite"
+    (
+        cd "$build/tests/$suite"
+        qmake "$client/tests/$suite/$suite.pro" CONFIG+=release CONFIG-=app_bundle \
+            QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
+            "QMAKE_CXXFLAGS+=-include arm_acle.h"
+        make -j"${PLANK_BUILD_JOBS:-8}"
+        DYLD_LIBRARY_PATH="$PLANK_MAC_CLIENT_DEPS/install/lib" \
+            PLANK_CONNECTIVITY_CAPTURE_DIR="${PLANK_ARTIFACT_ROOT:-$build}/qualification/connectivity" \
+            PLANK_QT_SESSION_CAPTURE_DIR="${PLANK_ARTIFACT_ROOT:-$build}/qualification/mac-qt-session" \
+            PLANK_REPO_ROOT="$source_root" PLANK_CLIENT_SOURCE="$client" \
+            PLANK_PASSKEY_HELPER="$build/app/plank-client.app/Contents/MacOS/plank-passkey" \
+            QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "./$suite"
+    )
+}
+# These small policy/network fixtures need no application objects; fail early.
+run_shared_client_test plankclientpolicy
+run_shared_client_test internetconnectivity
+run_shared_client_test macqtsession
+bash "$source_root/scripts/test/test-macos-qt-metal.sh" "$source_root" "$build/tests/qt-metal"
 xcrun clang++ -std=c++17 -include arm_acle.h -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werror \
-    -F"$PLANK_QT_ROOT/lib" "$source_root/tests/packaging/macos-client-paths.cpp" \
+    -F"$PLANK_QT_ROOT/lib" -I"$client/app" "$source_root/tests/packaging/macos-client-paths.cpp" \
     -framework QtCore -Wl,-rpath,"$PLANK_QT_ROOT/lib" -o "$build/tests/client-paths-test"
 "$build/tests/client-paths-test"
 bash "$source_root/scripts/test/build-macos-client-permissions.sh" "$source_root" "$build/tests/permissions"
@@ -68,10 +90,10 @@ rm -f "$build/app/plank-client.app/Contents/Info.plist"
 # Recursive generation is mandatory when retaining a build: otherwise existing
 # subproject Makefiles may silently retain the previous source/version/flags.
 qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
-    CONFIG+=plank-transport CONFIG+=disable-libplacebo CONFIG+=disable-wayland \
+    CONFIG+=plank-transport CONFIG+=bde-sdl-session CONFIG+=disable-libplacebo CONFIG+=disable-wayland \
     CONFIG+=disable-x11 CONFIG+=disable-libva CONFIG+=disable-libdrm \
     QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
-    PLANK_VERSION="$version" PLANK_MACOS_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+    PLANK_VERSION="$version" PLANK_MAC_CLIENT_MIN_MACOS="$PLANK_MAC_CLIENT_MIN_MACOS" PLANK_MACOS_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
     "QMAKE_CFLAGS+=$PLANK_C_FILE_FLAGS" "QMAKE_CXXFLAGS+=$PLANK_C_FILE_FLAGS"
 make -j"${PLANK_BUILD_JOBS:-8}" release
 # Touch ID sign-in helper (bde-linux docs/plank-broker.md 13.4): bundled by
@@ -81,16 +103,7 @@ test -x "$passkey_helper"
 bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
 for suite in fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
-mkdir -p "$build/tests/$suite"
-(
-    cd "$build/tests/$suite"
-    qmake "$client/tests/$suite/$suite.pro" CONFIG+=release CONFIG-=app_bundle \
-        QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
-        "QMAKE_CXXFLAGS+=-include arm_acle.h"
-    make -j"${PLANK_BUILD_JOBS:-8}"
-    PLANK_REPO_ROOT="$source_root" PLANK_CLIENT_SOURCE="$client" PLANK_PASSKEY_HELPER="$passkey_helper" \
-        QT_QPA_PLATFORM=offscreen "./$suite"
-)
+    run_shared_client_test "$suite"
 done
 # Dummy input only: no microphone permission or physical recording on builders.
 mkdir -p "$build/tests/client-microphone"

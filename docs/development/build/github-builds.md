@@ -26,7 +26,7 @@ pinned dependencies, then invokes the normal build/package scripts. Existing
 patch, payload, version and clean-source gates remain mandatory.
 
 The Mac Client uses one package on macOS15 and macOS27. Its lower deployment
-floor does not lower the builder SDK requirement or change the Host's27.0
+floor does not lower the builder SDK requirement or change the Host's26.7
 minimum. Exact cache keys include the Client deployment policy; old
 27-minimum dependencies are not reused. Native target-validation fixtures run
 in the Client build, and PKG packaging checks every bundled binary and the app
@@ -54,6 +54,55 @@ These jobs do not install products or perform live display, audio, input,
 network-loss or hardware-decoder qualification. Existing hardware gates and
 local builders remain available until hosted builds are qualified.
 
+## Local downloads and cleanup
+
+Use one task-specific staging directory under `build/` when downloading hosted
+artifacts. Verify the original manifest and SHA-256, then collect packages with
+`scripts/package/collect-package.py` into the versioned catalog and retain test
+reports under `artifacts/qualification/`. Once verified, remove that exact
+staging directory; do not leave duplicate installers or extracted payloads in
+multiple download folders.
+
+`build/worktrees/` is for active source worktrees, not a permanent archive of
+reviews. Before retiring one, check its root and nested repositories for loose
+edits and unpublished commits. Preserve unfinished native Apple work. Keep
+private recovery copies outside Git, and never delete canonical Git metadata,
+prepared dependencies, accepted package catalogs or qualification reports as
+part of scratch cleanup.
+
+## Ubuntu Qt Client qualification
+
+Qt is the ordinary Ubuntu Client from 1.2.00. The `linux-client` job runs on
+push/PR and through `bash scripts/ci/dispatch.sh linux-client false` from a
+clean, pushed main or feature branch. It uses the verified Client dependency
+caches/bootstrap, then runs package-upgrade fixtures, normal/sanitized component
+tests and a private headless GNOME compositor at 100% and forced 125% scale.
+It also checks selected-output retention on two differently sized virtual
+monitors. Fullscreen startup and normal content-size restoration must pass
+without treating a requested window state as proof of completed native sizing.
+
+Toolbar tests and the standalone probe select the real launcher's Material
+Dark/Dense style. Keep explicit content-size, rendered-glyph, idle/hover/press
+and invisible-hit-target checks at both scales. The Linux raw-HID Wacom adapter
+runs with wrapped device I/O normally and under ASan/UBSan/leak checks.
+Evidence is in `wacom.log` and `wacom-asan.log`; coverage includes USB
+renumbering, partial enumeration, pen evdev readiness, I/O loss and reconnects.
+See the release runbook's fortified-I/O and stale-preflight failure signatures
+before retrying a failed job; do not skip those gates.
+
+The job builds one complete Client with all ordinary preflight checks, requires
+native PipeWire playback rather than SDL audio, and checks three real
+launcher/shutdown cycles with SDL video deliberately unavailable. It packages
+that exact binary under `plank-client`, validates source/linkage and package
+identity, and collects it in the normal mainline or candidate catalog.
+Existing bookmarks, trust, policy and logs keep their ordinary PLANK locations.
+The old independently installable `plank-client-qt` test app is retired.
+
+Software Vulkan/GL and private PipeWire null-sink tests do not qualify Intel
+VA-API decoding, physical input, audible playback, A/V sync or live performance.
+Do not use the retained Ubuntu VM as a fallback builder. No product is installed
+on the hosted builder; package-upgrade fixtures use disposable synthetic roots.
+
 ## macOS distribution credentials
 
 Ordinary CI intentionally has no Apple credentials. Its unsigned results are
@@ -70,7 +119,7 @@ product. The job requires manual dispatch and directly names the protected
 `macos-signing` environment. At the operator's request, this environment has no
 required reviewers or wait timer: an explicitly dispatched signed build on an
 allowed branch proceeds automatically. Keep custom deployment branch policies
-enabled (currently `main` only after merged-branch cleanup); do not replace them
+enabled for explicitly reviewed branches; do not replace them
 with an all-branches wildcard. Remove a temporary branch's signing permission
 when retiring that branch. Review source, workflow and dependency changes before
 dispatching or adding a candidate branch. Public push/PR jobs have no signing
@@ -133,6 +182,78 @@ restricted to disposable GitHub-hosted machines running approved source, never
 an operator's Mac, shared runner or public PR. Local interactive keychain rules
 remain unchanged. See [GitHub's signing guidance](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
 
+### Approved contributor Host test builds
+
+Chris (`cnoellert`) can request a signed macOS Host candidate by posting a new
+PR Conversation comment containing exactly:
+
+```text
+/build-macos-host
+```
+
+The project owner can use the same command. Account authorization uses immutable
+GitHub user IDs. No repository write access, personal access token or Apple
+credential is given to the requester. A reply links the build and its artifact;
+after success, download the signed Host PKG from that run. Artifacts expire
+after seven days. This command does not merge, release or install anything.
+
+Before enabling a PR, a maintainer must review its source, including executable
+build/test scripts and dependencies. Prepare a candidate from current main and
+that reviewed PR revision, assign a new candidate version, run portable checks,
+and push it to `macos-host-test` (or an explicitly reviewed
+`macos-host-test-...` branch). Add only that exact branch to `macos-signing`'s
+deployment branch policies. Record its full SHA, the reviewed PR head SHA, PR
+author ID and fork repository ID in `.github/macos-host-test-approvals.json` on
+main. The PR feature itself need not be merged to main.
+
+`request-macos-host-build.yml` handles newly created PR comments using only the
+default branch's controller and approval registry. It does not check out PR
+code or receive signing secrets. It rechecks the live comment, open PR identity,
+reviewed head and exact candidate branch SHA, then dispatches the existing
+`build.yml` with fixed inputs: `macos-host`, signed, minimum26.7, exact source SHA,
+and ordinary dependency-cache reuse. The existing build policy checks the SHA
+again before the environment-protected signing job. Its limited Actions token
+can dispatch a workflow; this event is one of GitHub's documented exceptions to
+token-triggered workflow suppression. See [GitHub's workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+An updated PR or moved test branch requires a fresh maintainer review and
+approval-registry commit. Approval of one revision is not approval of future
+changes. Editing a comment or rerunning a request job does not authorize another
+build: post a new command. Concurrent requests reuse an already-running build
+for the same source. Retiring the candidate means removing its registry entry
+and its exact environment branch permission. Do not use wildcard branches or
+`pull_request_target` to execute contributor code with credentials.
+
+Hosted builds qualify compilation, component checks, signing and packaging.
+Chris still owns installed macOS26.7 testing; the identical package needs the
+ordinary macOS27 regression checks before feature acceptance.
+
+### Proposed main protection — not enabled
+
+The October 31 discussion recommended protecting `main`, which currently has no
+branch protection or repository rulesets. This is a proposal awaiting operator
+authorization, not a description of enforced settings.
+
+- Block force pushes and branch deletion.
+- Require a PR before changes enter main, with appropriate automated checks.
+- Initially require no second-person approval; the ordinary authorized
+  commit/push/merge workflow can create and merge its PR after checks pass.
+- Retain a narrowly scoped administrator bypass through PRs for exceptional
+  recovery, with a visible record.
+
+Before enabling required checks, ensure they always report a result for their
+applicable PRs. Account for documentation-only changes, path filters and
+`[skip ci]`; a required skipped workflow can otherwise block merging indefinitely.
+Do not require all four package rebuilds for an unrelated documentation change.
+Choose exact check identities and validate the resulting merge workflow first.
+
+Protecting main also protects the normal change path for the trusted request
+controller and signing-approval registry. It does not replace source review or
+the exact-branch restrictions on the signing environment. The existing signed
+test command and automatic environment approval policy should remain intact.
+See [GitHub's rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+and [PR-only bypass settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
+
 ## Initial qualification
 
 The protected direct Host job passed signing, notarization, stapling, final
@@ -189,9 +310,15 @@ the build-deps Git pin, tracked files and source gitlinks. Both Client library
 groups retain all FFmpeg patch inputs and build-path/sanitization helpers.
 
 Rust toolchain changes invalidate Rust and Cargo downloads; transport and
-vendor-test manifests/locks invalidate only their Cargo group. Native library
-keys still include exact installed Linux packages or Mac SDK/compiler/build
-tools. Downloads/source-only groups do not depend on those C/C++ build tools.
+vendor-test manifests/locks invalidate only their Cargo group. Linux Host
+library keys retain the exact installed package inventory; Mac keys retain
+SDK/compiler/build tools. Ubuntu keys use the qualified OS/architecture, actual
+compiler/build-tool versions, development packages and relevant ABI/protocol
+packages, not the runner image date or unrelated desktop/runtime packages.
+Native development packages remain conservative inputs because FFmpeg and SDL
+auto-detect optional libraries. Unrelated PHP SDK packages are excluded: neither
+library uses them, and GitHub image updates can change PHP independently.
+Downloads/source-only groups do not depend on those C/C++ build tools.
 All keys remain product/platform/path-specific; Mac Client native/Qt keys
 retain the explicit deployment-target policy. Changes to the shared cache
 implementation itself invalidate all groups conservatively. Application-only
@@ -203,7 +330,9 @@ The composite action `.github/actions/dependency-cache` handles the same
 restore/verify and seal/save sequence for all four products. Each group can hit
 or miss independently. Save skips exact hits, and job-local hit bookkeeping is
 not cached. The narrow Rust/Cargo allowlist excludes credentials/configuration
-and compiled target objects. There are no application, package or signing caches.
+and compiled target objects. Dependency caches never contain application,
+package or signing state. Ubuntu's separate per-object compiler cache is
+described below; the other product jobs still compile application sources fresh.
 
 Mac Host's cache avoids Rust installation/downloads, not application or
 transport compilation. Do not promise the same improvement as caching FFmpeg.
@@ -227,6 +356,36 @@ seconds and passed application/package checks and artifact upload. This proves
 Ubuntu warm reuse, not partial-hit or all-platform warm qualification. Linux
 Host passed packaging and all six strengthened loss matrices on its first
 hosted attempt; Mac results are unsigned, not distribution installers.
+
+### Ubuntu compiler-output reuse
+
+The Ubuntu job additionally uses the distro `sccache` tool for C/C++ and Rust.
+Job-local compiler-name wrappers point to the real `/usr/bin/` compilers through
+sccache; no system compiler, user machine or shipped runtime is replaced.
+Rust uses `RUSTC_WRAPPER` with incremental compilation disabled. Cache entries
+are compiler results, not reused build trees, complete executables or installers.
+Cargo's cc-rs also recognizes that wrapper, so `HOST_CC`/`HOST_CXX` name the
+real `/usr/bin/` compilers rather than wrapping the PATH wrappers a second time.
+A small hosted compile check validates both invocation forms before the suite.
+Every run creates clean sources/build directories, runs the existing tests,
+links and packages the selected version, and verifies the finished DEB.
+
+Only the bounded job-local `compiler-cache` directory is archived. The wrapper,
+server socket, reports, Cargo configuration/credentials and signing material are
+not included. Caches restore within GitHub's existing branch/default-branch
+boundaries; public pull requests cannot save them. Save occurs only after a
+successful build and tests. A unique run key permits updating immutable cache
+snapshots. Prefix restores are permitted **only for this compiler cache**:
+sccache independently checks each compiler/source/header/flag input. Prepared
+dependency caches still require an exact receipt and source/patch verification.
+
+`clean_bootstrap=true` bypasses both kinds of cache. Compiler hit/miss statistics
+are retained in the Qt qualification artifact and job summary, including failed
+builds when setup succeeded. A second identical hosted run must demonstrate
+actual C/C++ and Rust hits and unchanged qualification gates; a successful cache
+upload alone does not qualify reuse. A first build after this policy change is
+expected to populate new keys once. Do not bypass branch isolation to import
+feature-branch artifacts into main.
 
 #### Historical v1 four-product qualification
 
@@ -302,13 +461,57 @@ as equivalent workloads: the second job additionally signed and notarized.
 ## Diagnosing a hosted build
 
 Manual dispatch accepts `product=all`, `linux-host`, `linux-client`,
-`macos-host` or `macos-client`. A selected-product run has an independent
+`macos-host` or `macos-client`.
+A selected-product run has an independent
 concurrency group, so retrying it does not cancel other platforms. Inspect the
 failed job's first error, not the final nonzero-exit summary.
 
 Use `bash scripts/ci/dispatch.sh linux-host` (or another product) after pushing.
 It requires a clean, fully pushed branch and passes its exact expected SHA.
 The policy job rejects a stale dispatch revision before costly bootstrap.
+
+### macOS 26.7 Host build
+
+The standard Host package now targets **26.7** and runs on 26.7 and newer.
+Normal push/PR builds, mainline dispatch and signed Host packaging all use this
+minimum. The runner stays Apple Silicon macOS27/SDK27, so the same binary and
+component tests continue to exercise macOS27. Keep newer APIs behind runtime
+availability checks. Client minimum15.0 and Linux policies are independent.
+Chris (cnoellert) owns 26.7 installed qualification; validate the identical
+signed package on both 26.7 and 27 before recording shared-package acceptance.
+
+From a clean, pushed main checkout, use the ordinary signed Host dispatch:
+
+```sh
+bash scripts/ci/dispatch.sh macos-host true
+```
+
+`--macos-host-min-os=26.7` remains an explicit equivalent. For a regression
+comparison only, a reviewed candidate branch may request
+`--macos-host-min-os=27.0`. That alternative is rejected for main, tags,
+other products and ordinary push/PR runs; it does not create a second release
+package. Both targets still require SDK27. Workflow concurrency separates the
+targets, and Host cache entries contain toolchains/downloaded sources rather
+than compiled Host objects. Every run rebuilds the transport for its target.
+
+Mainline retains the ordinary filename, such as `plank-host_1.2.05_arm64.pkg`,
+with `target_os=macos-26.7` in the manifest. Candidates retain their branch and
+floor suffix, allowing a comparison pair without overwrite. Historical 27-only
+packages keep their exact names, bytes and original metadata. The collector
+rejects conflicting bytes or provenance, including changing an existing
+package's claimed OS floor. Never retarget or relabel signed installers.
+
+The dispatch helper checks the exact pushed source commit. Protected signing
+still requires explicit dispatch and a permitted branch; public push/PR jobs
+receive no signing credentials. Main is already permitted. For candidate
+signing, allow only the reviewed exact branch and remove that permission when
+retiring it. Do not broaden the environment to every branch.
+
+Download with the normal runbook, verify the original checksum and source
+manifest, and collect the installer without changing its identity. Passing
+component, signing, notarization and package gates is not installed session
+acceptance. See the [Host plan](../plans/macos26-host-backport.md) for remaining
+26.7/27 validation and the distinction from the earlier baseline candidate.
 
 Diagnostic-only `macos-fullscreen-probe` additionally requires `signed=true`.
 It builds the standalone AppKit probe, not either product, and uses the same

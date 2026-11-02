@@ -1,11 +1,21 @@
 # macOS development build notes
 
-Status: experimental macOS Host; standard PKG qualification is in progress.
+Status: packaged macOS Host; installed qualification remains version-specific.
 Authorized GitHub-hosted builders are documented in [github-builds.md](github-builds.md).
 The local sequences below apply only when use of the dedicated development Mac
 is authorized. Linux builder roles are unchanged.
-Require Apple Silicon, macOS 27, SDK 27 and explicit deployment target 27.0.
+Hosted builds require Apple Silicon, macOS 27, SDK27 and deployment target26.7.
 Probe signing/installation remains documented in `probes/macos/README.md`.
+
+The standard Host package supports macOS26.7 and newer, with
+`PLANK_MACOS_HOST_MIN_OS=26.7` selected by default.
+SDK 27, Rust 1.89 and the exact transport/dependency pins remain required. The
+same setting must be used for the transport archive, Host, component tests and
+PKG. Application, camera extension, audio-driver and installer minimums follow
+that selected target. A 27.0 candidate comparison remains available; see the
+[backport investigation](../plans/macos26-host-backport.md) for evidence and
+uncompleted installed-session gates. Do not reuse a transport built for 27.0
+in a 26.7 package or retarget a previously signed package.
 
 Before updating Mac sources, inspect the canonical clone's `origin`: the
 dedicated builder was seeded from a retained bootstrap Git bundle, not a live
@@ -17,13 +27,16 @@ the verified commit. Do not infer that a successful fetch means main is current.
 ## Click-through installer
 
 Use `scripts/package/build-macos-host-pkg.sh CLEAN_SOURCE NEW_OUTPUT TRANSPORT_ARCHIVE`
-on the dedicated Mac. Read `docs/development/plans/macos-installer.plan` for uncompleted live gates.
+through the GitHub-hosted signed build workflow. Read
+`docs/development/plans/macos-installer.plan` for uncompleted live gates.
 The destination Mac needs neither Python nor developer tools. The package owns
 the app payload at `/Applications/PLANK Host.app` and three system launchd
 entries. Bash pre/post-install scripts create administrator configuration,
 private identity and administrator-readable system logs. Private state is not a
 payload and survives uninstall.
-There is no compiled installer helper or persistent installation service.
+The PKG contains a signed native Installer Requirements pane, loaded only for
+the installation wizard. It is not installed with the product and introduces
+no persistent helper or installation service.
 Prepare/validate persistent state and logs in preinstall, before worker shutdown.
 The .82 real install found root-owned logs changed to directory0744/files0644;
 the postinstall-only strict mode check stopped after replacing the app. The
@@ -67,8 +80,17 @@ Do not generate a separate uninstall PKG. `macos_pkg_gate=pass` does not prove i
 permission continuity, reboot or streaming acceptance. No `installer -pkg`
 invocation is part of the build. Do not publish a rejected/pending artifact.
 
-The normal graphical workflow is to open the Host PKG, approve Installer, then
-open PLANK Host in Applications for privacy setup. Uninstall with the installed
+The normal graphical workflow is to open the Host PKG. A native Requirements
+page follows Introduction and runs read-only `fdesetup isactive` through
+Foundation's process API. Continue stays disabled while checking, when FileVault
+is enabled/busy, or when verification fails. The page explains the remote-access
+requirement, points to Settings and offers Check Again. The check has a five-second
+deadline and stops its child when the page closes. Late results from retired
+checks cannot enable Continue. No FileVault setting is changed automatically.
+The preinstall script rechecks before modifying state or stopping services,
+including command-line installations and changes since the initial check.
+After installation, open PLANK Host in Applications for privacy setup.
+Uninstall with the installed
 script (administrator authorization is required):
 
 ```bash
@@ -82,7 +104,8 @@ app bundle; it does not source code from mutable configuration or user paths.
 Reinstall the signed Host package to recover or restore the product.
 
 Installer scripts only accept `/` as the target volume; uninstall accepts no
-arguments and uses the running system. Both require macOS27/arm64. Installation
+arguments and uses the running system. Both require the sealed package minimum
+(26.7 for the standard package) and arm64. Installation
 requires FileVault off; uninstall remains available if it was later enabled.
 They verify existing app product/team/type and owned startup entries before
 stopping services. It admits the explicitly planned same-team Apple Development
@@ -98,6 +121,20 @@ tests mocked launchd lifecycle without privileges; `--filesystem` additionally
 requires root and creates/removes an isolated fixture under
 `/Library/Application Support`, without touching product services or files.
 These are developer qualification commands, not operator instructions.
+`python3 tests/packaging/test-macos-installer-preflight.py` checks page order and
+rejects the deprecated external-script option. The Mac build compiles the pane
+with deprecated-API diagnostics treated as errors, exercises its actual lifecycle
+against harmless child processes, and loads the generated bundle without opening
+Installer or executing FileVault commands. Finished-PKG checks verify the embedded
+page order, signature and loadability. The pane uses public AppKit/Foundation and
+InstallerPlugins interfaces; no distribution JavaScript or private registry status
+heuristic remains. The native bundle is signed before productbuild/notarization.
+
+Actual Installer presentation remains a separate gate. Apple has acknowledged
+[plug-in loading failures](https://developer.apple.com/forums/thread/842811) in
+26.7/27 and suggested retesting 27.2 beta 4. Direct bundle loading does not prove
+Installer's own extraction/loading path works. Test the identical signed PKG's
+Requirements page on supported systems; do not disable signing checks as a workaround.
 For command-line signature requirements, `codesign -R` needs a leading `=` for
 inline requirement text; otherwise it treats the expression as a filename.
 After this validation-command error, recheck the already signed binary and
@@ -561,8 +598,8 @@ dedicated Mac, direct dlopen confirmed `mis-aligned LINKEDIT string pool` despit
 a valid code signature. This matches
 [Rust issue 157750](https://github.com/rust-lang/rust/issues/157750).
 The macOS runner sets `RUSTFLAGS=-C strip=none` (appended to any caller flags)
-to keep compiler-plugin metadata intact. Do not lower the 27.0 deployment target,
-disable signing/security, upgrade dependency versions or redownload caches to
+to keep compiler-plugin metadata intact. Do not change the selected deployment
+target to hide this failure, disable signing/security, upgrade dependency versions or redownload caches to
 hide this error. Revalidate whether this workaround is needed with a future
 qualified toolchain; it does not change the shared Linux build.
 
@@ -726,8 +763,8 @@ That root Background synthetic run is not proof of LoginWindow capture/input.
 `bash scripts/test/build-macos-preview.sh SOURCE_ROOT EMPTY_OUTPUT ARCHIVE` builds
 the loopback synthetic launch server, native receiver, and a signed **PLANK Host
 Probe.app** with real account verification and capture. It requires the existing
-`PLANK_MACOS_SIGNING_IDENTITY` certificate fingerprint, SDK/minimum macOS 27
-and the retained archive. This app entry point is the authenticated HTTPS probe,
+`PLANK_MACOS_SIGNING_IDENTITY` certificate fingerprint, SDK27, the shared
+Host deployment target (26.7 by default) and a matching transport archive. This app entry point is the authenticated HTTPS probe,
 not the older command-line chart/input probe. Preserve the previously installed
 probe app before replacing it on the dedicated Mac. Do not install on the
 read-only reference Mac or change TCC/keychain trust policy to make it work.
@@ -799,7 +836,7 @@ hardware decoding/presentation and longer live tests are still required.
 `scripts/test/build-macos-auth.sh SOURCE_ROOT EMPTY_OUTPUT_DIRECTORY` builds the
 portable ownership test and a short-lived Open Directory verifier harness.
 It also builds the private-channel and authentication-conversation tests.
-It requires SDK/macOS 27 and sets a 27.0 deployment target. It does not install
+It requires SDK27 and uses the shared Host target (26.7 by default). It does not install
 anything, grant permissions, modify accounts or expose a network listener.
 The harness and native backend compile with warnings as errors. Current
 uncommitted files are qualification inputs only, not a release snapshot; record

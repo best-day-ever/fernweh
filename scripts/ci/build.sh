@@ -21,16 +21,19 @@ case $role in
     bash "$PLANK_SOURCE_ROOT/scripts/ci/test-linux-host-input.sh" "$PLANK_WORK_ROOT/host-build"
     ;;
   linux-client)
+    python3 "$PLANK_SOURCE_ROOT/tests/packaging/test-client-policy-upgrade.py"
+    source "$PLANK_SOURCE_ROOT/scripts/package/client-package-identity.sh"
+    plank_client_package_identity
     export PLANK_CLIENT_SDL_WORK="$PLANK_DEP_ROOT/client-sdl"
-    bash "$PLANK_SOURCE_ROOT/scripts/build/build-client-package-binaries.sh" \
-      "$PLANK_SOURCE_ROOT/apps/client" "$PLANK_DEP_ROOT/client-ffmpeg" "$PLANK_WORK_ROOT/client-build"
+    # Qualify and build the exact ordinary Client once, then package that binary.
+    bash "$PLANK_SOURCE_ROOT/scripts/ci/test-qt-session.sh"
     bash "$PLANK_SOURCE_ROOT/scripts/package/build-client-deb.sh" \
-      "$PLANK_WORK_ROOT/client-build/app/plank-client" "$PLANK_DEP_ROOT/client-ffmpeg" \
+      "$PLANK_WORK_ROOT/client-build/app/$client_package" "$PLANK_DEP_ROOT/client-ffmpeg" \
       "$PLANK_WORK_ROOT/client-package" "$PLANK_SOURCE_ROOT/apps/client"
     ;;
   macos-host)
     source "$PLANK_SOURCE_ROOT/scripts/package/package-version.sh"
-    plank_load_package_version "$PLANK_SOURCE_ROOT"
+    plank_load_macos_host_package_version "$PLANK_SOURCE_ROOT"
     # Isolated installer filesystem fixture only; never install the product or
     # start its services on a builder. This also checks administrator log access.
     sudo -n /bin/bash "$PLANK_SOURCE_ROOT/tests/packaging/macos-pkg-scripts.sh" --filesystem

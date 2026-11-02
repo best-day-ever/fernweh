@@ -8,7 +8,10 @@ if (($# < 2 || $# > 3)); then
 fi
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$repo_dir/scripts/package/client-package-identity.sh"
+plank_client_package_identity
 source_dir=$(realpath -- "$1")
+plank_client_require_session_runtime "$source_dir"
 ffmpeg_work_dir=$(realpath -- "$2")
 build_dir=$(realpath -m -- "${3:-${repo_dir}/build/package-client}")
 ffmpeg_prefix="${ffmpeg_work_dir}/install"
@@ -468,7 +471,7 @@ if rg -n \
 fi
 echo "client_remote_host_control_absence_gate=pass"
 
-# Focus loss must stop local raw-Wacom forwarding without sending the
+# Focus and USB I/O loss must stop local raw-Wacom forwarding without sending the
 # destructive detach that removes and recreates host UHID/XInput endpoints.
 client_common_dir="${source_dir}/moonlight-common-c/moonlight-common-c/src"
 printf '#include "Limelight.h"\nint main() { return 0; }\n' |
@@ -492,7 +495,7 @@ rg -q '#define[[:space:]]+LI_FF_RAW_HID_FOCUS_SUSPEND[[:space:]]+0x20' \
 }
 for required_raw_hid_token in \
   LI_FF_RAW_HID_FOCUS_SUSPEND \
-  suspendForFocusLoss \
+  suspendForwarding \
   'sendFrame(PLANK_RAW_HID_SUSPEND, 0, 0, nullptr, 0)'; do
   rg -Fq "$required_raw_hid_token" \
     "$source_dir/app/streaming/input/input.cpp" \
@@ -502,11 +505,16 @@ for required_raw_hid_token in \
     exit 1
   }
 done
-rg -U -q 'void LinuxRawWacomInput::setActive\(bool active\)(.|\n)*?if \(!active\) \{(.|\n)*?suspendForFocusLoss\(\);' \
+rg -U -q 'void LinuxRawWacomInput::setActive\(bool active\)(.|\n)*?if \(!active\) \{(.|\n)*?suspendForwarding\(\);' \
   "$source_dir/app/streaming/input/linuxrawwacom.cpp" || {
   echo "client focus loss does not use non-destructive raw-HID suspension" >&2
   exit 1
 }
+if rg -q 'sendFrame\(PLANK_RAW_HID_DETACH' \
+  "$source_dir/app/streaming/input/linuxrawwacom.cpp"; then
+  echo "client recovery must not destroy retained Host raw-HID endpoints" >&2
+  exit 1
+fi
 echo "client_raw_hid_focus_suspend_gate=pass"
 
 # A reconnect must prevent the raw-tablet worker from attaching while the
@@ -834,10 +842,9 @@ rg -Fq 'params.enableFramePacing = false;' \
 }
 echo "client_frame_pacing_preference_absence_gate=pass"
 
-# The speed candidate keeps the accepted system-memory allocator as its
-# default and exposes two developer-only alternatives through an environment
-# selector. The mapped allocator is the measured reference experiment. The
-# host-import allocator preserves cacheable FFmpeg reference frames while
+# Prefer the pooled host-import allocator on capable devices; keep the mapped
+# and system-memory fallbacks and developer-only selector. Host import
+# preserves cacheable FFmpeg reference frames while
 # importing their allocations as Vulkan transfer buffers, avoiding the Intel
 # driver's CPU linear-to-tiled upload path.
 for required_frame_allocator_token in \
@@ -853,7 +860,8 @@ for required_frame_allocator_token in \
   'Using persistently mapped Vulkan decode buffers'; do
   rg -Fq "$required_frame_allocator_token" \
     "$source_dir/app/streaming/video/ffmpeg-renderers/plvk.cpp" \
-    "$source_dir/app/streaming/video/ffmpeg-renderers/plvk.h" || {
+    "$source_dir/app/streaming/video/ffmpeg-renderers/plvk.h" \
+    "$source_dir/app/streaming/video/ffmpeg-renderers/plvkframepool.cpp" || {
     echo "Vulkan frame-allocator invariant is missing: ${required_frame_allocator_token}" >&2
     exit 1
   }
@@ -1021,8 +1029,16 @@ for required_profile_bitrate_ui_token in \
     exit 1
   }
 done
+# Global preferences must not own bitrate; a session-local toolbar property is
+# valid and does not persist a global default. Check generic property declarations
+# in settings, but keep legacy persistence/access/CLI checks across the app.
+if rg -n 'Q_PROPERTY\(int bitrateKbps|\bbitrateKbps MEMBER' \
+  "$source_dir/app/settings"; then
+  echo "global bitrate property remains in PLANK client settings" >&2
+  exit 1
+fi
 if rg -n \
-  'Q_PROPERTY\(int bitrateKbps|\bbitrateKbps MEMBER|#define SER_BITRATE "bitrate"|plank-bitrate-kbps|getDefaultBitrate|StreamingPreferences\.bitrateKbps|m_Preferences\.bitrateKbps|preferences->bitrateKbps|addValueOption\("bitrate"' \
+  '#define SER_BITRATE "bitrate"|plank-bitrate-kbps|getDefaultBitrate|StreamingPreferences\.bitrateKbps|m_Preferences\.bitrateKbps|preferences->bitrateKbps|addValueOption\("bitrate"' \
   "$source_dir/app" \
   --glob '!**/languages/**'; then
   echo "global or command-line bitrate configuration remains in PLANK client" >&2
@@ -1171,10 +1187,10 @@ done
 echo "client_reconnect_local_event_gate=pass"
 
 for required_client_identity_token in \
-  'QGuiApplication::setApplicationDisplayName("BDE Fernweh Client");' \
-  'SDL_SetAppMetadata("BDE Fernweh Client",' \
-  '"la.instinctual.Plank.Client");' \
-  'app.setDesktopFileName("la.instinctual.Plank.Client");'; do
+  'QGuiApplication::setApplicationDisplayName(PlankClientIdentity::displayName);' \
+  'SDL_SetAppMetadata(PlankClientIdentity::displayName,' \
+  'QCoreApplication::setApplicationName(PlankClientIdentity::applicationName);' \
+  'app.setDesktopFileName(PlankClientIdentity::desktopId);'; do
   rg -Fq "$required_client_identity_token" "$source_dir/app/main.cpp" || {
     echo "client application identity is missing: ${required_client_identity_token}" >&2
     exit 1
@@ -1552,7 +1568,7 @@ fi
   echo "client package still carries an unnecessary launcher wrapper" >&2
   exit 1
 }
-rg -Fq '\$$ORIGIN/../lib/plank' "$source_dir/app/app.pro" || {
+rg -Fq '\$$ORIGIN/../lib/$$PLANK_PRIVATE_LIB_NAME' "$source_dir/app/app.pro" || {
   echo "client build does not define its private relative runtime path" >&2
   exit 1
 }
@@ -1622,14 +1638,14 @@ echo "client_mdns_default_off_gate=pass"
 for required_log_token in \
   XDG_STATE_HOME \
   '.local/state' \
-  'plank/logs'; do
+  'PlankClientIdentity::logDirectory'; do
   rg -Fq "$required_log_token" "$source_dir/app/path.cpp" || {
     echo "client persistent log path invariant is missing: ${required_log_token}" >&2
     exit 1
   }
 done
 for required_log_token in \
-  'plank-client-*.log' \
+  'logNamePattern = logPrefix + QStringLiteral("-*.log");' \
   'MAX_LOG_SIZE_BYTES (10 * 1024 * 1024)' \
   'QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner' \
   'QFileDevice::ReadOwner | QFileDevice::WriteOwner' \
@@ -1643,6 +1659,21 @@ for required_log_token in \
   }
 done
 echo "client_persistent_log_source_gate=pass"
+
+# Frontend selection must preserve the existing settings/trust/log namespace.
+# Test shared identity with and without the Linux Qt session define.
+for variant in production qt; do
+  identity_test_build="$build_dir/tests/identity-$variant"
+  mkdir -p "$identity_test_build"
+  (
+    cd "$identity_test_build"
+    identity_config=()
+    if [[ $variant == qt ]]; then identity_config+=(CONFIG+=plank-qt-session); fi
+    qmake6 "$source_dir/tests/clientidentity/clientidentity.pro" "${identity_config[@]}"
+    make -j"${PLANK_BUILD_JOBS:-4}"
+    ./clientidentity
+  )
+done
 
 policy_test_build=$(mktemp -d --tmpdir plank-client-policy-test.XXXXXX)
 cleanup_policy_test() {
@@ -1727,12 +1758,13 @@ cleanup_bookmark_test() {
   fi
 }
 trap cleanup_bookmark_test EXIT
-for bookmark_test in outputtopology hostchoices planktoolbarlogic sessionhotkeys changelog authenticationtakeover hosttruststore hosttlsguard; do
+for bookmark_test in outputtopology hostchoices planktoolbarlogic sessionhotkeys changelog authenticationtakeover hosttruststore hosttlsguard internetconnectivity; do
   mkdir "$bookmark_test_build/$bookmark_test"
   qmake6 "$source_dir/tests/$bookmark_test/$bookmark_test.pro" \
     -o "$bookmark_test_build/$bookmark_test/Makefile"
   make -C "$bookmark_test_build/$bookmark_test" -j"$(nproc)"
   PLANK_REPO_ROOT="$repo_dir" PLANK_CLIENT_SOURCE="$source_dir" \
+    PLANK_CONNECTIVITY_CAPTURE_DIR="${PLANK_ARTIFACT_ROOT:-$build_dir}/qualification/connectivity" \
     QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
     "$bookmark_test_build/$bookmark_test/$bookmark_test"
 done
@@ -1808,7 +1840,7 @@ mkdir -p "$build_dir"
   make -j"$(nproc)"
 )
 
-client_binary="${build_dir}/app/plank-client"
+client_binary="${build_dir}/app/${client_package}"
 [[ -x ${client_binary} ]] || {
   echo "PLANK client package binary was not produced" >&2
   exit 1
@@ -1877,7 +1909,7 @@ done
 log_runtime_root=$(mktemp -d)
 log_runtime_home="${log_runtime_root}/home"
 log_runtime_state="${log_runtime_root}/state"
-log_runtime_dir="${log_runtime_state}/plank/logs"
+log_runtime_dir="${log_runtime_state}/${client_log_path}"
 log_runtime_config="${log_runtime_root}/config"
 log_runtime_cache="${log_runtime_root}/cache"
 log_runtime_session="${log_runtime_root}/runtime"
@@ -1886,7 +1918,7 @@ mkdir -p "$log_runtime_home" "$log_runtime_dir" "$log_runtime_config" \
 chmod 0700 "$log_runtime_home" "$log_runtime_dir" "$log_runtime_config" \
   "$log_runtime_cache" "$log_runtime_session"
 for old_log in {01..11}; do
-  touch "${log_runtime_dir}/plank-client-20000101-000000-000-${old_log}.log"
+  touch "${log_runtime_dir}/${client_package}-20000101-000000-000-${old_log}.log"
 done
 chmod 0600 "${log_runtime_dir}"/*.log
 
@@ -1908,7 +1940,7 @@ if [[ $log_runtime_status -ne 0 ]]; then
 fi
 
 mapfile -t runtime_logs < <(find "$log_runtime_dir" -maxdepth 1 -type f \
-  -name 'plank-client-*.log' -print)
+  -name "${client_package}-*.log" -print)
 if [[ ${#runtime_logs[@]} -ne 10 ]]; then
   printf '%s\n' "$log_runtime_output" >&2
   echo "client did not retain exactly 10 persistent logs" >&2

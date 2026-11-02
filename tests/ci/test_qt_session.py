@@ -1,0 +1,145 @@
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class QtSessionWorkflowTests(unittest.TestCase):
+    def test_ordinary_client_runs_qt_qualification_without_credentials(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        job = workflow.split('  linux-client:\n')[1].split('  macos:\n')[0]
+        self.assertIn("inputs.product == 'all' || inputs.product == 'linux-client'", job)
+        self.assertNotIn('linux-client-qt', workflow)
+        self.assertIn('runs-on: ubuntu-26.04', job)
+        self.assertIn('needs: policy', job)
+        self.assertIn('product: linux-client', job)
+        self.assertIn('scripts/ci/bootstrap.sh linux-client', job)
+        self.assertIn('scripts/ci/build.sh linux-client', job)
+        self.assertIn('gnome-shell dbus-x11 pipewire wireplumber', job)
+        self.assertIn('qt-session-reports/', job)
+        for forbidden in ('self-hosted', 'secrets.', 'environment:'):
+            self.assertNotIn(forbidden, job)
+        package = (ROOT / 'scripts/ci/build.sh').read_text().split('  linux-client)')[1].split('  macos-host)')[0]
+        self.assertIn('scripts/ci/test-qt-session.sh', package)
+        self.assertNotIn('build-client-package-binaries.sh', package)
+        self.assertIn('client-build/app/$client_package', package)
+        self.assertIn('scripts/package/build-client-deb.sh', package)
+
+    def test_keeps_qualification_and_runtime_gates(self):
+        script = (ROOT / 'scripts/ci/test-qt-session.sh').read_text()
+        for gate in ('GITHUB_ACTIONS', 'ubuntu:26.04', '6.10.2',
+                     'test-client-qt-package.py', 'run-qt-session-tests.sh',
+                     'run-qt-session-compositor.sh', 'QT_SCALE_FACTOR=1.25',
+                     'PLANK_QT_SESSION_SANITIZERS=1', 'detect_leaks=1', 'halt_on_error=1',
+                     'PLANK_WACOM_SANITIZERS=1', 'scripts/test/test-linux-wacom.sh',
+                     'wacom-asan.log',
+                     'build-client-package-binaries.sh', 'package-upgrade.log',
+                     'VK_DRIVER_FILES', 'LIBGL_ALWAYS_SOFTWARE=1',
+                     'PLANK_QT_CLIENT_BINARY', 'PLANK_QT_LAUNCHER_REPORTS',
+                     'hardware_acceptance=not-performed'):
+            self.assertIn(gate, script)
+        self.assertNotIn('build-client-deb.sh', script)
+        self.assertEqual(script.count('bash scripts/build/build-client-package-binaries.sh'), 1)
+        self.assertNotIn('baseline-client-build', script)
+        self.assertNotIn('qt-runtime-build', script)
+        self.assertIn('test -f app/release/pipewire.o', script)
+        self.assertIn('test ! -f app/release/sdlaud.o', script)
+        runner = (ROOT / 'scripts/test/run-qt-session-tests.sh').read_text()
+        self.assertIn('qtsoftwarevideo.pro', runner)
+        self.assertIn('pipewireaudio.pro', runner)
+        self.assertIn('run-qt-pipewire-test.sh', runner)
+        self.assertIn('timeout 120 ./qtsoftwarevideo', runner)
+        self.assertIn('qtsystemproperties.pro', runner)
+        self.assertIn('QT_SCALE_FACTOR=1.25 ./qtsystemproperties', runner)
+        smoke = (ROOT / 'scripts/test/smoke-qt-client.py').read_text()
+        self.assertIn("environment['SDL_VIDEO_DRIVER'] = 'plank-disabled-for-qt-test'", smoke)
+        self.assertIn('process.terminate()', smoke)
+        self.assertIn('process.wait(timeout=20)', smoke)
+
+    def test_audio_daemon_is_isolated(self):
+        runner = (ROOT / 'scripts/test/run-qt-pipewire-test.sh').read_text()
+        for required in ('GITHUB_ACTIONS', 'mktemp -d', 'XDG_RUNTIME_DIR',
+                         'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'dbus-run-session',
+                         'server_pid', 'manager_pid', 'timeout 30', 'realPipeWirePlayback'):
+            self.assertIn(required, runner)
+        for forbidden in ('systemctl', 'sudo', '/home/', 'ssh '):
+            self.assertNotIn(forbidden, runner)
+        config = (ROOT / 'tests/audio/qt-pipewire.conf').read_text()
+        self.assertIn('support.null-audio-sink', config)
+        self.assertIn('default.clock.quantum = 1024', config)
+
+    def test_bitrate_gate_distinguishes_session_ui_from_global_preferences(self):
+        script = (ROOT / 'scripts/build/build-client-package-binaries.sh').read_text()
+        # Execute the real gate, not a second implementation of its patterns.
+        gate = script.split('# Global preferences must not own bitrate;')[1].split("if rg -n 'NVENC")[0]
+        gate = gate[gate.index('\nif rg '):]
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            for path in ('settings', 'streaming/qt', 'cli'):
+                (source / 'app' / path).mkdir(parents=True)
+            settings = source / 'app/settings/streamingpreferences.h'
+            settings.write_text('// no global bitrate\n')
+            (source / 'app/streaming/qt/sessionwindow.h').write_text(
+                'Q_PROPERTY(int bitrateKbps READ bitrateKbps WRITE setBitrateKbps NOTIFY bitrateChanged)\n')
+            def check():
+                return subprocess.run(['bash', '-c', 'set -euo pipefail; source_dir=$1\n' + gate,
+                                       'gate-test', str(source)], text=True, capture_output=True)
+            self.assertEqual(check().returncode, 0)
+            for token in ('Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps)',
+                          'Q_PROPERTY(int rate READ bitrateKbps MEMBER bitrateKbps)',
+                          '#define SER_BITRATE "bitrate"',
+                          'getDefaultBitrate()', 'StreamingPreferences.bitrateKbps',
+                          'm_Preferences.bitrateKbps', 'preferences->bitrateKbps'):
+                with self.subTest(token=token):
+                    settings.write_text(token + '\n')
+                    self.assertEqual(check().returncode, 1)
+            settings.write_text('// no global bitrate\n')
+            for token in ('plank-bitrate-kbps', 'addValueOption("bitrate")'):
+                with self.subTest(token=token):
+                    (source / 'app/cli/start.cpp').write_text(token + '\n')
+                    self.assertEqual(check().returncode, 1)
+
+    def test_probe_uses_production_style(self):
+        # This policy job has no submodules. The Client's runtime tests assert
+        # their Material style separately after product bootstrap.
+        source = (ROOT / 'probes/qt-session/main.cpp').read_text()
+        for required in ('QQuickStyle::setStyle(QStringLiteral("Material"))',
+                         '"QT_QUICK_CONTROLS_MATERIAL_THEME", "Dark"',
+                         '"QT_QUICK_CONTROLS_MATERIAL_VARIANT", "Dense"',
+                         '"QT_QUICK_CONTROLS_MATERIAL_ACCENT", "#5A9CE6"'):
+            self.assertIn(required, source)
+        self.assertLess(source.index('QQuickStyle::setStyle'),
+                        source.index('QGuiApplication app('))
+
+    def test_wacom_suspend_gate_keeps_non_destructive_recovery(self):
+        script = (ROOT / 'scripts/build/build-client-package-binaries.sh').read_text()
+        start = script.index('for required_raw_hid_token in \\\n  LI_FF_RAW_HID_FOCUS_SUSPEND')
+        end = script.index('echo "client_raw_hid_focus_suspend_gate=pass"', start)
+        gate = script[start:end]
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            inputs = source / 'app/streaming/input'
+            inputs.mkdir(parents=True)
+            (inputs / 'input.cpp').write_text('LI_FF_RAW_HID_FOCUS_SUSPEND\n')
+            (inputs / 'linuxrawwacom.h').write_text('void suspendForwarding();\n')
+            adapter = inputs / 'linuxrawwacom.cpp'
+            valid = ('void LinuxRawWacomInput::setActive(bool active) {\n'
+                     '    if (!active) { suspendForwarding(); }\n}\n'
+                     'void LinuxRawWacomInput::suspendForwarding() {\n'
+                     '    sendFrame(PLANK_RAW_HID_SUSPEND, 0, 0, nullptr, 0);\n}\n')
+            def check(contents):
+                adapter.write_text(contents)
+                return subprocess.run(['bash', '-c', 'set -euo pipefail; source_dir=$1\n' + gate,
+                                       'gate-test', str(source)], text=True, capture_output=True)
+            self.assertEqual(check(valid).returncode, 0)
+            self.assertEqual(check(valid.replace('if (!active)', 'if (active)')).returncode, 1)
+            self.assertEqual(check(valid.replace('PLANK_RAW_HID_SUSPEND',
+                                                 'PLANK_RAW_HID_DETACH')).returncode, 1)
+            self.assertEqual(check(valid + 'sendFrame(PLANK_RAW_HID_DETACH, 0, 0, nullptr, 0);\n')
+                             .returncode, 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

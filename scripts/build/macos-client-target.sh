@@ -3,9 +3,9 @@
 plank_macos_client_target() {
     # Deployment floor is independent of the SDK: retain modern APIs in one
     # binary, with runtime availability checks for anything newer than macOS15.
-    PLANK_MAC_CLIENT_MIN_MACOS=${PLANK_MAC_CLIENT_MIN_MACOS:-${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}}
-    [[ $PLANK_MAC_CLIENT_MIN_MACOS == 13.0 ]] || {
-        echo 'BDE fernweh deployment target must be 13.0' >&2; return 2;
+    PLANK_MAC_CLIENT_MIN_MACOS=${PLANK_MAC_CLIENT_MIN_MACOS:-${PLANK_MACOS_DEPLOYMENT_TARGET:-15.0}}
+    [[ $PLANK_MAC_CLIENT_MIN_MACOS == 15.0 ]] || {
+        echo 'BDE fernweh deployment target must be 15.0' >&2; return 2;
     }
     [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || {
         echo 'The Mac Client requires an Apple Silicon builder' >&2; return 2;
