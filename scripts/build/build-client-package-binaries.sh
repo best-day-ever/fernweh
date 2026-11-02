@@ -1218,8 +1218,8 @@ cmp --silent "$approved_client_logo" "$runtime_client_logo" || {
 echo "client_approved_logo_source_gate=pass"
 client_desktop="$source_dir/app/deploy/linux/la.instinctual.Plank.Client.desktop"
 client_appstream="$source_dir/app/deploy/linux/la.instinctual.Plank.Client.appdata.xml"
-rg -Fxq 'Name=BDE Fernweh Client' "$client_desktop" || {
-  echo "client desktop display name is not BDE Fernweh Client" >&2
+rg -Fxq 'Name=BDE fernweh' "$client_desktop" || {
+  echo "client desktop display name is not BDE fernweh" >&2
   exit 1
 }
 rg -Fxq 'StartupWMClass=la.instinctual.Plank.Client' \
