@@ -4,6 +4,24 @@
 > `docs/bde/agents.md`: fork branches and PR flow, local builds, client/broker/host contracts, the code graph
 > (`scripts/agent/graph`) and the shared agent memory.
 
+## Mac Client compatibility scope
+
+The operator authorized one Apple Silicon Client package for macOS 15 and newer,
+built with SDK27 or newer and a 15.0 deployment target. Bootstrap, application,
+and PKG packaging use that same policy; do not reuse dependencies built with a
+newer minimum OS. Use runtime availability checks for APIs newer than macOS15,
+not compile-time removal of macOS27 capabilities. The operator authorized one
+macOS Host package for 26.7 and newer, built with SDK27 and exact dependency
+pins. `PLANK_MACOS_HOST_MIN_OS` defaults to 26.7. The optional 27.0 target is
+only for candidate regression comparisons, not a second release package.
+Chris (cnoellert) owns macOS 26.7 hardware and session validation; the operator
+does not need a 26.7 test machine. This target is not experimental. Preserve
+the macOS 27 build/regression gates and distinguish uninstalled build checks
+from installed session acceptance. See `docs/development/plans/macos26-host-backport.md`.
+Linux qualification rules are unchanged. Qualify the identical
+Client package on both macOS15 and macOS27; compilation alone is not streaming,
+audio, input or tablet acceptance.
+
 ## Project Structure & Module Organization
 
 This repository is in late integration and production hardening. It has a
@@ -92,11 +110,16 @@ NUC's VA-API, where the same exact-format gate and software fallback apply.
 
 ## Build, Test, and Development Commands
 
-Experimental macOS Host work targets **macOS 27 or newer**, using SDK 27 or
-newer and an explicit 27.0 deployment target. The reference Mac used to inspect
-PCoIP is read-only, not an older-OS compatibility target. Build and run macOS
-probes only on the user-authorized dedicated development Mac. Do not add older
-macOS compatibility paths. Beta results require revalidation against the final
+macOS Host builds use **SDK 27 or newer** and a **26.7 deployment target** for
+one package covering 26.7 and newer. Hosted compilation and component regression
+tests continue on macOS27. Qualify the identical signed package on 26.7 and 27
+before treating the shared package as accepted; use the validation ownership
+above. No broader older-OS support is implied. Reference Macs are read-only
+unless the operator explicitly reassigns one for development. Use only the
+currently authorized test Mac; private notes hold the current assignment and
+session-preservation constraints. Build probes on hosted SDK27 workers and run
+them on that Mac only within the operator's authorization.
+Beta results require revalidation against the final
 OS release. This work does not change the supported Linux release gates below.
 
 Experimental macOS Client builds use the same authorized dedicated development
@@ -105,6 +128,22 @@ Mac, Apple Silicon, SDK27 or newer and deployment target15.0. See
 permission to compile Linux packages on the Mac or restore inherited prebuilts.
 
 Builder and hardware-test roles are deliberately separate:
+
+The Ubuntu Client uses the Qt session frontend and direct PipeWire playback
+under the ordinary `plank-client` identity. Build and test it on GitHub-hosted
+Actions, not the retained Ubuntu VM. Use `linux-client` for the component,
+sanitizer, compositor, launcher and package-upgrade gates and the resulting DEB.
+There is no separate Qt product or experimental configuration namespace.
+Preserve existing bookmarks, Host trust, administrator policy and log paths.
+The operator authorized merging the macOS Qt/Metal session frontend into main;
+Mac playback retains SDL/CoreAudio. Keep platform-specific rendering and audio
+backends separate while sharing the Qt session controls. Installed Mac session
+acceptance and remaining parity work are still required before release; see
+`docs/development/plans/macos-qt-session.plan`.
+Do not ask the operator to repair VM prerequisites or distribute a standalone
+probe as the Client.
+Hosted tests do not replace exact-candidate hardware/session acceptance. Read
+HANDOFF and the private notes for current test-target availability and results.
 
 The workflows in `.github/workflows/build.yml` also authorize disposable
 GitHub-hosted builders for the same target OS/toolchain contracts: Rocky 9.7

@@ -45,10 +45,22 @@ def collect(args):
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', args.branch):
         raise ValueError('invalid branch qualifier')
     effective = version if args.branch == 'main' else version + '-' + args.branch
+    if args.product == 'host' and args.platform == 'macos':
+        # Match plank_load_macos_host_package_version. Historical macos-27
+        # artifacts retain their original identity when transferred/re-collected.
+        if args.target_os not in ('macos-27', 'macos-27.0', 'macos-26.7'):
+            raise ValueError('unsupported macOS Host package target')
+        # Mainline now targets 26.7; retain original target metadata when
+        # transferring historical 27-only packages. Conflicting provenance
+        # remains an error, even if the package bytes are identical.
+        if args.branch != 'main' and args.target_os != 'macos-27':
+            effective += '-' + args.target_os.replace('macos-', 'macos', 1)
     source = args.package.resolve(strict=True)
     if not source.is_file():
         raise ValueError('package must be a regular file')
     extension = source.suffix
+    if args.product not in ('host', 'client'):
+        raise ValueError('unsupported product; Linux Qt uses the client identity')
     allowed = {'linux': ('.deb', '.rpm'), 'macos': ('.pkg', '.dmg')}
     if extension not in allowed[args.platform]:
         raise ValueError('package extension does not match platform')

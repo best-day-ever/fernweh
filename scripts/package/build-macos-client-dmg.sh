@@ -43,7 +43,7 @@ done
 # Every Mach-O must load on the oldest supported macOS: a dependency built for a
 # newer target would make the whole app refuse to launch there.
 macos_min=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")
-[[ $macos_min == "${PLANK_MACOS_DEPLOYMENT_TARGET:-13.0}" ]] || { echo "LSMinimumSystemVersion $macos_min" >&2; exit 1; }
+[[ $macos_min == "${PLANK_MACOS_DEPLOYMENT_TARGET:-15.0}" ]] || { echo "LSMinimumSystemVersion $macos_min" >&2; exit 1; }
 while IFS= read -r -d '' file; do
     file -b "$file" | grep -q Mach-O || continue
     minos=$(otool -l "$file" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')

@@ -12,7 +12,7 @@ $env:QT_QPA_PLATFORM = 'offscreen'
 $env:PLANK_REPO_ROOT = $SourceRoot
 # The clipboard suites use the test process's Windows clipboard, so they run
 # sequentially. Run on a builder desktop without personal clipboard contents.
-foreach ($suite in @('sessionhotkeys', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore')) {
+foreach ($suite in @('outputtopology', 'internetconnectivity', 'plankclientpolicy', 'sessionhotkeys', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore')) {
     $directory = Join-Path $BuildDir $suite
     [void](New-Item -ItemType Directory -Force -Path $directory)
     $runner = Join-Path $directory 'build.cmd'

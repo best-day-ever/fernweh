@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Load the public PLANK product version and package-manager-specific metadata.
-# The operator-facing patch component is zero-padded from 1.1.001 onward.
+# Preserve the operator-facing zero padding (1.2.00, previously 1.1.001).
 # Callers must pass the repository root containing packaging/VERSION.
 plank_load_package_version() {
   if (($# != 1)); then
@@ -44,6 +44,25 @@ plank_load_package_version() {
     # Feature candidates must compare older than the final main RPM for the
     # same base version. RPM Release values cannot contain hyphens.
     PLANK_RPM_RELEASE="0.${build_branch//-/_}.1"
+  fi
+}
+
+# Mac Host candidates built from one branch must coexist across runtime floors.
+# Keep ordinary mainline versions and all other products' identities unchanged.
+plank_load_macos_host_package_version() {
+  plank_load_package_version "$@" || return
+  local target=${PLANK_MACOS_HOST_MIN_OS:-26.7}
+  case $target in
+    26.7|27.0) ;;
+    *) echo "unsupported macOS Host package target: ${target}" >&2; return 1 ;;
+  esac
+  if [[ $PLANK_BUILD_BRANCH_RESOLVED = main ]]; then
+    [[ $target = 26.7 ]] || {
+      echo 'macOS Host 27.0 comparison requires a candidate branch' >&2
+      return 1
+    }
+  else
+    PLANK_PACKAGE_VERSION+="-macos${target}"
   fi
 }
 

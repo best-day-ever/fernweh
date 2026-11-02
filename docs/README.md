@@ -1,22 +1,30 @@
 # Documentation
 
 - [User documentation](user/): bookmark behavior and product configuration.
+  [Ubuntu Client displays](user/client-displays.md) covers per-bookmark fullscreen
+  monitor selection and spanning.
   [macOS configuration](user/macos-configuration.md) covers Host/Client INI files,
   installation, upgrade preservation and identity separation.
   [Permissions](user/permissions.md) covers launch-time setup, denied access,
   and OS-controlled prompts that cannot be moved out of a session.
   [Remembered usernames](user/remembered-usernames.md) documents the Client's
   default-off, per-bookmark sign-in prefill policy.
+  [Internet indicator](user/client-internet-connectivity.md) covers the
+  main-window connectivity checks and administrator-controlled targets.
   [Mac remote audio output](user/macos-audio-output.md) explains PLANK Output,
   volume controls and restoration of local playback.
 - [Architecture](architecture/): media, input, authentication and lifecycle.
 - [Development](development/): platform matrix, acceptance, build runbooks and plans.
   [macOS 15 integration review](development/macos15-integration-review.md)
   covers the experimental fork, evidence, regression risks and linked PR plan.
+  [macOS 26.7 Host PR review](development/reviews/macos26-host-pr32-review.md)
+  records the candidate packaging concern and remaining qualification gates.
   [GitHub-hosted builds](development/build/github-builds.md) covers CI scope,
   artifacts and signing boundaries.
   [Dependency maintenance](development/dependency-maintenance.md) covers update
   automation, script-pinned inputs and upgrade qualification.
+  [Ubuntu Qt session experiment](development/plans/ubuntu-qt-session.plan)
+  tracks the isolated window/input prototype and its precision gates.
   [Native media forwarding](development/investigations/native-media-forwarding.md)
   investigates preserving webcam and microphone device payloads through transport.
   [Installed media reader](development/investigations/installed-media-reader.md)

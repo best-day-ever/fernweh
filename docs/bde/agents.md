@@ -7,7 +7,7 @@ not ours: never record BDE state there. Ours lives in bde-linux (`docs/TASKS.md`
 
 ## What this fork ships
 
-- **BDE Fernweh Client**: the Mac client (`apps/client`), macOS 13+, Apple Silicon, Developer ID signed and
+- **BDE Fernweh Client**: the Mac client (`apps/client`), macOS 15+, Apple Silicon, Developer ID signed and
   notarized. Remote mode signs in through the broker (password + TOTP, or a Touch ID passkey), binds the session
   to the device, and connects either straight to the workstation (office LAN) or through the broker's relay.
 - **Linux Host RPM** for the Rocky 9.7 workstations (`apps/host/linux`), with GSSAPI admission, desktop handoff
@@ -67,10 +67,10 @@ Each release gets `docs/releases/<version>.md` and a `packaging/VERSION` bump.
   `agent-heavy-run bash scripts/build/build-macos-client.sh "$PWD" "$B/work/client-build-<topic>"` (absolute paths).
   It runs the Mac test suites listed in that script. Always put `$PLANK_QT_ROOT/bin` first on `PATH`: the Homebrew
   qmake is a different Qt. `~/.cache/plank-ci` (the CI mirror, `scripts/ci/build.sh`) has dependencies built for
-  macOS 27, not the 13.0 target; prefer the builder above.
+  macOS 27, not the 15.0 target; prefer the builder above.
 - **Single client test suite** (with the variables above and `PATH=$PLANK_QT_ROOT/bin:$PLANK_MAC_CLIENT_DEPS/install/bin:$PATH`,
   `PKG_CONFIG_PATH=$PLANK_MAC_CLIENT_DEPS/install/lib/pkgconfig`): in an empty build directory,
-  `qmake <src>/apps/client/tests/<suite>/<suite>.pro CONFIG+=release CONFIG-=app_bundle QMAKE_MACOSX_DEPLOYMENT_TARGET=13.0 QMAKE_APPLE_DEVICE_ARCHS=arm64 "QMAKE_CXXFLAGS+=-include arm_acle.h"`,
+  `qmake <src>/apps/client/tests/<suite>/<suite>.pro CONFIG+=release CONFIG-=app_bundle QMAKE_MACOSX_DEPLOYMENT_TARGET=15.0 QMAKE_APPLE_DEVICE_ARCHS=arm64 "QMAKE_CXXFLAGS+=-include arm_acle.h"`,
   `make -j8`, then `PLANK_REPO_ROOT=<src> QT_QPA_PLATFORM=offscreen ./<suite>`. Suites missing from the build script's
   list only run when someone runs them by hand, so add new suites to that list.
 - **Mac client release DMG**: a release commit bumps `packaging/VERSION` (the catalog refuses to overwrite a version) and
