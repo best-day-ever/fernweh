@@ -53,7 +53,7 @@ plank_load_macos_host_package_version() {
   plank_load_package_version "$@" || return
   local target=${PLANK_MACOS_HOST_MIN_OS:-26.7}
   case $target in
-    26.7|27.0) ;;
+    15.4|26.7|27.0) ;;
     *) echo "unsupported macOS Host package target: ${target}" >&2; return 1 ;;
   esac
   if [[ $PLANK_BUILD_BRANCH_RESOLVED = main ]]; then

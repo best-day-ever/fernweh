@@ -72,6 +72,10 @@ xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -W
 xcrun clang -std=c11 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
     -Iapps/host/macos/media tests/auth/macos-stream-diagnostics.c -o "$output/stream-diagnostics-test"
 "$output/stream-diagnostics-test"
+xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
+    -Iapps/host/macos/auth apps/host/macos/auth/broker-admission.m tests/auth/macos-broker-admission.m \
+    -framework Foundation -framework Security -o "$output/broker-admission-test"
+"$output/broker-admission-test"
 python3 "$source_root/tests/packaging/test-macos-host-permissions.py"
 python3 "$source_root/tests/packaging/test-macos-installer-preflight.py"
 python3 "$source_root/tests/packaging/test-macos-camera-profile.py"
@@ -154,7 +158,7 @@ common=("${PLANK_FILE_FLAGS[@]}" -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET
     -framework CoreVideo -framework ScreenCaptureKit -framework VideoToolbox -framework AudioToolbox -framework CoreAudio
     -framework Carbon -framework ApplicationServices -framework OpenDirectory -framework IOKit -framework SystemExtensions
     -Wl,-fatal_warnings -Wl,-sectcreate,__CGPreLoginApp,__cgpreloginapp,/dev/null)
-sources=(apps/host/macos/auth/authentication-session.m apps/host/macos/auth/graphical-authority.m
+sources=(apps/host/macos/auth/broker-admission.m apps/host/macos/auth/authentication-session.m apps/host/macos/auth/graphical-authority.m
     apps/host/macos/auth/account-verifier.m apps/host/macos/auth/account-channel.m
     apps/host/macos/control/http-request.m apps/host/macos/control/server-information.m
     apps/host/macos/control/fixed-capture.m apps/host/macos/control/desktop-display.m apps/host/macos/control/display-layout.m apps/host/macos/control/https-auth-server.m

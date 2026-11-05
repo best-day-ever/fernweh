@@ -11,6 +11,8 @@
 // Factories permit non-posting/synthetic qualification without a second launch
 // implementation; the application supplies ScreenCapture and QuartzInput.
 @interface PLANKMacHostRuntime : NSObject
+@property(copy) BOOL (^verifyBrokerAdmission)(NSString *token, NSString *subject,
+                                            PLANKMacAccountIdentity *identity);
 // Configure before start, only after checking shared_desktop_user against the
 // positively identified local desktop account. No LoginWindow admission.
 @property(nonatomic) BOOL sharedDesktop;

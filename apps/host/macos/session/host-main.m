@@ -16,6 +16,7 @@
 #include "permission-status.h"
 #import "desktop-provisioning.h"
 #import "host-configuration.h"
+#import "broker-admission.h"
 #import "machine-identity.h"
 #import "desktop-start.h"
 #import "permission-setup.h"
@@ -320,6 +321,16 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
         }
         input:^id<PLANKMacInputDevice> { return [PLANKMacQuartzInput new]; }];
     runtime.sharedDesktop = sharedUser != nil;
+    if (config[@"BrokerPublicKey"]) {
+        NSData *brokerKey = [[NSData alloc] initWithBase64EncodedString:config[@"BrokerPublicKey"] options:0];
+        PLANKMacBrokerAdmission *broker = [[PLANKMacBrokerAdmission alloc] initWithPublicKey:brokerKey
+            host:config[@"BrokerHost"] localUser:sharedUser certificateDER:certificateBytes
+            replayPath:[directory stringByAppendingPathComponent:@"broker-nonces"]];
+        if (!broker) return startupFailure("broker-admission-configuration");
+        runtime.verifyBrokerAdmission = ^BOOL(NSString *token, NSString *subject, PLANKMacAccountIdentity *account) {
+            return [broker verifyToken:token subject:subject now:(uint64_t)time(NULL) identity:account];
+        };
+    }
     if (desktopDisplay.mirrorHostDisplays) runtime.releaseDisplay = ^BOOL {
         dispatch_semaphore_t finished = dispatch_semaphore_create(0);
         __block atomic_bool restored = false;

@@ -201,7 +201,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
         andDeviceUID:@PLANK_OUTPUT_DEVICE_UID withStream:0];
     _description.name = @"PLANK Session Audio";
     _description.privateTap = YES;
-    _description.processRestoreEnabled = NO; // no bundle-ID cross-user matching
+    if (@available(macOS 26.0, *)) _description.processRestoreEnabled = NO; // no bundle-ID cross-user matching
     _description.exclusive = NO; // include only the verified process allowlist
     _description.muteBehavior = CATapUnmuted; // PLANK Output itself is a null sink
     if (AudioHardwareCreateProcessTap(_description, &_tap)) return NO;

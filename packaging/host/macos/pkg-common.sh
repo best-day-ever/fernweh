@@ -213,7 +213,7 @@ check_configuration() {
 platform_compatible() {
     local version=$1 architecture=$2 major minor required_major required_minor
     [[ $architecture = arm64 && $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
-    case $minimum_macos in 26.7|27.0) ;; *) return 1 ;; esac
+    case $minimum_macos in 15.4|26.7|27.0) ;; *) return 1 ;; esac
     major=${version%%.*}; minor=${version#*.}; minor=${minor%%.*}
     required_major=${minimum_macos%%.*}; required_minor=${minimum_macos#*.}
     [[ $major -gt $required_major || ( $major -eq $required_major && $minor -ge $required_minor ) ]]

@@ -40,7 +40,7 @@ static OSStatus discardAudio(AudioObjectID device, const AudioTimeStamp *now,
     CATapDescription *description = [[CATapDescription alloc] initStereoMixdownOfProcesses:@[]];
     description.name = @"PLANK Audio Permission Setup";
     description.privateTap = YES;
-    description.processRestoreEnabled = NO;
+    if (@available(macOS 26.0, *)) description.processRestoreEnabled = NO;
     description.exclusive = NO;
     description.muteBehavior = CATapUnmuted;
     if (AudioHardwareCreateProcessTap(description, &_tap)) return NO;

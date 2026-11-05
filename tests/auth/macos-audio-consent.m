@@ -14,7 +14,8 @@ static uid_t testUID(void) { return fixtureUID; }
 static OSStatus step(void) { return ++calls == failAt ? -1 : noErr; }
 static OSStatus createTap(CATapDescription *description, AudioObjectID *tap) {
     assert(description.processes.count == 0 && !description.exclusive && description.privateTap);
-    assert(!description.processRestoreEnabled && description.muteBehavior == CATapUnmuted);
+    if (@available(macOS 26.0, *)) assert(!description.processRestoreEnabled);
+    assert(description.muteBehavior == CATapUnmuted);
     if (step()) return -1;
     taps++; *tap = 10; return noErr;
 }

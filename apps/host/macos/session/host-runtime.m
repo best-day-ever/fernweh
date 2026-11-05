@@ -56,6 +56,14 @@
             if (!owner) { *status = 503; return nil; }
             return [owner launch:request token:token peer:peer port:port status:status];
         }];
+    _server.verifyBrokerAdmission = ^BOOL(NSString *token, NSString *subject, PLANKMacAccountIdentity *account) {
+        typeof(self) owner = weakSelf;
+        if (!owner || atomic_load(&owner->_stopping) || !owner->_started || !owner.sharedDesktop ||
+            !owner.verifyBrokerAdmission) return NO;
+        PLANKMacGraphicalIdentity scope = owner->_snapshot();
+        return owner.verifyBrokerAdmission(token, subject, account) &&
+            !atomic_load(&owner->_stopping) && plank_macos_same_graphical_scope(scope, owner->_snapshot());
+    };
     _server.negotiateMedia = ^NSDictionary *(NSDictionary *request, unsigned *status) {
         typeof(self) owner = weakSelf;
         if (!owner || atomic_load(&owner->_stopping) || !owner->_started) { *status = 503; return nil; }
