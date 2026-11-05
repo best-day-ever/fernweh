@@ -13,6 +13,7 @@ import json
 import os
 import re
 import resource
+import select
 import socket
 import ssl
 import struct
@@ -246,26 +247,35 @@ class Acceptance:
             command.append("--audio-optional")
         environment = {k: v for k, v in os.environ.items() if not k.startswith("FW_") and k != "SSLKEYLOGFILE"}
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, env=environment)
+                                 stderr=subprocess.PIPE, env=environment, bufsize=0)
         try:
             data = encode(launch)
             deadline = time.monotonic() + self.seconds + 35
+            child.stdin.write(data)
+            child.stdin.close()
+            child.stdin = None
+            # The receiver flushes this line only after decoding a real frame.
+            # Same-runner timestamps let two independent fixture runs prove
+            # overlapping media, rather than merely overlapping authentication.
+            self.require("decoded_pixels_ready", bool(select.select([child.stdout], [], [], 20)[0]) and
+                         child.stdout.readline(256).strip() == b"remote_receiver_pixels_ready=1")
+            video_started = time.time_ns() // 1_000_000
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise Failure("receiver_timeout")
                 try:
-                    stdout, _ = child.communicate(input=data, timeout=min(25, remaining))
+                    stdout, _ = child.communicate(timeout=min(25, remaining))
                     break
                 except subprocess.TimeoutExpired:
-                    data = None
                     status, reply = self.call("POST", broker_path + "/keepalive", {})
                     self.require("stream_keepalive", status == 200 and reply.get("state") == "ok")
-            self.require("quic_decoded_pixels", child.returncode == 0 and
-                         b"remote_receiver_pixels_ready=1" in stdout and b"remote_decode=pass" in stdout)
+            self.require("quic_decoded_pixels", child.returncode == 0 and b"remote_decode=pass" in stdout)
             self.require("stream_disconnected", b"disconnected=1" in stdout)
             self.results["scope"] = "broker_host_and_quic_video"
             self.results["audio_required"] = not self.audio_optional
+            self.results["video_started_unix_ms"] = video_started
+            self.results["video_finished_unix_ms"] = time.time_ns() // 1_000_000
         finally:
             if child.poll() is None:
                 child.terminate()

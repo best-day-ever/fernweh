@@ -97,7 +97,11 @@ During longer receiver runs, fresh signed keepalives renew the lease every25
 seconds. Receiver success requires decoded pixels, `remote_decode=pass`, clean
 disconnect and exit0. Its process is terminated/reaped after a failed check.
 Successful output then has `scope: broker_host_and_quic_video`. This proves one
-stream. Concurrent access, input behavior, microphone/camera, WAN reachability
+stream. `video_started_unix_ms` records the receiver's first decoded-frame
+notification; `video_finished_unix_ms` records its successful exit. Two runs on
+the same external runner can use these intervals to demonstrate overlapping
+decoded streams, while retaining separate MFA accounts, device keys and leases.
+Concurrent access, input behavior, microphone/camera, WAN reachability
 from additional networks, and second-client survival still need separate tests.
 
 ## Offline regression tests

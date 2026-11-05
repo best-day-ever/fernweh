@@ -3,6 +3,7 @@
 import base64
 import datetime
 import importlib.util
+import io
 import json
 from pathlib import Path
 import time
@@ -144,22 +145,28 @@ class Tests(unittest.TestCase):
 
     def test_relay_receiver_uses_leased_port_and_stdin_only(self):
         captured = {}
+        class Input(io.BytesIO):
+            def close(self):
+                captured["launch"] = json.loads(self.getvalue())
+                super().close()
         class Child:
             returncode = 0
             def __init__(self, command, **kwargs):
                 captured["command"] = command
                 captured["environment"] = kwargs["env"]
+                self.stdin = Input()
+                self.stdout = io.BytesIO(b"remote_receiver_pixels_ready=1\nremote_decode=pass disconnected=1")
             def communicate(self, input=None, timeout=None):
-                if input is not None:
-                    captured["launch"] = json.loads(input)
-                return b"remote_receiver_pixels_ready=1\nremote_decode=pass disconnected=1", b""
+                return self.stdout.read(), b""
             def poll(self):
                 return 0
         with patch.object(m.subprocess, "Popen", Child), patch.object(m.socket, "gethostbyname", return_value="203.0.113.8"), \
+                patch.object(m.select, "select", side_effect=lambda readers, *args: (readers, [], [])), \
                 patch.dict(m.os.environ, {"FW_PASSWORD": "private-password", "SSLKEYLOGFILE": "/must/not/write"}):
             result = self.runner(receiver="/receiver", audio_optional=True).run()
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["scope"], "broker_host_and_quic_video")
+        self.assertLessEqual(result["video_started_unix_ms"], result["video_finished_unix_ms"])
         self.assertEqual(captured["launch"]["udp_port"], 29042)
         self.assertNotIn(SECRET, " ".join(captured["command"]))
         self.assertNotIn("FW_PASSWORD", captured["environment"])
