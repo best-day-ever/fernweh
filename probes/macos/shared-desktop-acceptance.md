@@ -104,3 +104,37 @@ source using `afplay`. It does not change volume or output settings. Both local
 and remote source files are removed afterwards. Captured PCM is reduced to
 statistics in memory and never saved. Coordinate this playback with people
 sharing the desktop before running it.
+
+For a session where another remote-access application competes for the default
+output, use the explicit-device generator without changing any shared setting:
+
+```sh
+xcrun clang -mmacosx-version-min=15.4 -fobjc-arc -Wall -Wextra -Werror \
+  probes/macos/play-output-tone.m -framework Foundation -framework AudioToolbox \
+  -framework CoreAudio -o "$OUTPUT_TONE"
+python3 probes/macos/play-acceptance-tone.py --explicit-generator "$OUTPUT_TONE" \
+  "$SSH_TARGET" -- python3 probes/macos/shared-desktop-acceptance.py \
+  --address "$HOST_ADDRESS" --username "$LOCAL_USER" \
+  --certificate "$TRUSTED_LEAF_PEM" --sha256 "$TRUSTED_LEAF_SHA256" \
+  --receiver "$ENERGY_RECEIVER" --single --single-seconds 12 --audio-energy
+```
+
+This temporary native generator uses AudioQueue bound to the PLANK Output UID.
+It synthesizes 440/880 Hz stereo PCM directly for eight seconds, changes no
+default device or volume, and is removed from the target after the trial. This
+qualifies the explicit output-device path, independently of default routing.
+
+On 2026-11-06 the unchanged strict waveform gate passed through the installed
+signed Host: 570,720 decoded PCM frames, seven qualifying one-second windows,
+left/right RMS 0.070782/0.070764, expected-tone fractions 0.999928/0.999974 and
+opposite-tone fractions below the printed six-decimal precision. The same
+12-second connection decoded 22 video frames and received 2,378 audio packets;
+bitrate control and clean disconnect passed. The temporary generator was
+removed. This verifies non-silent stereo waveform capture, Apple Opus encoding,
+QUIC transport and decoding. It does not establish subjective speaker playback.
+
+An earlier default-routed `afplay` trial had non-silent decoded audio but failed
+the strict tone gate. A later attempt refused playback when the observed default
+output was another remote-access application's device. The explicit-device pass
+isolates a working Host capture/codec path; default-output selection must still
+be qualified with that competing application's connection closed.
