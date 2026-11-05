@@ -1,10 +1,11 @@
 # Consented desktop collaboration
 
 The Linux Host advertises feature `0x20000000` for collaboration. An authenticated
-guest joins the current owner's desktop only after that owner explicitly grants
-view or interaction permission. Normal PAM/GSSAPI authentication and host access
+guest joins the current owner's desktop after that owner explicitly grants
+view or interaction permission, or an explicit Host support policy authorizes it.
+Normal PAM/GSSAPI authentication and host access
 policy still apply independently to every guest. A broker route is reachability,
-never desktop consent.
+never desktop authorization.
 
 ## Identity and consent
 
@@ -20,6 +21,42 @@ The Host's participant window remains available during sharing to revoke a
 guest or change their permission. Guest input must be inhibited while the consent
 or participant control UI is being used, so an existing controller cannot approve
 another controller or change its own permission.
+
+## Administrator support override
+
+An administrator may configure `collaboration_support_group` in the Host's
+`[collaboration]` section. It defaults to empty (disabled). The Host resolves
+membership through NSS/SSSD using the authenticated account UID. Missing groups,
+failed lookups and nonmembers do not authorize support. Client JSON, usernames
+and feature flags cannot confer this role. PAM/GSSAPI and workstation access
+policy still apply; this is solely an exception to owner consent.
+
+Members receive a desktop-bound interaction grant without waiting for approval.
+The Host rechecks membership on guest status and at launch. The grant is still
+single-use and expires after two minutes if unused. Owner deny/revoke/downgrade
+controls cannot change a support grant. The local indicator labels it as
+administrator support and exposes no permission buttons for it. A missing or
+closed helper revokes ordinary guests but does not block support. The Host keeps
+trying to start the indicator; it also logs successful support joins by UID,
+without grant secrets. Input remains suspended while owner security controls
+are open, including during other guests' pending consent.
+
+Support remains bound to the unlocked desktop: lock, logout, generation change,
+primary stream termination and guest cancellation revoke it and release held
+input. Guest clipboard, files, pen, devices, microphone and camera remain disabled.
+The owner's capture and layout stay authoritative. Four separate support slots
+prevent ordinary pending/active guests from exhausting support admission; support
+is also bounded to four concurrent identities. Capture/transport resources and
+matching encoder requirements still apply.
+
+Membership changes affect new requests and launches through refreshed NSS/SSSD
+state; an already streaming support grant is not continuously reauthenticated.
+To end it immediately, disconnect the support stream or lock/end the desktop.
+
+The wire negotiation is unchanged (`0x20000000`). Request creation retains its
+`pending` acknowledgement for existing clients; the next status response returns
+`control` with the existing grant/capture fields. Owner/helper participant records
+add `support: true` for support grants; absent/false means ordinary consent.
 
 ## Host HTTPS API
 
@@ -39,7 +76,8 @@ grants are not logged.
 An approved guest supplies `plankCollaboration=<grant>` to `/launch`. The Host
 revalidates the authenticated guest, owner, desktop and permission before creating
 any guest media endpoint. A feature bit alone or a client-supplied permission is
-never sufficient. Reconnecting a guest requires another approval.
+never sufficient. Reconnecting an ordinary guest requires another approval; support
+requires a fresh group check.
 
 ## Display ownership
 
@@ -69,7 +107,9 @@ Host's current permission remains the authority for every input packet.
 Every guest has an independent authenticated transport connection. Dropping a
 guest must not stop the owner or another guest, release the owner's display
 lease, or lock their desktop. Ending the primary stream, locking/logging out the
-desktop, replacing its worker, or losing the consent helper revokes sharing.
+desktop, replacing its worker, or losing the consent helper revokes ordinary
+sharing. Support is exempt only from helper loss; all desktop lifecycle
+revocations still apply.
 Queued input is rejected after revocation, and held guest keys/buttons are
 released. A guest never keeps an otherwise abandoned desktop unlocked.
 
