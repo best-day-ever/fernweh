@@ -45,7 +45,10 @@ done
 macos_min=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")
 [[ $macos_min == "${PLANK_MACOS_DEPLOYMENT_TARGET:-15.0}" ]] || { echo "LSMinimumSystemVersion $macos_min" >&2; exit 1; }
 while IFS= read -r -d '' file; do
-    file -b "$file" | grep -q Mach-O || continue
+    # Consume all of file's universal-binary output: grep -q can close the
+    # pipe early, causing SIGPIPE under pipefail and silently skipping signing.
+    file_kind=$(file -b "$file")
+    [[ $file_kind == *Mach-O* ]] || continue
     minos=$(otool -l "$file" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
     [[ -n $minos ]] && [[ $(printf '%s\n%s\n' "$minos" "$macos_min" | sort -V | tail -1) == "$macos_min" ]] ||
         { echo "deployment target gate: $file minos=${minos:-none} > $macos_min" >&2; exit 1; }
@@ -64,7 +67,10 @@ for name in SDL3-3.4.2 SDL3_ttf-3.2.2 opus-1.5.2 openssl-3.5.5 freetype-2.14.1 f
         -exec cp {} "$app/Contents/Resources/licenses/$name/" \;
 done
 while IFS= read -r -d '' binary; do
-    file -b "$binary" | grep -q 'Mach-O' || continue
+    # Consume all of file's universal-binary output: grep -q can close the
+    # pipe early, causing SIGPIPE under pipefail and silently skipping signing.
+    file_kind=$(file -b "$binary")
+    [[ $file_kind == *Mach-O* ]] || continue
     # Remove debug sections before distribution signing, not runtime strings.
     strip -S "$binary"
     # macdeployqt relocates linked libraries; remove developer-only search paths.
