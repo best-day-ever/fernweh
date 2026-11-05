@@ -71,3 +71,87 @@ geometry and 4:4:4 request returned the unchanged active workspace. Final
 authenticated topology remained available after all streams drained. This is
 actual direct TLS/QUIC video decoding and audio packet transport evidence; it
 does not qualify audible playback, non-silent content, or the Internet relay.
+
+## Optional decoded test-tone gate
+
+Build the receiver with `-DPLANK_PREVIEW_AUDIO_ENERGY`, the prepared libopus
+include path and static archive. This adds no product dependency; ordinary
+preview builds retain their existing behavior. Use a deployment target compatible
+with both prepared archives and the receiver machine, for example:
+
+```sh
+xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+  -DPLANK_PREVIEW_AUDIO_ENERGY -I"$OPUS_PREFIX/include" \
+  -Iprotocol/plank-transport/include probes/macos/preview-receive.m \
+  "$TRANSPORT_ARCHIVE" "$OPUS_PREFIX/lib/libopus.a" \
+  -framework Foundation -framework CoreMedia -framework CoreVideo \
+  -framework VideoToolbox -framework Security -lpthread -lm -o "$ENERGY_RECEIVER"
+```
+
+`--audio-energy` requires valid decoded stereo Opus, measurable energy, and two
+whole one-second windows dominated by 440 Hz on the left and 880 Hz on the right.
+It reports both expected-tone and opposite-tone energy fractions per channel.
+Silence, channel swaps and mono mixing fail the synthetic fixture
+`tests/audio/macos-preview-audio-energy.c`. Compile that fixture with the same
+prepared libopus archive; it needs no capture device or permission.
+
+For an authorized short waveform trial, prefix the ordinary controller command
+with `python3 probes/macos/play-acceptance-tone.py "$SSH_TARGET" --`, and give the
+controller `--single --single-seconds 12 --audio-energy` plus the energy-enabled
+receiver. The wrapper generates an eight-second source WAV, waits for decoded
+video, verifies the Host default output is PLANK Output, and then plays the
+source using `afplay`. It does not change volume or output settings. Both local
+and remote source files are removed afterwards. Captured PCM is reduced to
+statistics in memory and never saved. Coordinate this playback with people
+sharing the desktop before running it.
+
+For a session where another remote-access application competes for the default
+output, use the explicit-device generator without changing any shared setting:
+
+```sh
+xcrun clang -mmacosx-version-min=15.4 -fobjc-arc -Wall -Wextra -Werror \
+  probes/macos/play-output-tone.m -framework Foundation -framework AudioToolbox \
+  -framework CoreAudio -o "$OUTPUT_TONE"
+python3 probes/macos/play-acceptance-tone.py --explicit-generator "$OUTPUT_TONE" \
+  "$SSH_TARGET" -- python3 probes/macos/shared-desktop-acceptance.py \
+  --address "$HOST_ADDRESS" --username "$LOCAL_USER" \
+  --certificate "$TRUSTED_LEAF_PEM" --sha256 "$TRUSTED_LEAF_SHA256" \
+  --receiver "$ENERGY_RECEIVER" --single --single-seconds 12 --audio-energy
+```
+
+This temporary native generator uses AudioQueue bound to the PLANK Output UID.
+It synthesizes 440/880 Hz stereo PCM directly for eight seconds, changes no
+default device or volume, and is removed from the target after the trial. This
+qualifies the explicit output-device path, independently of default routing.
+
+On 2026-11-06 the unchanged strict waveform gate passed through the installed
+signed Host: 570,720 decoded PCM frames, seven qualifying one-second windows,
+left/right RMS 0.070782/0.070764, expected-tone fractions 0.999928/0.999974 and
+opposite-tone fractions below the printed six-decimal precision. The same
+12-second connection decoded 22 video frames and received 2,378 audio packets;
+bitrate control and clean disconnect passed. The temporary generator was
+removed. This verifies non-silent stereo waveform capture, Apple Opus encoding,
+QUIC transport and decoding. It does not establish subjective speaker playback.
+
+An earlier default-routed `afplay` trial had non-silent decoded audio but failed
+the strict tone gate. A later attempt refused playback when the observed default
+output was another remote-access application's device. The explicit-device pass
+isolates a working Host capture/codec path; default-output selection must still
+be qualified with that competing application's connection closed.
+
+After closing the competing remote-access connection, the default-routed
+`afplay` trial also passed the unchanged strict stereo gate on 2026-11-06:
+571,200 decoded PCM frames, seven qualifying windows, left/right RMS
+0.070522/0.070813, expected-tone fractions 0.999904/0.999952 and opposite-tone
+fractions below printed precision. The 12-second stream decoded 22 video frames
+and received 2,380 audio packets; bitrate acknowledgement and graceful
+disconnect passed. Host counters reported no audio send drops. No tone player or
+temporary tone file remained afterwards, and existing render-worker and Host
+PIDs were unchanged.
+
+The default output was already PLANK Output before this final trial and remained
+so afterwards; the system-alert output remained the physical speakers. This
+checks preservation of the observed pre-test routing state, not restoration
+from PLANK Output to a physical device. Default-route competition with another
+remote-access application remains an operational concern; no shared volume or
+device settings were changed by these probes.

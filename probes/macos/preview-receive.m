@@ -3,6 +3,9 @@
 #import <Foundation/Foundation.h>
 #import <CoreMedia/CoreMedia.h>
 #import "hevc-decode-check.h"
+#ifdef PLANK_PREVIEW_AUDIO_ENERGY
+#include "opus-energy-check.h"
+#endif
 #include "plank_transport.h"
 #include "plank_transport_control.h"
 #include <unistd.h>
@@ -15,13 +18,17 @@ int main(int argc, const char **argv) {
     unsigned seconds = 3;
     BOOL media = YES;
     BOOL remote = argc >= 5 && !strcmp(argv[2], "--remote");
-    BOOL requireAudio = YES;
+    BOOL requireAudio = YES, checkAudioEnergy = NO;
     const char *address = "127.0.0.1";
     BOOL waitShared = argc == 3 && !strcmp(argv[2], "--shared-no-media");
     BOOL takeover = argc == 3 && !strcmp(argv[2], "--wait-takeover");
     if (remote) {
-        if (argc != 5 && (argc != 6 || strcmp(argv[5], "--audio-optional"))) return 2;
-        address = argv[3]; requireAudio = argc != 6;
+        if (argc != 5 && (argc != 6 || (strcmp(argv[5], "--audio-optional") && strcmp(argv[5], "--audio-energy")))) return 2;
+        checkAudioEnergy = argc == 6 && !strcmp(argv[5], "--audio-energy");
+#ifndef PLANK_PREVIEW_AUDIO_ENERGY
+        if (checkAudioEnergy) { fputs("audio energy support was not built\n", stderr); return 2; }
+#endif
+        address = argv[3]; requireAudio = argc != 6 || checkAudioEnergy;
         char *end = NULL; unsigned long value = strtoul(argv[4], &end, 10);
         if (!end || *end || value < 3 || value > 300) return 2;
         seconds = (unsigned)value;
@@ -89,6 +96,10 @@ int main(int argc, const char **argv) {
                 usleep(10000);
             }
         }
+        #ifdef PLANK_PREVIEW_AUDIO_ENERGY
+        PLANKOpusEnergyCheck audioEnergy;
+        if (checkAudioEnergy) REQUIRE(PLANKOpusEnergyInit(&audioEnergy));
+#endif
         PLANKHEVCDecodeCheck *decoder = remote ? [PLANKHEVCDecodeCheck new] : nil;
         uint64_t frames = 0, totalBytes = 0, lastPTS = 0, audioPackets = 0, lastAudioPTS = 0;
         double audioMaxAgeMs = 0, firstVideoMs = 0, firstAudioMs = 0;
@@ -124,6 +135,9 @@ int main(int argc, const char **argv) {
                     if (got == PLANK_TRANSPORT_TIMEOUT) break;
                     REQUIRE(got == PLANK_TRANSPORT_OK && size > 0 && packet.frame_samples == 240 && packet.missing_samples == 0);
                     REQUIRE(!audioPackets || packet.pts == lastAudioPTS + 5);
+#ifdef PLANK_PREVIEW_AUDIO_ENERGY
+                    if (checkAudioEnergy) REQUIRE(PLANKOpusEnergyDecode(&audioEnergy, audio, size));
+#endif
                     if (!audioPackets) firstAudioMs = (double)packet.pts;
                     double ageMs = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())) * 1000 - packet.pts;
                     // Monotonic clocks on different machines do not share an epoch.
@@ -136,6 +150,18 @@ int main(int argc, const char **argv) {
             REQUIRE(frames > 0 && (!requireAudio || audioPackets > 100));
             if (audioPackets) REQUIRE(fabs(firstVideoMs - firstAudioMs) < 1000); // same source clock, not a sync-quality gate
         }
+        #ifdef PLANK_PREVIEW_AUDIO_ENERGY
+        if (checkAudioEnergy) {
+            printf("audio_energy decoded_frames=%llu qualified_windows=%u left_rms=%.6f right_rms=%.6f left_tone_fraction=%.6f right_tone_fraction=%.6f left_other_tone_fraction=%.6f right_other_tone_fraction=%.6f\n",
+                (unsigned long long)audioEnergy.frames, audioEnergy.qualifiedWindows,
+                audioEnergy.bestRMS[0], audioEnergy.bestRMS[1], audioEnergy.bestFraction[0], audioEnergy.bestFraction[1],
+                audioEnergy.bestOtherFraction[0], audioEnergy.bestOtherFraction[1]);
+            BOOL passed = PLANKOpusEnergyPassed(&audioEnergy);
+            PLANKOpusEnergyDestroy(&audioEnergy);
+            REQUIRE(passed);
+            puts("audio_energy=pass expected_left_hz=440 expected_right_hz=880");
+        }
+#endif
         uint8_t control[20]; size_t count = 0;
         uint32_t target = 111500;
         REQUIRE(!plank_transport_control_encode(PLANK_TRANSPORT_CONTROL_SET_VIDEO_BITRATE, &target, 1, control, sizeof(control), &count));
