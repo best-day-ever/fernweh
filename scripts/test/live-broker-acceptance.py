@@ -177,6 +177,17 @@ class Acceptance:
         status, hosts = self.call("GET", "/v1/hosts", headers=proof)
         self.require("host_list", status == 200 and isinstance(hosts.get("hosts"), list))
         entries = [h for h in hosts["hosts"] if h.get("id") == self.host]
+        # Report only bounded status fields for the requested host, never the
+        # raw response, other users' identities, or arbitrary server strings.
+        self.results["selected_host_count"] = len(entries)
+        if len(entries) == 1:
+            entry = entries[0]
+            self.results["selected_host_status"] = {
+                key: entry.get(key) if type(entry.get(key)) is bool else None
+                for key in ("online", "connectable", "shared_desktop", "busy")}
+            reason = entry.get("reason")
+            self.results["selected_host_status"]["reason"] = reason if reason in (
+                None, "no address", "certificate changed", "offline") else "unknown"
         self.require("shared_host_available", len(entries) == 1 and entries[0].get("online") is True
                      and entries[0].get("connectable") is True and entries[0].get("shared_desktop") is True)
         status, _ = self.call("GET", "/v1/hosts", headers=proof)

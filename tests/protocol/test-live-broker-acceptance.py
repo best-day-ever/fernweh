@@ -125,6 +125,23 @@ class Tests(unittest.TestCase):
         self.assertTrue(runner.broker.logged_out)
         self.assertNotIn(SECRET, json.dumps(result))
 
+    def test_host_status_failure_reports_only_allowlisted_diagnostics(self):
+        for reason, expected in (("certificate changed", "certificate changed"), (SECRET, "unknown")):
+            class UnavailableBroker(Broker):
+                def request(self, method, path, body=b"", headers=None):
+                    status, reply = super().request(method, path, body, headers)
+                    if status == 200 and path == "/v1/hosts":
+                        reply["hosts"][0].update(connectable=False, reason=reason, in_use_by=SECRET)
+                    return status, reply
+            result = self.runner(UnavailableBroker()).run()
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["failed_check"], "shared_host_available")
+            self.assertEqual(result["selected_host_count"], 1)
+            self.assertEqual(result["selected_host_status"]["reason"], expected)
+            self.assertTrue(result["selected_host_status"]["online"])
+            self.assertFalse(result["selected_host_status"]["connectable"])
+            self.assertNotIn(SECRET, json.dumps(result))
+
     def test_relay_receiver_uses_leased_port_and_stdin_only(self):
         captured = {}
         class Child:

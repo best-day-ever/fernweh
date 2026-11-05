@@ -63,6 +63,10 @@ the envelope and never substitutes its own signing authority.
 
 One final JSON object reports `ok`, `checks`, `scope`, route and sanitized failure
 names. Exit0 requires success, including logout and subsequent session denial.
+`selected_host_count` and `selected_host_status` expose only the requested Host's
+boolean availability fields and an allowlisted reason (`no address`, `offline`,
+or `certificate changed`), so an availability failure can be diagnosed without
+printing the raw host list or an occupant's identity.
 No response bodies or subprocess diagnostics are echoed. `cleanup_failed:true`
 means the fixture's session could not be confirmed revoked; revoke the fixture
 through the approved administrative workflow. Failures after login still attempt
