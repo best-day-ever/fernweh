@@ -140,7 +140,10 @@ receive its existing size, scale and encoding profile and must adopt it after
 authentication returns `shared_desktop: true`. They cannot resize a live shared
 workspace. The last stream releases any display-mirroring lease and the shared
 PLANK Output routing lease. Each stream has independent capture, encoder,
-transport and input lifetime; clipboard changes intentionally affect the common
+transport, desktop audio tap and input lifetime. Shared audio uses at most 32
+independent taps with the existing local-user process allowlist; pending consent
+and deferred HAL cleanup keep their reservation until cleanup completes.
+Clipboard changes intentionally affect the common
 desktop. Local microphone and camera devices still have one active producer;
 shared reverse-media mixing is not implemented.
 

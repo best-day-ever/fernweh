@@ -7,6 +7,7 @@
 // is required for the tap; the OS may request it on first use.
 @class PLANKMacOutputRoute;
 @interface PLANKMacScreenCapture : NSObject <PLANKMacPreviewCapture>
+@property BOOL sharedDesktopAudio; // configure before starting capture
 @property(copy) PLANKMacOutputRoute *(^outputRoute)(dispatch_queue_t);
 - (instancetype)initWithDesktopAudioTap:(BOOL)desktopAudioTap;
 @end

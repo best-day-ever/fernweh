@@ -15,9 +15,21 @@
 static AudioObjectPropertyAddress property(AudioObjectPropertySelector selector) {
     return (AudioObjectPropertyAddress){selector, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 }
-// A consent request can remain inside HAL until the user responds. Bound the
-// worker to one tap (including its deferred cleanup), even across reconnects.
-static atomic_bool tapInUse = false;
+// Consent may remain inside HAL after logical cancellation. Reservations are
+// released only after HAL cleanup, bounding reconnects as well as active taps.
+// Exclusive sessions retain their single reservation; shared desktops permit
+// 32 independent taps with the same existing per-user process allowlist.
+enum { SharedTapLimit = 32, ExclusiveTapReservation = SharedTapLimit + 1 };
+static atomic_uint tapReservations = 0;
+static BOOL reserveTap(BOOL shared) {
+    unsigned current = 0;
+    if (!shared) return atomic_compare_exchange_strong(&tapReservations, &current, ExclusiveTapReservation);
+    current = atomic_load(&tapReservations);
+    while (current < SharedTapLimit) {
+        if (atomic_compare_exchange_weak(&tapReservations, &current, current + 1)) return YES;
+    }
+    return NO;
+}
 enum { TapPreparing, TapActivating, TapCancelled };
 typedef struct {
     PLANKTapBuffer buffer;
@@ -58,7 +70,7 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
     BOOL (^_sample)(CMSampleBufferRef);
     void (^_failed)(void);
     BOOL _started, _stopped;
-    BOOL _ownsSlot;
+    BOOL _ownsSlot, _sharedDesktop;
     BOOL _systemAlertsIncluded;
     atomic_int _activation;
     AudioObjectID _tap, _device;
@@ -80,9 +92,14 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
 }
 - (instancetype)init { return nil; }
 - (instancetype)initWithQueue:(dispatch_queue_t)queue sample:(BOOL (^)(CMSampleBufferRef))sample failed:(void (^)(void))failed {
+    return [self initWithQueue:queue sharedDesktop:NO sample:sample failed:failed];
+}
+- (instancetype)initWithQueue:(dispatch_queue_t)queue sharedDesktop:(BOOL)sharedDesktop
+                        sample:(BOOL (^)(CMSampleBufferRef))sample failed:(void (^)(void))failed {
     if (!queue || !sample || !failed || getuid() == 0 || geteuid() != getuid()) return nil;
     self = [super init];
     if (!self) return nil;
+    _sharedDesktop = sharedDesktop;
     _owner = queue; _sample = [sample copy]; _failed = [failed copy];
     mach_timebase_info_data_t timebase;
     if (mach_timebase_info(&timebase) != KERN_SUCCESS || !timebase.numer || !timebase.denom) return nil;
@@ -191,6 +208,8 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
     if (status) { NSLog(@"PLANK audio device-list listener failed: status=%d", (int)status); return NO; }
     _outputListening = YES;
     [self refreshOutputVolume];
+    if (_outputDevice == kAudioObjectUnknown)
+        NSLog(@"PLANK desktop audio unavailable: PLANK Output device is not registered with Core Audio");
     return _outputDevice != kAudioObjectUnknown && _deviceListening;
 }
 - (BOOL)prepare {
@@ -288,8 +307,8 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
 - (void)startWithCompletion:(void (^)(BOOL))completion {
     if (_started || _stopped || !completion) { if (completion) completion(NO); return; }
     _started = YES;
-    if (atomic_exchange(&tapInUse, true)) {
-        NSLog(@"PLANK desktop audio unavailable: previous tap cleanup is pending");
+    if (!reserveTap(_sharedDesktop)) {
+        NSLog(@"PLANK desktop audio unavailable: capture reservation limit or pending cleanup");
         completion(NO); return;
     }
     _ownsSlot = YES;
@@ -385,7 +404,11 @@ static OSStatus receive(AudioObjectID device, const AudioTimeStamp *now,
     // it cannot deliver samples, start IO or mute playback after completion.
     dispatch_async(_control, ^{
         [self destroy];
-        if (self->_ownsSlot) { atomic_store(&tapInUse, false); self->_ownsSlot = NO; }
+        if (self->_ownsSlot) {
+            if (self->_sharedDesktop) atomic_fetch_sub(&tapReservations, 1);
+            else atomic_store(&tapReservations, 0);
+            self->_ownsSlot = NO;
+        }
         dispatch_async(self->_owner, ^{
             dispatch_source_cancel(self->_ready);
             NSLog(@"PLANK desktop audio tap stopped; PLANK Output capture released");
