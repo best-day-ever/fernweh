@@ -149,6 +149,62 @@ NSDictionary<NSString *, NSData *> *PLANKMacIssueWorkerIdentity(NSData *csr, NSS
     return pem && der && authority ? @{@"certificate": pem, @"der": der, @"authority": authority} : nil;
 }
 
+static BOOL certificatePEMMatches(NSData *pem, NSData *der) {
+    NSString *text = [[NSString alloc] initWithData:pem encoding:NSASCIIStringEncoding];
+    NSArray *lines = [[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+        componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+    if (lines.count < 3 || ![lines.firstObject isEqual:@"-----BEGIN CERTIFICATE-----"] ||
+        ![lines.lastObject isEqual:@"-----END CERTIFICATE-----"]) return NO;
+    NSString *body = [[lines subarrayWithRange:NSMakeRange(1, lines.count - 2)] componentsJoinedByString:@""];
+    return [[[NSData alloc] initWithBase64EncodedString:body options:0] isEqual:der];
+}
+
+static BOOL validWorkerCertificate(NSData *der, NSData *authority, NSData *expectedKey, NSDate *date) {
+    SecCertificateRef root = authority ? SecCertificateCreateWithData(NULL, (__bridge CFDataRef)authority) : NULL;
+    SecCertificateRef leaf = der ? SecCertificateCreateWithData(NULL, (__bridge CFDataRef)der) : NULL;
+    SecKeyRef publicKey = leaf ? SecCertificateCopyKey(leaf) : NULL;
+    NSData *actualKey = publicKey ? CFBridgingRelease(SecKeyCopyExternalRepresentation(publicKey, NULL)) : nil;
+    SecPolicyRef policy = SecPolicyCreateSSL(true, CFSTR("plank-host"));
+    SecTrustRef trust = NULL;
+    NSArray *certificates = root && leaf ? @[(__bridge id)leaf, (__bridge id)root] : nil;
+    BOOL valid = expectedKey.length && [actualKey isEqual:expectedKey] && certificates &&
+        SecTrustCreateWithCertificates((__bridge CFArrayRef)certificates, policy, &trust) == errSecSuccess &&
+        SecTrustSetAnchorCertificates(trust, (__bridge CFArrayRef)@[(__bridge id)root]) == errSecSuccess &&
+        SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess &&
+        SecTrustSetNetworkFetchAllowed(trust, false) == errSecSuccess &&
+        SecTrustSetVerifyDate(trust, (__bridge CFDateRef)date) == errSecSuccess && SecTrustEvaluateWithError(trust, NULL);
+    if (trust) CFRelease(trust);
+    if (policy) CFRelease(policy);
+    if (publicKey) CFRelease(publicKey);
+    if (root) CFRelease(root);
+    if (leaf) CFRelease(leaf);
+    return valid;
+}
+
+static BOOL installWorkerIdentity(NSDictionary *issued, NSString *directory, NSString *stage,
+                                  NSData *expectedKey, NSDate *date) {
+    NSData *authority = issued[@"authority"], *der = issued[@"der"], *pem = issued[@"certificate"];
+    // Always authenticate the current coordinator and verify its response. A
+    // cached certificate alone must not bypass privileged IPC or trust checks.
+    if (!certificatePEMMatches(pem, der) || !validWorkerCertificate(der, authority, expectedKey, date)) return NO;
+    NSData *existingDER = readPublicResult([directory stringByAppendingPathComponent:@"cert.der"]);
+    NSData *existingPEM = readPublicResult([directory stringByAppendingPathComponent:@"cert.pem"]);
+    if (certificatePEMMatches(existingPEM, existingDER) &&
+        validWorkerCertificate(existingDER, authority, expectedKey, date)) {
+        // Broker capability audiences pin the exact leaf DER, not just its key.
+        // Keep the existing issued leaf across ordinary desktop/Host restarts.
+        return YES;
+    }
+    BOOL ok = writeNew(pem, [stage stringByAppendingPathComponent:@"cert.pem"]) &&
+        writeNew(der, [stage stringByAppendingPathComponent:@"cert.der"]);
+    // Both must succeed before a listener starts. Invalid/expired old leaves
+    // are replaced; the broker correctly requires an explicit pin review then.
+    for (NSString *name in @[@"cert.pem", @"cert.der"])
+        if (ok) ok = rename([stage stringByAppendingPathComponent:name].fileSystemRepresentation,
+                           [directory stringByAppendingPathComponent:name].fileSystemRepresentation) == 0;
+    return ok;
+}
+
 NSData *PLANKMacAuthorizeDesktopIdentity(NSString *directory, const char *service, NSString *requirement) {
     if (!getuid() || getuid() != geteuid() || !service || !requirement.length) return nil;
     NSString *stage = stageIn(directory);
@@ -195,34 +251,12 @@ NSData *PLANKMacAuthorizeDesktopIdentity(NSString *directory, const char *servic
     __block NSDictionary *result = nil;
     dispatch_sync(queue, ^{ if (received) result = issued; });
     NSData *authority = result[@"authority"];
-    SecCertificateRef root = authority ? SecCertificateCreateWithData(NULL, (__bridge CFDataRef)authority) : NULL;
-    SecCertificateRef leaf = result[@"der"] ? SecCertificateCreateWithData(NULL, (__bridge CFDataRef)result[@"der"]) : NULL;
-    SecKeyRef publicKey = leaf ? SecCertificateCopyKey(leaf) : NULL;
-    NSData *actualKey = publicKey ? CFBridgingRelease(SecKeyCopyExternalRepresentation(publicKey, NULL)) : nil;
-    SecPolicyRef policy = SecPolicyCreateSSL(true, CFSTR("plank-host"));
-    SecTrustRef trust = NULL;
-    NSArray *certificates = root && leaf ? @[(__bridge id)leaf, (__bridge id)root] : nil;
-    BOOL validChain = certificates && SecTrustCreateWithCertificates((__bridge CFArrayRef)certificates, policy, &trust) == errSecSuccess &&
-        SecTrustSetAnchorCertificates(trust, (__bridge CFArrayRef)@[(__bridge id)root]) == errSecSuccess &&
-        SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess &&
-        SecTrustSetNetworkFetchAllowed(trust, false) == errSecSuccess && SecTrustEvaluateWithError(trust, NULL);
-    if (trust) CFRelease(trust);
-    if (policy) CFRelease(policy);
     // Check the returned leaf belongs to the private key that made this CSR.
-    ok = result && validChain && crypto(stage, @[@"rsa", @"-in", @"../key.pem", @"-RSAPublicKey_out", @"-outform", @"DER", @"-out", @"public.der"],
+    ok = result && crypto(stage, @[@"rsa", @"-in", @"../key.pem", @"-RSAPublicKey_out", @"-outform", @"DER", @"-out", @"public.der"],
         clock_gettime_nsec_np(CLOCK_MONOTONIC) + PLANK_MAC_IDENTITY_CRYPTO_NS);
     NSString *publicPath = [stage stringByAppendingPathComponent:@"public.der"];
-    if (ok) ok = !chmod(publicPath.fileSystemRepresentation, 0600) && [actualKey isEqual:readPublicResult(publicPath)];
-    if (publicKey) CFRelease(publicKey);
-    if (root) CFRelease(root);
-    if (leaf) CFRelease(leaf);
-    if (ok) ok = writeNew(result[@"certificate"], [stage stringByAppendingPathComponent:@"cert.pem"]) &&
-        writeNew(result[@"der"], [stage stringByAppendingPathComponent:@"cert.der"]);
-    // Both must succeed before a listener starts. An interrupted pair is
-    // regenerated from the same key on the next startup, never re-trusted.
-    for (NSString *name in @[@"cert.pem", @"cert.der"])
-        if (ok) ok = rename([stage stringByAppendingPathComponent:name].fileSystemRepresentation,
-                           [directory stringByAppendingPathComponent:name].fileSystemRepresentation) == 0;
+    if (ok) ok = !chmod(publicPath.fileSystemRepresentation, 0600) &&
+        installWorkerIdentity(result, directory, stage, readPublicResult(publicPath), NSDate.date);
     removeStage(stage);
     return ok ? authority : nil;
 }

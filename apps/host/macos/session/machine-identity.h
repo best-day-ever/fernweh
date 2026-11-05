@@ -18,7 +18,8 @@ NSDictionary<NSString *, NSData *> *PLANKMacIssueWorkerIdentity(NSData *csr, NSS
 
 // Startup only, before the graphical worker registers or opens any listener.
 // Uses the existing privileged Mach service, verifies its signing identity and
-// kernel UID, and atomically replaces certificate files, never the user key.
+// kernel UID, and retains an existing valid machine-issued leaf matching the
+// user's key. Replaces only invalid/expired certificate files, never the key.
 // Returns the machine authority DER to send with the worker's TLS certificate.
 NSData *PLANKMacAuthorizeDesktopIdentity(NSString *directory, const char *service,
                                        NSString *requirement);

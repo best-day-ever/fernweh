@@ -100,6 +100,21 @@ Host TLS **leaf certificate** that the broker pinned and returns to the Client;
 it is not a CA/SPKI digest. Mac desktop workers can have a different leaf from
 the machine authority certificate; the verifier must use its served leaf.
 
+The desktop retains its existing leaf across ordinary worker/Host restarts,
+provided its PEM/DER pair agrees, its public key matches the desktop private
+key, and its TLS name, usage, chain and validity still verify against the
+currently authenticated machine authority. Startup still authenticates the
+root coordinator and validates its issuance response; the cached certificate
+does not replace that authorization. Expiry, key rotation or authority changes
+can replace the leaf and require an administrator to verify the new identity
+before resetting the broker pin.
+
+For initial enrollment, establish the shared desktop before trusting its leaf.
+An empty broker TOFU store can otherwise learn the different sign-in identity.
+An existing desktop pin remains unchanged during sign-in/desktop transitions:
+the different sign-in identity is unavailable through the broker until the
+pinned desktop leaf returns. Never automatically reset pins on that transition.
+
 ## Host admission and replay
 
 The Client posts `/plank/auth/start` with exactly `username` and `broker_token`.
