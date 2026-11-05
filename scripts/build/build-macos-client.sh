@@ -102,7 +102,7 @@ passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
 test -x "$passkey_helper"
 bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
+for suite in hostpolling windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
     run_shared_client_test "$suite"
 done
 # Dummy input only: no microphone permission or physical recording on builders.
