@@ -13,6 +13,9 @@ static BOOL available = YES, changeDuringRead, failRegistration;
 static unsigned copyCount;
 static int fakeMode;
 static size_t width = 3840;
+static CGRect bounds = {{0, 0}, {1920, 1080}};
+static BOOL moveDuringBoundsRead;
+static unsigned boundsReads;
 CGError CGDisplayRegisterReconfigurationCallback(CGDisplayReconfigurationCallBack callback, void *context) {
     assert(context == NULL);
     ++registered;
@@ -31,7 +34,11 @@ void CGDisplayModeRelease(CGDisplayModeRef mode) { assert(mode == (CGDisplayMode
 size_t CGDisplayModeGetPixelWidth(CGDisplayModeRef mode) { (void)mode; return width; }
 size_t CGDisplayModeGetPixelHeight(CGDisplayModeRef mode) { (void)mode; return 2160; }
 int32_t CGDisplayModeGetIODisplayModeID(CGDisplayModeRef mode) { (void)mode; return 17; }
-CGRect CGDisplayBounds(CGDirectDisplayID display) { assert(display == 42); return CGRectMake(0, 0, 1920, 1080); }
+CGRect CGDisplayBounds(CGDirectDisplayID display) {
+    assert(display == 42);
+    if (moveDuringBoundsRead && ++boundsReads == 2) bounds.origin.x += 50;
+    return bounds;
+}
 
 int main(int argc, const char **argv) {
     @autoreleasepool {
@@ -66,6 +73,35 @@ int main(int argc, const char **argv) {
         assert(![capture snapshot]);
         available = YES;
         assert(![[capture snapshot][@"generation"] isEqual:fourth[@"generation"]]);
+        // External display arrangement changes can move the captured display
+        // without changing any encoded pixel dimensions or its mode ID.
+        NSDictionary *beforeOrigin = [capture snapshot];
+        bounds.origin = CGPointMake(-1920, -100);
+        NSDictionary *moved = [capture snapshot];
+        assert(![moved[@"generation"] isEqual:beforeOrigin[@"generation"]]);
+        assert([moved[@"capture"][@"width"] unsignedIntValue] == 3840);
+        assert([moved[@"capture"][@"logical_bounds"][@"x"] doubleValue] == -1920);
+        assert([moved[@"capture"][@"logical_bounds"][@"y"] doubleValue] == -100);
+        assert([moved isEqual:[capture snapshot]]);
+        // A logical scale change with the same encoded pixels also replaces
+        // the input contract, including when no callback reached this process.
+        bounds.size = CGSizeMake(3840, 2160);
+        NSDictionary *unscaled = [capture snapshot];
+        assert(![unscaled[@"generation"] isEqual:moved[@"generation"]]);
+        assert([unscaled[@"capture"][@"width"] unsignedIntValue] == 3840);
+        assert([unscaled[@"capture"][@"logical_bounds"][@"width"] unsignedIntValue] == 3840);
+        assert([unscaled[@"capture"][@"logical_bounds"][@"height"] unsignedIntValue] == 2160);
+        // Reconfiguring an unrelated display still conservatively invalidates
+        // the stream contract; it cannot leave a stale desktop origin cached.
+        observer(99, kCGDisplayMovedFlag, NULL);
+        NSDictionary *external = [capture snapshot];
+        assert(![external[@"generation"] isEqual:unscaled[@"generation"]]);
+        moveDuringBoundsRead = YES; boundsReads = 0;
+        assert(![capture snapshot]);
+        moveDuringBoundsRead = NO;
+        NSDictionary *settled = [capture snapshot];
+        assert(settled && ![settled[@"generation"] isEqual:external[@"generation"]]);
+        assert([settled[@"capture"][@"logical_bounds"][@"x"] doubleValue] == -1870);
         // An unnotified geometry difference is still caught by the double read.
         NSDictionary *beforeWidth = [capture snapshot];
         width = 1920;
@@ -83,6 +119,6 @@ int main(int argc, const char **argv) {
         assert(![capture snapshot]);
         capture = nil;
         observer(42, kCGDisplaySetModeFlag, NULL); // no dangling object context
-        puts("macos_capture_observer=pass synthetic_cg=1 change_back_invalidated=1 mid_read_rejected=1 process_lifetime=1");
+        puts("macos_capture_observer=pass synthetic_cg=1 change_back_invalidated=1 mid_read_rejected=1 origin_only=1 scale_only=1 external_display=1 origin_mid_read_rejected=1 process_lifetime=1");
     }
 }
