@@ -7,6 +7,7 @@ preflight "${3:-}"
 [[ $(/usr/bin/fdesetup status) = 'FileVault is Off.' ]] || fail 'FileVault must be off before installing PLANK Host. Open System Settings > Privacy & Security > FileVault, turn it off, wait for it to finish, then reopen this installer.'
 # Discover unsafe state/log paths before stopping a working Host or replacing
 # its app. Repeating this in postinstall is intentional and idempotent.
+verify_camera_variant
 initialize_state
 owner=$(console_uid)
 stop_roles

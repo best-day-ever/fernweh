@@ -29,8 +29,13 @@ def expected_mode(name, directory, app_only=False):
     return "-rwxr-xr-x" if relative in EXECUTABLES or name in {DRIVER + "/Contents/MacOS/plank-microphone", OUTPUT_DRIVER + "/Contents/MacOS/plank-output"} else "-rw-r--r--"
 
 
-def check_records(records, app_only=False):
-    required = {"."} | (REQUIRED_APP if app_only else {
+def check_records(records, app_only=False, camera_extension=True):
+    required_app = REQUIRED_APP if camera_extension else {name for name in REQUIRED_APP if not name.startswith(CAMERA)}
+    if not camera_extension:
+        prefix = "" if app_only else APP + "/"
+        if any(name.startswith(prefix + CAMERA) or name == prefix + "Contents/embedded.provisionprofile" for name in records):
+            raise ValueError("camera-disabled package contains a camera extension or provisioning profile")
+    required = {"."} | (required_app if app_only else {
         "Applications", APP, "Library", "Library/LaunchAgents", "Library/LaunchDaemons",
         APP + "/Contents/Resources/uninstall.sh",
         "Library/LaunchDaemons/la.instinctual.PLANK.Host.machine.plist",
@@ -40,7 +45,7 @@ def check_records(records, app_only=False):
         DRIVER + "/Contents/_CodeSignature/CodeResources",
         OUTPUT_DRIVER, OUTPUT_DRIVER + "/Contents/Info.plist", OUTPUT_DRIVER + "/Contents/MacOS/plank-output",
         OUTPUT_DRIVER + "/Contents/_CodeSignature/CodeResources",
-    } | {APP + "/" + name for name in REQUIRED_APP})
+    } | {APP + "/" + name for name in required_app})
     missing = required - records.keys()
     if missing:
         raise ValueError("missing required package entries: " + ", ".join(sorted(missing)))
@@ -54,15 +59,15 @@ def check_records(records, app_only=False):
             raise ValueError(f"{name}: permissions {mode}, expected {expected}")
 
 
-def check_tree(root, app_only=False):
+def check_tree(root, app_only=False, camera_extension=True):
     # lstat refuses to treat a symlink as an ordinary file or directory.
     records = {".": stat.filemode(root.lstat().st_mode)}
     for path in root.rglob("*"):
         records[path.relative_to(root).as_posix()] = stat.filemode(path.lstat().st_mode)
-    check_records(records, app_only)
+    check_records(records, app_only, camera_extension)
 
 
-def check_bom(text, payload=None):
+def check_bom(text, payload=None, camera_extension=True):
     records = {}
     for line in text.splitlines():
         name, mode = line.rsplit("\t", 1)
@@ -88,10 +93,10 @@ def check_bom(text, payload=None):
         metadata[name] = mode
     for name in metadata:
         del records[name]
-    check_records(records)
+    check_records(records, camera_extension=camera_extension)
 
 
-def check_package(package):
+def check_package(package, camera_extension=True):
     with tempfile.TemporaryDirectory(prefix="plank-host-pkg-check-") as scratch:
         expanded = Path(scratch) / "expanded"
         subprocess.run(["pkgutil", "--expand-full", str(package), str(expanded)], check=True)
@@ -99,8 +104,8 @@ def check_package(package):
         if len(boms) != 1:
             raise ValueError("expected exactly one Host component BOM")
         payload = boms[0].parent / "Payload"
-        check_tree(payload)
-        check_bom(subprocess.check_output(["lsbom", "-p", "fM", str(boms[0])], text=True), payload)
+        check_tree(payload, camera_extension=camera_extension)
+        check_bom(subprocess.check_output(["lsbom", "-p", "fM", str(boms[0])], text=True), payload, camera_extension)
 
 
 def main():
@@ -109,11 +114,13 @@ def main():
     group.add_argument("--app", type=Path)
     group.add_argument("--payload", type=Path)
     group.add_argument("--pkg", type=Path)
+    parser.add_argument("--camera-extension", choices=("enabled", "disabled"), default="enabled")
     args = parser.parse_args()
+    camera_extension = args.camera_extension == "enabled"
     if args.pkg:
-        check_package(args.pkg.resolve())
+        check_package(args.pkg.resolve(), camera_extension)
     else:
-        check_tree(args.app or args.payload, app_only=bool(args.app))
+        check_tree(args.app or args.payload, app_only=bool(args.app), camera_extension=camera_extension)
     print("macos_host_permissions=pass")
 
 

@@ -145,6 +145,19 @@ class Permissions(unittest.TestCase):
                         "org.example.permission-fixture", "--version", "1.0", str(package)], check=True)
         gate.check_package(package)
 
+    @unittest.skipUnless(platform.system() == "Darwin", "requires macOS pkgutil/pkgbuild")
+    def test_camera_disabled_package_roundtrip_keeps_audio_payload(self):
+        shutil.rmtree(self.app / gate.CAMERA)
+        package = Path(self.scratch.name) / "camera-free.pkg"
+        subprocess.run(["pkgbuild", "--root", str(self.root), "--identifier",
+                        "org.example.camera-free-fixture", "--version", "1.0", str(package)], check=True)
+        gate.check_package(package, camera_extension=False)
+        with self.assertRaises(ValueError):
+            gate.check_package(package)
+        (self.root / gate.DRIVER / "Contents/MacOS/plank-microphone").unlink()
+        with self.assertRaises(ValueError):
+            gate.check_tree(self.root, camera_extension=False)
+
     @unittest.skipUnless(platform.system() == "Darwin", "requires macOS Installer/productbuild")
     def test_distribution_recommends_restart(self):
         scratch = Path(self.scratch.name)
