@@ -10,7 +10,8 @@
 @implementation PLANKMacHostRuntime {
     PLANKMacAuthenticationSession *_sessions;
     PLANKMacHTTPSAuthServer *_server;
-    PLANKMacPreviewSession *_stream;
+    PLANKMacPreviewSession *_stream; // exclusive mode only
+    NSMutableSet<PLANKMacPreviewSession *> *_sharedStreams;
     PLANKMacGraphicalSnapshot _snapshot;
     NSDictionary *(^_topology)(void);
     id<PLANKMacPreviewCapture> (^_capture)(void);
@@ -45,6 +46,7 @@
     _idleTimeoutMs = idleTimeoutMilliseconds;
     _capture = [capture copy]; _input = [input copy];
     _address = [address copy]; _certificate = [certificate copy]; _privateKey = [privateKey copy];
+    _sharedStreams = [NSMutableSet set];
     _sessions = [[PLANKMacAuthenticationSession alloc] initWithGraphicalSnapshot:snapshot];
     __weak typeof(self) weakSelf = self;
     _server = [[PLANKMacHTTPSAuthServer alloc] initWithIdentity:identity authority:authority sessions:_sessions
@@ -70,7 +72,7 @@
         if (!owner) return NO;
         @synchronized(owner) {
             if (!owner.recoverDisplay || !owner->_started || atomic_load(&owner->_stopping) ||
-                (owner->_stream && owner->_stream.state != PLANKMacPreviewStopped)) return NO;
+                [owner hasActiveStreams]) return NO;
             PLANKMacGraphicalIdentity scope = owner->_snapshot();
             BOOL (^valid)(void) = ^BOOL {
                 return !atomic_load(&owner->_stopping) && authorized() &&
@@ -82,6 +84,18 @@
         }
     };
     return _server ? self : nil;
+}
+- (void)setSharedDesktop:(BOOL)sharedDesktop {
+    @synchronized(self) {
+        if (_started) return;
+        _sharedDesktop = sharedDesktop;
+        _sessions.sharedDesktop = sharedDesktop;
+    }
+}
+- (BOOL)hasActiveStreams {
+    for (PLANKMacPreviewSession *stream in _sharedStreams)
+        if (stream.state != PLANKMacPreviewStopped) return YES;
+    return _stream && _stream.state != PLANKMacPreviewStopped;
 }
 // Caller holds the runtime lock, never the graphical main queue. A failed
 // restoration fails future admission; the graphical owner retires its worker.
@@ -125,6 +139,17 @@
         if (!valid()) { *status = 401; return nil; }
         NSDictionary *permissionError = [self permissionError:status];
         if (permissionError) return permissionError;
+        if (self.sharedDesktop) {
+            if (scope.phase != PLANKMacScopeDesktop) { *status = 403; return nil; }
+            if (takeover) { *status = 400; return nil; }
+            // Join the established workspace. Changing it would invalidate every
+            // existing capture/input contract. Clients adopt this returned size.
+            if ([self hasActiveStreams] || _displayPrepared) {
+                NSDictionary *existing = _topology();
+                *status = existing && valid() ? 200 : 503;
+                return *status == 200 ? existing : nil;
+            }
+        }
         if (takeover && ![takeover isEqual:_stream.sessionID]) {
             *status = 409; return @{@"state": @"denied", @"error": @"session_changed"};
         }
@@ -159,7 +184,7 @@
             if (_stream.state != PLANKMacPreviewStopped) { *status = 503; return nil; }
         }
         if (![self releasePreparedDisplay]) { *status = 503; return nil; }
-        _displayPrepared = self.releaseDisplay != nil;
+        _displayPrepared = self.releaseDisplay != nil || self.sharedDesktop;
         if (!self.prepareDisplay(width, height, scale, request[@"encoding_mode"], valid) || !valid()) {
             [self releasePreparedDisplay];
             NSLog(@"PLANK desktop preparation failed: %ux%u", width, height);
@@ -183,7 +208,7 @@
                     typeof(self) owner = weakSelf; if (!owner) return;
                     @synchronized(owner) {
                         if (owner->_displayGeneration == generation &&
-                            (!owner->_stream || owner->_stream.state == PLANKMacPreviewStopped))
+                            ![owner hasActiveStreams])
                             [owner releasePreparedDisplay];
                     }
                 });
@@ -201,7 +226,8 @@
 }
 - (BOOL)startOnPort:(uint16_t)port ready:(void (^)(uint16_t))ready failed:(void (^)(void))failed {
     @synchronized(self) {
-        if (_started || atomic_load(&_stopping) || !ready || !plank_macos_graphical_identity_valid(_snapshot())) return NO;
+        if (_started || atomic_load(&_stopping) || !ready || !plank_macos_graphical_identity_valid(_snapshot()) ||
+            (self.sharedDesktop && _snapshot().phase != PLANKMacScopeDesktop)) return NO;
         _started = YES;
         return [_server startOnAddress:_address port:port ready:ready failed:failed];
     }
@@ -226,7 +252,10 @@
         NSDictionary *selected = _topology();
         if ([self takeoverReservedForAnotherToken:token peer:peer]) { *status = 409; return nil; }
         if (!PLANKMacPreviewRequestMatchesTopology(request, selected)) { *status = 400; return nil; }
-        if (_stream && _stream.state != PLANKMacPreviewStopped) { *status = 409; return nil; }
+        if ((!self.sharedDesktop && [self hasActiveStreams]) ||
+            (self.sharedDesktop && (_snapshot().phase != PLANKMacScopeDesktop || _sharedStreams.count >= 32))) {
+            *status = 409; return nil;
+        }
         NSDictionary *permissionError = [self permissionError:status];
         if (permissionError) return permissionError;
         NSString *bind = [NSString stringWithFormat:@"%@:%u", _address, port];
@@ -238,40 +267,47 @@
         config.private_key_path = _privateKey.UTF8String;
         config.idle_timeout_ms = _idleTimeoutMs;
         config.keep_alive_interval_ms = plank_macos_keep_alive_interval(_idleTimeoutMs);
-        _stream = [[PLANKMacPreviewSession alloc] initWithSessions:_sessions token:token peer:peer
+        PLANKMacPreviewSession *stream = [[PLANKMacPreviewSession alloc] initWithSessions:_sessions token:token peer:peer
             request:request topology:_topology config:&config capture:_capture() input:_input()
             microphoneGeneration:_snapshot().generation];
-        if (!_stream) { [self releasePreparedDisplay]; *status = 503; return nil; }
-        if (_displayPrepared) {
+        if (!stream) {
+            if (![self hasActiveStreams]) [self releasePreparedDisplay];
+            *status = 503; return nil;
+        }
+        if (self.sharedDesktop) [_sharedStreams addObject:stream]; else _stream = stream;
+        if (_displayPrepared || self.sharedDesktop) {
             uint64_t generation = _displayGeneration;
             __weak typeof(self) weakSelf = self;
-            _stream.didStop = ^{
+            __weak PLANKMacPreviewSession *weakStream = stream;
+            stream.didStop = ^{
                 // Do not take the runtime lock on the session drain queue:
                 // authenticated takeover can be waiting for that same drain.
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                     typeof(self) owner = weakSelf; if (!owner) return;
                     @synchronized(owner) {
-                        if (owner->_displayGeneration == generation) [owner releasePreparedDisplay];
+                        [owner->_sharedStreams removeObject:weakStream];
+                        if (owner->_displayGeneration == generation && ![owner hasActiveStreams])
+                            [owner releasePreparedDisplay];
                     }
                 });
             };
         }
         if ([request[@"schema_version"] isEqual:@7]) {
             NSArray *required = request[@"required_features"];
-            if (([required containsObject:@"clipboard"] && !_stream.clipboardEnabled) ||
-                ([required containsObject:@"microphone"] && !_stream.microphoneEnabled) ||
-                ([required containsObject:@"camera"] && !_stream.cameraEnabled)) {
-                [_stream stopWithCompletion:nil];
+            if (([required containsObject:@"clipboard"] && !stream.clipboardEnabled) ||
+                ([required containsObject:@"microphone"] && !stream.microphoneEnabled) ||
+                ([required containsObject:@"camera"] && !stream.cameraEnabled)) {
+                [stream stopWithCompletion:nil];
                 *status = 426; return @{@"state": @"denied", @"error": @"protocol_incompatible"};
             }
         }
         _takeoverToken = nil; _takeoverPeer = nil;
         // Snapshot after endpoint creation as well. Do not put a later display
         // generation into a manifest for a stream created against an older one.
-        NSString *transportToken = _stream.transportToken;
+        NSString *transportToken = stream.transportToken;
         if (atomic_load(&_stopping) || !transportToken || ![selected isEqual:_topology()] ||
             !plank_macos_graphical_identity_valid(_snapshot())) {
-            [_stream stopWithCompletion:nil]; *status = 503; return nil;
+            [stream stopWithCompletion:nil]; *status = 503; return nil;
         }
         unsigned schema = [request[@"schema_version"] unsignedIntValue];
         NSDictionary *normalized = PLANKMacNormalizeMediaLaunch(request);
@@ -281,15 +317,15 @@
         if (schema == 7) {
             reply[@"transport"] = @"plank-native/2";
             reply[@"required_features"] = request[@"required_features"];
-            reply[@"features"] = PLANKMacMediaReplyFeatures(request, _stream.clipboardEnabled,
-                _stream.microphoneEnabled, _stream.cameraEnabled);
+            reply[@"features"] = PLANKMacMediaReplyFeatures(request, stream.clipboardEnabled,
+                stream.microphoneEnabled, stream.cameraEnabled);
         } else {
             NSMutableDictionary *services = [@{@"audio": @YES, @"input": @YES, @"pen": @"normalized", @"cursor": @"embedded",
-                @"clipboard": @(_stream.clipboardEnabled), @"microphone": @(_stream.microphoneEnabled)} mutableCopy];
-            if (schema >= 6) services[@"camera"] = @(_stream.cameraEnabled);
+                @"clipboard": @(stream.clipboardEnabled), @"microphone": @(stream.microphoneEnabled)} mutableCopy];
+            if (schema >= 6) services[@"camera"] = @(stream.cameraEnabled);
             reply[@"services"] = services;
         }
-        [_stream start]; *status = 200; return reply;
+        [stream start]; *status = 200; return reply;
     }
 }
 - (void)stopWithCompletion:(void (^)(void))completion {
@@ -297,8 +333,12 @@
     // Endpoint construction may still be finishing on the auth lane. Never
     // make the graphical event loop wait for its lock or filesystem I/O.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        PLANKMacPreviewSession *stream;
-        @synchronized(self) { stream = self->_stream; }
+        NSArray<PLANKMacPreviewSession *> *streams;
+        @synchronized(self) {
+            NSMutableArray *all = self->_sharedStreams.allObjects.mutableCopy;
+            if (self->_stream) [all addObject:self->_stream];
+            streams = all;
+        }
         // Normal stop releases held input before the HTTP owner revokes tokens.
         // Scope loss independently blocks release into another account. During
         // this bounded drain HTTP can still answer, but launch is already closed.
@@ -308,7 +348,12 @@
                 [self->_server stopWithCompletion:completion];
             });
         };
-        if (stream) [stream stopWithCompletion:finish]; else finish();
+        dispatch_group_t draining = dispatch_group_create();
+        for (PLANKMacPreviewSession *stream in streams) {
+            dispatch_group_enter(draining);
+            [stream stopWithCompletion:^{ dispatch_group_leave(draining); }];
+        }
+        dispatch_group_notify(draining, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), finish);
     });
 }
 @end

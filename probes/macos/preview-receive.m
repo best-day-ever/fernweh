@@ -13,9 +13,10 @@
 int main(int argc, const char **argv) {
     unsigned seconds = 3;
     BOOL media = YES;
+    BOOL waitShared = argc == 3 && !strcmp(argv[2], "--shared-no-media");
     BOOL takeover = argc == 3 && !strcmp(argv[2], "--wait-takeover");
     if (takeover) { media = NO; seconds = 30; }
-    else if (argc == 3 && !strcmp(argv[2], "--no-media")) media = NO;
+    else if (argc == 3 && (!strcmp(argv[2], "--no-media") || waitShared)) media = NO;
     else if (argc == 4 && !strcmp(argv[2], "--seconds")) {
         char *end = NULL; unsigned long value = strtoul(argv[3], &end, 10);
         if (!end || *end || value < 3 || value > 30) return 2;
@@ -68,6 +69,15 @@ int main(int argc, const char **argv) {
             }
             plank_transport_native_endpoint_destroy(endpoint);
             puts("takeover_receiver_terminal=1"); return 0;
+        }
+        if (waitShared) {
+            puts("shared_receiver_ready=1"); fflush(stdout);
+            // Test driver disconnects another peer while this endpoint stays up.
+            uint64_t deadline = clock_gettime_nsec_np(CLOCK_MONOTONIC) + 8*NSEC_PER_SEC;
+            while (clock_gettime_nsec_np(CLOCK_MONOTONIC) < deadline) {
+                REQUIRE(plank_transport_native_endpoint_state(endpoint) == PLANK_TRANSPORT_STATE_READY);
+                usleep(10000);
+            }
         }
         uint64_t frames = 0, totalBytes = 0, lastPTS = 0, audioPackets = 0, lastAudioPTS = 0;
         double audioMaxAgeMs = 0, firstVideoMs = 0, firstAudioMs = 0;

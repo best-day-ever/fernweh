@@ -19,6 +19,12 @@ typedef PLANKMacGraphicalIdentity (^PLANKMacGraphicalSnapshot)(void);
 // forwarded header). Calls belong on a background authentication queue.
 // This component opens no socket and does not log or retain passwords.
 @interface PLANKMacAuthenticationSession : NSObject
+// Set before admission. Shared mode admits only the active desktop owner and
+// retains independent leases/tokens for peers behind the same relay.
+@property(nonatomic) BOOL sharedDesktop;
+// Caller has verified the broker capability and resolved the configured local
+// account. This method still requires that exact active desktop identity.
+- (NSDictionary *)authenticateBrokerAccount:(PLANKMacAccountIdentity)account peer:(NSData *)peer;
 - (instancetype)initWithGraphicalSnapshot:(PLANKMacGraphicalSnapshot)snapshot;
 - (NSDictionary *)startForPeer:(NSData *)peer username:(NSString *)username;
 - (NSDictionary *)respondForPeer:(NSData *)peer conversation:(NSString *)conversation
@@ -26,7 +32,7 @@ typedef PLANKMacGraphicalIdentity (^PLANKMacGraphicalSnapshot)(void);
 - (BOOL)authorizeToken:(NSString *)token peer:(NSData *)peer
              identity:(PLANKMacAccountIdentity *)identity;
 // After validating the requested capture/profile/geometry, atomically consume
-// the HTTP token. At most one pending/active lease exists; no implicit takeover.
+// the HTTP token. Exclusive mode has one lease; shared desktops have bounded independent leases.
 - (PLANKMacStreamLease *)claimToken:(NSString *)token peer:(NSData *)peer;
 // Call only after this lease's token-authenticated QUIC endpoint becomes ready.
 // Pending leases expire after 15 seconds; activation does not renew old tokens.

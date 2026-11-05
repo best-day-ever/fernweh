@@ -46,6 +46,20 @@ int main(void) { @autoreleasepool {
     assert([parse(@"# Defaults\n")[@"Name"] isEqual:@"PLANK"]);
     unterminatedHostName = NO; testHostName = "workstation-a";
     assert([parse(@"# Defaults\n")[@"Port"] isEqual:@28989]);
+    assert([parse(@"[security]\nshared_desktop_user = studio-user\n")[@"SharedDesktopUser"] isEqual:@"studio-user"]);
+    for (NSString *name in @[@"", @"root", @"user@realm", @"../user", @"user name"])
+        assert(!parse([NSString stringWithFormat:@"[security]\nshared_desktop_user = %@\n", name]));
+    NSMutableData *point = [NSMutableData dataWithLength:65];
+    ((uint8_t *)point.mutableBytes)[0] = 4;
+    NSString *keyText = [point base64EncodedStringWithOptions:0];
+    NSString *brokerConfig = [NSString stringWithFormat:
+        @"[security]\nshared_desktop_user=studio-user\nbroker_public_key=%@\nbroker_host=host.example.invalid\n", keyText];
+    assert([parse(brokerConfig)[@"BrokerHost"] isEqual:@"host.example.invalid"]);
+    assert(!parse([brokerConfig stringByReplacingOccurrencesOfString:@"shared_desktop_user=studio-user\n" withString:@""]));
+    assert(!parse([brokerConfig stringByReplacingOccurrencesOfString:@"broker_host=host.example.invalid\n" withString:@""]));
+    for (NSString *host in @[@"localhost", @"Host.example.invalid", @"host..invalid", @"-host.example.invalid", @"host.example.invalid."])
+        assert(!parse([brokerConfig stringByReplacingOccurrencesOfString:@"host.example.invalid" withString:host]));
+    assert(!parse([brokerConfig stringByReplacingOccurrencesOfString:keyText withString:@"bad"]));
     NSDictionary *config = parse(@"; comment\r\n[general]\r\nhost_name = Example Host\r\n[network]\r\nport = 30000\r\n");
     assert([config[@"Name"] isEqual:@"Example Host"] && [config[@"Port"] isEqual:@30000]);
     assert([config[@"Address"] isEqual:@"0.0.0.0"] && config.count == 6);
