@@ -39,6 +39,11 @@ configuration validation and each issuance; replacing it never causes a fallback
 to Kerberos. No private key material is logged. Provision public keys to Hosts
 through administrator configuration; never trust a key supplied in a token.
 
+The relay helper validates the shared configuration policy without opening the
+Mac signing key. Keep that key private to the broker API account; do not grant
+the relay account or its group access. Broker startup and `check-config` retain
+full key validation.
+
 Host keys must be exact lower-case FQDNs. Values are non-root local short names,
 using the same bounded lowercase POSIX name syntax as directory usernames.
 `ttl_secs` defaults to60 and accepts only1 through60. Omitting this entire table

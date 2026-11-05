@@ -48,7 +48,7 @@ pub struct Claims {
 }
 
 impl MacAdmissionConfig {
-    fn validate_policy(&self) -> Result<()> {
+    pub(crate) fn validate_policy(&self) -> Result<()> {
         if !self.signing_key_file.is_absolute() {
             bail!("mac_admission signing key path must be absolute");
         }
