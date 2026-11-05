@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #import "camera-session.h"
+#include "../camera-device/camera-build.h"
 #import "../camera-device/camera-producer.h"
 #import "../camera-device/camera-signing.h"
 #import "../camera-device/camera-clock.h"
@@ -23,7 +24,7 @@
     // readiness. Explicit activation is acknowledged only after broker admission.
     NSString *path = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:
         @"Contents/Library/SystemExtensions/la.instinctual.PLANK.Host.Camera.systemextension"];
-    return geteuid() != 0 && PLANKCameraPeerRequirement(@"la.instinctual.PLANK.Host.Camera") &&
+    return PLANK_MACOS_CAMERA_EXTENSION && geteuid() != 0 && PLANKCameraPeerRequirement(@"la.instinctual.PLANK.Host.Camera") &&
         [NSBundle bundleWithPath:path] != nil;
 }
 - (instancetype)init { return nil; }

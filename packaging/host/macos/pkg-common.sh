@@ -27,6 +27,20 @@ signin=la.instinctual.PLANK.Host.sign-in
 team='@TEAM@'
 version='@VERSION@'
 minimum_macos='@MIN_MACOS@'
+camera_extension='@CAMERA@'
+
+camera_extensions() { /usr/bin/systemextensionsctl list; }
+verify_camera_variant() {
+    local extensions
+    case $camera_extension in
+      1) return 0 ;;
+      0) ;;
+      *) fail 'Invalid Host camera package variant' ;;
+    esac
+    extensions=$(camera_extensions) || fail 'Cannot inspect installed camera extensions; Host was not changed.'
+    [[ $extensions != *'la.instinctual.PLANK.Host.Camera'* ]] ||
+        fail 'Disable PLANK Camera using the existing camera-enabled Host before installing this camera-free build. Host was not changed.'
+}
 
 fail() { echo "PLANK: $*" >&2; exit 1; }
 present() { [[ -e $1 || -L $1 ]]; }

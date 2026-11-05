@@ -5,12 +5,18 @@ if [[ $# != 3 || $1 != /* || $2 != /* || $3 != /* || $(uname -s) != Darwin ]]; t
   echo 'Usage: build-macos-host-pkg.sh CLEAN_SOURCE NEW_OUTPUT RETAINED_TRANSPORT_ARCHIVE' >&2; exit 2
 fi
 source_root=$1; output=$2; archive=$3
+camera_extension=${PLANK_MACOS_CAMERA_EXTENSION:-1}
+case $camera_extension in 0|1) ;; *) echo 'PLANK_MACOS_CAMERA_EXTENSION must be 0 or 1' >&2; exit 2 ;; esac
+camera_variant=enabled
+[[ $camera_extension = 1 ]] || camera_variant=disabled
 source "$source_root/scripts/build/macos-host-target.sh"
 plank_macos_host_target
 : "${PLANK_MACOS_SIGNING_IDENTITY:?Developer ID Application SHA1 required}"
 : "${PLANK_MACOS_INSTALLER_IDENTITY:?Developer ID Installer SHA1 required}"
 : "${PLANK_MACOS_TEAM_ID:?Developer Team ID required}"
-: "${PLANK_MACOS_APP_PROVISION_PROFILE:?Production Host system-extension installation profile required}"
+if [[ $camera_extension = 1 ]]; then
+    : "${PLANK_MACOS_APP_PROVISION_PROFILE:?Production Host system-extension installation profile required}"
+fi
 : "${PLANK_NOTARY_PROFILE:?Keychain profile required}"
 [[ $PLANK_MACOS_SIGNING_IDENTITY =~ ^[[:xdigit:]]{40}$ && $PLANK_MACOS_INSTALLER_IDENTITY =~ ^[[:xdigit:]]{40}$ ]]
 [[ $PLANK_MACOS_TEAM_ID =~ ^[A-Z0-9]{10}$ ]]
@@ -48,14 +54,17 @@ codesign --verify --strict -R "=identifier \"la.instinctual.PLANK.Output\" and a
 codesign --verify --strict -R "=identifier \"la.instinctual.PLANK.Microphone\" and anchor apple generic and certificate leaf[subject.OU] = \"$PLANK_MACOS_TEAM_ID\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$driver"
 codesign --verify --strict -R "=identifier \"la.instinctual.PLANK.Host\" and anchor apple generic and certificate leaf[subject.OU] = \"$PLANK_MACOS_TEAM_ID\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$app"
 camera="$app/Contents/Library/SystemExtensions/la.instinctual.PLANK.Host.Camera.systemextension"
-codesign --verify --strict -R "=identifier \"la.instinctual.PLANK.Host.Camera\" and anchor apple generic and certificate leaf[subject.OU] = \"$PLANK_MACOS_TEAM_ID\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$camera"
+if [[ $camera_extension = 1 ]]; then
+    codesign --verify --strict -R "=identifier \"la.instinctual.PLANK.Host.Camera\" and anchor apple generic and certificate leaf[subject.OU] = \"$PLANK_MACOS_TEAM_ID\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$camera"
+fi
+python3 "$source_root/scripts/test/check-macos-camera-package.py" "$app" --camera-extension "$camera_variant"
 test "$(/usr/libexec/PlistBuddy -c 'Print :PLANKVersion' "$app/Contents/Info.plist")" = "$PLANK_PACKAGE_VERSION"
 test -z "$(find "$output/payload" -name '*.py' -print)"
 codesign -d --verbose=4 "$app" 2>&1 | grep 'flags=.*runtime'
 codesign -d --verbose=4 "$app" 2>&1 | grep '^Timestamp='
 otool -L "$app/Contents/MacOS/plank-host"
 sed -e "s/@TEAM@/$PLANK_MACOS_TEAM_ID/g" -e "s/@VERSION@/$PLANK_PACKAGE_VERSION/g" \
-  -e "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" \
+  -e "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" -e "s/@CAMERA@/$camera_extension/g" \
   "$source_root/packaging/host/macos/pkg-common.sh" > "$output/install-scripts/pkg-common.sh"
 chmod 0644 "$output/install-scripts/pkg-common.sh"
 install -m 0755 "$app/Contents/Resources/plank-configure" "$output/install-scripts/"
@@ -74,7 +83,7 @@ bash -n "$app/Contents/Resources/uninstall.sh"
 sed "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" "$source_root/packaging/host/macos/welcome.html" > "$output/resources/welcome.html"
 install -m 0644 "$source_root/packaging/host/macos/conclusion.html" "$output/resources/"
 python3 "$source_root/scripts/test/check-package-build-paths.py" "$output/payload"
-python3 "$source_root/scripts/test/check-macos-host-permissions.py" --payload "$output/payload"
+python3 "$source_root/scripts/test/check-macos-host-permissions.py" --payload "$output/payload" --camera-extension "$camera_variant"
 pkgbuild --root "$output/payload" --component-plist "$source_root/packaging/host/macos/component.plist" \
   --identifier la.instinctual.PLANK.Host --version "$PLANK_BASE_VERSION" --install-location / \
   --ownership recommended --scripts "$output/install-scripts" "$output/host-component.pkg"
@@ -90,7 +99,7 @@ pkgutil --check-signature "$output/$name"
 if [[ $(/usr/sbin/installer -query RestartAction -pkg "$output/$name") != RecommendRestart ]]; then
   echo 'Host package must recommend a restart through macOS Installer.' >&2; exit 1
 fi
-python3 "$source_root/scripts/test/check-macos-host-permissions.py" --pkg "$output/$name"
+python3 "$source_root/scripts/test/check-macos-host-permissions.py" --pkg "$output/$name" --camera-extension "$camera_variant"
 python3 "$source_root/tests/packaging/test-macos-installer-preflight.py" --package "$output/$name" \
   --bundle-checker "$output/host/installer-preflight/bundle-checker"
 notary_flags=(--keychain-profile "$PLANK_NOTARY_PROFILE")
