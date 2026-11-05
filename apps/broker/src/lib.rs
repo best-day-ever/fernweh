@@ -13,6 +13,7 @@ pub mod directory;
 pub mod enrol;
 pub mod hbac;
 pub mod kerberos;
+pub mod mac_admission;
 #[cfg(feature = "system")]
 pub mod ldap;
 #[cfg(feature = "system")]

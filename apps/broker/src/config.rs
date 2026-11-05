@@ -23,6 +23,9 @@ pub struct Config {
     pub ldap: LdapConfig,
     #[serde(default)]
     pub hosts: HostsConfig,
+    /// Explicit broker-trusted admission for unjoined, shared macOS desktops.
+    #[serde(default)]
+    pub mac_admission: Option<crate::mac_admission::MacAdmissionConfig>,
     #[serde(default)]
     pub relay: RelayConfig,
     #[serde(default)]
@@ -470,6 +473,9 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(mac) = &self.mac_admission {
+            mac.validate()?;
+        }
         if let Some(updates) = &self.client_updates {
             if updates.windows_directory.as_ref().is_some_and(|p| !p.is_absolute()) {
                 bail!("client_updates.windows_directory must be absolute");
