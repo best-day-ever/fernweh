@@ -33,9 +33,15 @@ def main():
     parser.add_argument('--receiver', type=Path, required=True)
     parser.add_argument('--width', type=int, default=1920)
     parser.add_argument('--height', type=int, default=1080)
+    parser.add_argument('--single-seconds', type=int, default=8, help='Initial single-stream duration, 3 through 300 seconds')
     parser.add_argument('--single', action='store_true', help='One 8s stream before concurrent acceptance')
+    parser.add_argument('--audio-energy', action='store_true', help='Require decoded stereo 440/880 Hz tone; use an energy-enabled receiver')
     parser.add_argument('--audio-optional', action='store_true', help='Report audio count without requiring playback')
     args = parser.parse_args()
+    if not 3 <= args.single_seconds <= 300:
+        parser.error('--single-seconds must be 3 through 300')
+    if args.audio_energy and args.audio_optional:
+        parser.error('--audio-energy and --audio-optional cannot be combined')
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     if not re.fullmatch('[0-9a-f]{64}', args.sha256) or not 1 <= args.port <= 65535:
         parser.error('Invalid certificate fingerprint or port')
@@ -96,6 +102,8 @@ def main():
             'encoding_mode':capture['encoding_profile']['encoding_mode'],
             'frame_rate':60, 'bitrate_kbps':20000, 'max_udp_payload_size':1200}, token)
         command = [str(args.receiver), args.sha256, '--remote', address, str(seconds)]
+        if args.audio_energy:
+            command.append('--audio-energy')
         if args.audio_optional:
             command.append('--audio-optional')
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -113,7 +121,9 @@ def main():
         out, err = child.communicate(timeout=75)
         if child.returncode:
             # Receiver diagnostics contain only stages and numeric counters.
-            raise RuntimeError(f'{label}: receiver failed exit {child.returncode}; {err.strip()}')
+            raise RuntimeError(f'{label}: receiver failed exit {child.returncode}; {out.strip()}; {err.strip()}')
+        if args.audio_energy and 'audio_energy=pass' not in out:
+            raise RuntimeError(f'{label}: decoded tone evidence missing')
         if 'remote_decode=pass' not in out or 'disconnected=1' not in out:
             raise RuntimeError(f'{label}: incomplete decoder/disconnect evidence')
         summaries.append((label,out.strip()))
@@ -123,7 +133,7 @@ def main():
         if args.single:
             first = authenticate()
             topology = prepare(first, args.width, args.height)
-            finish(launch(first, topology, 8, 'single'), 'single')
+            finish(launch(first, topology, args.single_seconds, 'single'), 'single')
             for label, summary in summaries:
                 print(label+': '+summary)
             print('single_host_acceptance=pass real_tls=1 real_quic=1 real_decoded_pixels=1')

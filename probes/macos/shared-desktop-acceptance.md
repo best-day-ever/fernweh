@@ -71,3 +71,36 @@ geometry and 4:4:4 request returned the unchanged active workspace. Final
 authenticated topology remained available after all streams drained. This is
 actual direct TLS/QUIC video decoding and audio packet transport evidence; it
 does not qualify audible playback, non-silent content, or the Internet relay.
+
+## Optional decoded test-tone gate
+
+Build the receiver with `-DPLANK_PREVIEW_AUDIO_ENERGY`, the prepared libopus
+include path and static archive. This adds no product dependency; ordinary
+preview builds retain their existing behavior. Use a deployment target compatible
+with both prepared archives and the receiver machine, for example:
+
+```sh
+xcrun clang -mmacosx-version-min=27.0 -fobjc-arc -Wall -Wextra -Werror \
+  -DPLANK_PREVIEW_AUDIO_ENERGY -I"$OPUS_PREFIX/include" \
+  -Iprotocol/plank-transport/include probes/macos/preview-receive.m \
+  "$TRANSPORT_ARCHIVE" "$OPUS_PREFIX/lib/libopus.a" \
+  -framework Foundation -framework CoreMedia -framework CoreVideo \
+  -framework VideoToolbox -framework Security -lpthread -lm -o "$ENERGY_RECEIVER"
+```
+
+`--audio-energy` requires valid decoded stereo Opus, measurable energy, and two
+whole one-second windows dominated by 440 Hz on the left and 880 Hz on the right.
+It reports both expected-tone and opposite-tone energy fractions per channel.
+Silence, channel swaps and mono mixing fail the synthetic fixture
+`tests/audio/macos-preview-audio-energy.c`. Compile that fixture with the same
+prepared libopus archive; it needs no capture device or permission.
+
+For an authorized short waveform trial, prefix the ordinary controller command
+with `python3 probes/macos/play-acceptance-tone.py "$SSH_TARGET" --`, and give the
+controller `--single --single-seconds 12 --audio-energy` plus the energy-enabled
+receiver. The wrapper generates an eight-second source WAV, waits for decoded
+video, verifies the Host default output is PLANK Output, and then plays the
+source using `afplay`. It does not change volume or output settings. Both local
+and remote source files are removed afterwards. Captured PCM is reduced to
+statistics in memory and never saved. Coordinate this playback with people
+sharing the desktop before running it.
