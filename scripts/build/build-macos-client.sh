@@ -27,6 +27,10 @@ version=$PLANK_PACKAGE_VERSION
 client="$source_root/apps/client"
 test "$(qmake -query QT_VERSION)" = 6.10.2
 test "$(rustc --version | awk '{print $2}')" = 1.89.0
+# A restored dependency cache may predate the posted-pointer fix. Rebuild SDL
+# alone when its patch, target or installed binary no longer matches the stamp.
+bash "$source_root/scripts/build/ensure-macos-client-sdl.sh" "$source_root"
+python3 "$source_root/tests/packaging/test-macos-sdl-posted-pointer.py" "$PLANK_MAC_CLIENT_DEPS/src/SDL3-3.4.2"
 python3 "$source_root/tests/packaging/test-macos-client-target.py"
 python3 "$source_root/tests/packaging/test-macos-client-version-cache.py"
 python3 "$source_root/tests/packaging/test-macos-app-icons.py"
