@@ -43,3 +43,11 @@ workspace retention passed. These runs used `--audio-optional`: all audio packet
 counts were zero, so audio was not qualified. No input injection, Internet relay,
 physical display restoration or visual color-quality claim follows from this
 counter-only evidence. Re-run against the final signed candidate after changes.
+
+After the installed output device was registered with Core Audio and system-audio
+consent granted, a follow-up single-stream run passed with audio required:
+13 decoded video frames, 1,580 contiguous five-millisecond audio packets and a
+23.822 ms initial source timestamp difference over eight seconds. Bitrate control
+and graceful disconnect passed. This establishes audio packet delivery, not
+non-silent content or audible playback; concurrent audio still requires the
+updated signed Host candidate.
