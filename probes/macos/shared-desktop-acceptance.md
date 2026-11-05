@@ -138,3 +138,20 @@ the strict tone gate. A later attempt refused playback when the observed default
 output was another remote-access application's device. The explicit-device pass
 isolates a working Host capture/codec path; default-output selection must still
 be qualified with that competing application's connection closed.
+
+After closing the competing remote-access connection, the default-routed
+`afplay` trial also passed the unchanged strict stereo gate on 2026-11-06:
+571,200 decoded PCM frames, seven qualifying windows, left/right RMS
+0.070522/0.070813, expected-tone fractions 0.999904/0.999952 and opposite-tone
+fractions below printed precision. The 12-second stream decoded 22 video frames
+and received 2,380 audio packets; bitrate acknowledgement and graceful
+disconnect passed. Host counters reported no audio send drops. No tone player or
+temporary tone file remained afterwards, and existing render-worker and Host
+PIDs were unchanged.
+
+The default output was already PLANK Output before this final trial and remained
+so afterwards; the system-alert output remained the physical speakers. This
+checks preservation of the observed pre-test routing state, not restoration
+from PLANK Output to a physical device. Default-route competition with another
+remote-access application remains an operational concern; no shared volume or
+device settings were changed by these probes.
