@@ -51,3 +51,23 @@ consent granted, a follow-up single-stream run passed with audio required:
 and graceful disconnect passed. This establishes audio packet delivery, not
 non-silent content or audible playback; concurrent audio still requires the
 updated signed Host candidate.
+
+The later signed candidate containing bounded shared audio taps passed the full
+controller with audio required. Three clients shared one source IP, with four
+connections total after leave/rejoin. Every receiver decoded 1920×1080 HEVC
+10-bit 4:2:0 into `pf20` pixels and received contiguous five-millisecond audio
+packets with 240 samples and no reported missing samples:
+
+| Receiver | Duration | Decoded frames | Audio packets | Initial video minus audio |
+| --- | ---: | ---: | ---: | ---: |
+| Departing | 10 s | 44 | 1,979 | 1.500 ms |
+| Replacement | 10 s | 11 | 1,979 | 8.500 ms |
+| Survivor | 35 s | 73 | 6,980 | 2.822 ms |
+| Keeper | 50 s | 99 | 9,952 | −17.500 ms |
+
+All four acknowledged bitrate control and disconnected cleanly. The two
+remaining streams continued after the first left; the replacement's different
+geometry and 4:4:4 request returned the unchanged active workspace. Final
+authenticated topology remained available after all streams drained. This is
+actual direct TLS/QUIC video decoding and audio packet transport evidence; it
+does not qualify audible playback, non-silent content, or the Internet relay.
