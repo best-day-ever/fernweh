@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Loopback qualification receiver. Launch secret arrives only over stdin.
+// Loopback and authorized remote qualification receiver. Launch secret arrives only over stdin.
 #import <Foundation/Foundation.h>
 #import <CoreMedia/CoreMedia.h>
+#import "hevc-decode-check.h"
 #include "plank_transport.h"
 #include "plank_transport_control.h"
 #include <unistd.h>
@@ -13,9 +14,18 @@
 int main(int argc, const char **argv) {
     unsigned seconds = 3;
     BOOL media = YES;
+    BOOL remote = argc >= 5 && !strcmp(argv[2], "--remote");
+    BOOL requireAudio = YES;
+    const char *address = "127.0.0.1";
     BOOL waitShared = argc == 3 && !strcmp(argv[2], "--shared-no-media");
     BOOL takeover = argc == 3 && !strcmp(argv[2], "--wait-takeover");
-    if (takeover) { media = NO; seconds = 30; }
+    if (remote) {
+        if (argc != 5 && (argc != 6 || strcmp(argv[5], "--audio-optional"))) return 2;
+        address = argv[3]; requireAudio = argc != 6;
+        char *end = NULL; unsigned long value = strtoul(argv[4], &end, 10);
+        if (!end || *end || value < 3 || value > 300) return 2;
+        seconds = (unsigned)value;
+    } else if (takeover) { media = NO; seconds = 30; }
     else if (argc == 3 && (!strcmp(argv[2], "--no-media") || waitShared)) media = NO;
     else if (argc == 4 && !strcmp(argv[2], "--seconds")) {
         char *end = NULL; unsigned long value = strtoul(argv[3], &end, 10);
@@ -42,8 +52,8 @@ int main(int argc, const char **argv) {
         REQUIRE([token isKindOfClass:NSString.class] && token.length == 44 && port > 0 && port <= UINT16_MAX);
         PlankTransportConfig config = {0}; config.struct_size = sizeof(config); config.abi_version = PLANK_TRANSPORT_ABI_VERSION;
         config.mode = PLANK_TRANSPORT_MODE_CLIENT; config.session_token = token.UTF8String;
-        config.remote_address = [NSString stringWithFormat:@"127.0.0.1:%u", port].UTF8String;
-        config.server_name = "localhost"; config.certificate_sha256 = argv[1];
+        config.remote_address = [NSString stringWithFormat:@"%s:%u", address, port].UTF8String;
+        config.server_name = remote ? "plank-host" : "localhost"; config.certificate_sha256 = argv[1];
         config.handshake_timeout_ms = 5000; config.idle_timeout_ms = 5000; config.keep_alive_interval_ms = 1000;
         config.max_udp_payload_size = [launch[@"max_udp_payload_size"] unsignedIntValue];
         PlankTransportNativeEndpoint *endpoint = NULL;
@@ -79,6 +89,7 @@ int main(int argc, const char **argv) {
                 usleep(10000);
             }
         }
+        PLANKHEVCDecodeCheck *decoder = remote ? [PLANKHEVCDecodeCheck new] : nil;
         uint64_t frames = 0, totalBytes = 0, lastPTS = 0, audioPackets = 0, lastAudioPTS = 0;
         double audioMaxAgeMs = 0, firstVideoMs = 0, firstAudioMs = 0;
         if (media) {
@@ -97,6 +108,10 @@ int main(int argc, const char **argv) {
                     REQUIRE(frames ? info.pts > lastPTS : (info.flags & PLANK_TRANSPORT_NATIVE_VIDEO_FLAG_KEY));
                     static const uint8_t start[] = {0, 0, 0, 1};
                     REQUIRE(!memcmp(payload.bytes, start, 4));
+                    if (remote) {
+                        REQUIRE([decoder decode:payload.bytes length:count width:width height:height]);
+                        if (!frames) { puts("remote_receiver_pixels_ready=1"); fflush(stdout); }
+                    }
                     if (!frames) firstVideoMs = info.pts / 90.0;
                     ++frames; totalBytes += count; lastPTS = info.pts;
                 }
@@ -111,13 +126,15 @@ int main(int argc, const char **argv) {
                     REQUIRE(!audioPackets || packet.pts == lastAudioPTS + 5);
                     if (!audioPackets) firstAudioMs = (double)packet.pts;
                     double ageMs = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())) * 1000 - packet.pts;
-                    REQUIRE(isfinite(ageMs) && ageMs >= -1 && ageMs < 2000);
+                    // Monotonic clocks on different machines do not share an epoch.
+                    if (!remote) REQUIRE(isfinite(ageMs) && ageMs >= -1 && ageMs < 2000);
+                    else ageMs = 0;
                     audioMaxAgeMs = fmax(audioMaxAgeMs, ageMs);
                     ++audioPackets; lastAudioPTS = packet.pts;
                 }
             }
-            REQUIRE(frames > 0 && audioPackets > 100);
-            REQUIRE(fabs(firstVideoMs - firstAudioMs) < 1000); // same source clock, not a sync-quality gate
+            REQUIRE(frames > 0 && (!requireAudio || audioPackets > 100));
+            if (audioPackets) REQUIRE(fabs(firstVideoMs - firstAudioMs) < 1000); // same source clock, not a sync-quality gate
         }
         uint8_t control[20]; size_t count = 0;
         uint32_t target = 111500;
@@ -136,8 +153,10 @@ int main(int argc, const char **argv) {
             clock_gettime_nsec_np(CLOCK_MONOTONIC) < deadline) usleep(10000);
         REQUIRE(plank_transport_native_endpoint_state(endpoint) != PLANK_TRANSPORT_STATE_READY);
         plank_transport_native_endpoint_destroy(endpoint);
+        if (remote) printf("remote_decode=pass decoded_frames=%lu pixel_format=%u\n",
+            (unsigned long)decoder.decodedFrames, (unsigned)decoder.pixelFormat);
         printf("macos_preview_receiver=pass media=%d seconds=%u negotiated_pixels=%ux%u frames=%llu bytes=%llu audio_packets=%llu audio_max_source_age_ms=%.3f first_video_minus_audio_ms=%.3f bitrate_ack=1 disconnected=1\n",
             media, seconds, width, height, (unsigned long long)frames, (unsigned long long)totalBytes,
-            (unsigned long long)audioPackets, audioMaxAgeMs, firstVideoMs - firstAudioMs);
+            (unsigned long long)audioPackets, audioMaxAgeMs, audioPackets ? firstVideoMs - firstAudioMs : 0);
     }
 }
