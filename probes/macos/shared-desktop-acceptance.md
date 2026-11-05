@@ -155,3 +155,32 @@ checks preservation of the observed pre-test routing state, not restoration
 from PLANK Output to a physical device. Default-route competition with another
 remote-access application remains an operational concern; no shared volume or
 device settings were changed by these probes.
+
+## Pointer geometry diagnostics
+
+`probes/macos/display-geometry.py` reads live Quartz display bounds, pixel modes
+and the cursor without posting input or reading screen pixels. `--cursor-only`
+prints one position. `--watch-seconds 60 --interval 0.05` emits only changed
+positions with monotonic timestamps for at most 60 seconds; the interval is
+bounded to 0.02–1 second. It can run over SSH stdin without installing files:
+
+```sh
+ssh "$SSH_TARGET" /usr/bin/python3 - --watch-seconds 60 --interval 0.05 \
+  < probes/macos/display-geometry.py
+```
+
+Compare observed global coordinates with the authenticated capture's
+`logical_bounds`, accounting for the client's video viewport and pixel scaling.
+A display to the left or above the main display legitimately has negative global
+coordinates. These read-only measurements complement real client movement and
+click testing; synthetic desktop automation alone does not establish physical
+mouse behavior.
+
+Focused Host regression tests cover 162 independent grid points across three
+pixel resolutions, 1x/2x scale and three desktop origins; both button events
+retain the corresponding motion position. The fixed-capture lifecycle fixture
+also verifies origin-only and scale-only invalidation, unrelated-display
+reconfiguration and a bounds change during a snapshot. Both passed with
+AddressSanitizer/UndefinedBehaviorSanitizer on 2026-11-06, with no posted events.
+These are coordinate-contract tests, not a claim that an observed client-side
+pointer offset has been reproduced or fixed.

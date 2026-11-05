@@ -63,6 +63,41 @@ int main(void) {
             }
             CHECK([mapper stopAndCopyReleaseEvents].count == 0);
         }
+        // Independent rows/columns exercise screen-to-Quartz mapping beyond
+        // the diagonal: pixel corners, centre and off-axis points across the
+        // shipped 1080p/1440p/2160p choices, 1x/2x and desktop arrangements.
+        CGSize gridPixels[] = {CGSizeMake(1920, 1080), CGSizeMake(2560, 1440), CGSizeMake(3840, 2160)};
+        CGPoint gridOrigins[] = {CGPointMake(0, 0), CGPointMake(-1920, -100), CGPointMake(3200, 1800)};
+        unsigned gridPoints = 0;
+        for (unsigned resolution = 0; resolution < 3; ++resolution)
+            for (unsigned scale = 1; scale <= 2; ++scale)
+                for (unsigned origin = 0; origin < 3; ++origin) {
+                    CGSize size = gridPixels[resolution];
+                    CGRect bounds = {gridOrigins[origin], CGSizeMake(size.width / scale, size.height / scale)};
+                    PLANKMacInputEvents *grid = make(source, bounds, size);
+                    unsigned xs[] = {0, (unsigned)size.width / 2, (unsigned)size.width - 1};
+                    unsigned ys[] = {0, (unsigned)size.height / 2, (unsigned)size.height - 1};
+                    for (unsigned row = 0; row < 3; ++row) for (unsigned column = 0; column < 3; ++column) {
+                        CGPoint expected = CGPointMake(bounds.origin.x + (double)xs[column] / scale,
+                            bounds.origin.y + (double)ys[row] / scale);
+                        CGEventRef move = sendInput(grid, 1,
+                            motion(xs[column], ys[row], (unsigned)size.width - 1, (unsigned)size.height - 1), PLANKMacInputEvent);
+                        CGPoint actual = CGEventGetLocation(move);
+                        CHECK(fabs(actual.x - expected.x) < 1e-7 && fabs(actual.y - expected.y) < 1e-7);
+                        CHECK(CGEventGetType(move) == kCGEventMouseMoved); CFRelease(move);
+                        for (unsigned down = 1; ; --down) {
+                            CGEventRef click = sendInput(grid, 2, packet((uint8_t[]){1, down}, 2), PLANKMacInputEvent);
+                            CGPoint clickPoint = CGEventGetLocation(click);
+                            CHECK(fabs(clickPoint.x - expected.x) < 1e-7 && fabs(clickPoint.y - expected.y) < 1e-7);
+                            CHECK(CGEventGetType(click) == (down ? kCGEventLeftMouseDown : kCGEventLeftMouseUp));
+                            CFRelease(click);
+                            if (!down) break;
+                        }
+                        ++gridPoints;
+                    }
+                    CHECK([grid stopAndCopyReleaseEvents].count == 0);
+                }
+        CHECK(gridPoints == 162);
         PLANKMacInputEvents *mapper = make(source, rectangles[0], pixels[0]);
         sendInput(mapper, 1, motion(0, 0, 0, 10), PLANKMacInputMalformed);
         sendInput(mapper, 1, motion(11, 0, 10, 10), PLANKMacInputMalformed);
@@ -309,7 +344,7 @@ int main(void) {
         CHECK(mapper.nextRepeatTime == 0);
         CHECK([mapper stopAndCopyReleaseEvents].count == 1);
         CFRelease(source);
-        printf("macos_input_events checks=%u posted_events=0\n", checks);
+        printf("macos_input_events checks=%u grid_points=162 resolutions=3 scales=2 origins=3 posted_events=0\n", checks);
     }
     return 0;
 }
