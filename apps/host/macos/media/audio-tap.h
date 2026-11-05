@@ -15,6 +15,12 @@
 - (instancetype)initWithQueue:(dispatch_queue_t)queue
                         sample:(BOOL (^)(CMSampleBufferRef sample))sample
                         failed:(void (^)(void))failed;
+// Shared mode permits at most 32 independent, process-scoped taps. Slots remain
+// reserved until deferred HAL cleanup finishes, including cancelled consent.
+- (instancetype)initWithQueue:(dispatch_queue_t)queue
+                 sharedDesktop:(BOOL)sharedDesktop
+                        sample:(BOOL (^)(CMSampleBufferRef sample))sample
+                        failed:(void (^)(void))failed;
 - (void)startWithCompletion:(void (^)(BOOL ready))completion;
 - (void)stopWithCompletion:(void (^)(void))completion;
 @end

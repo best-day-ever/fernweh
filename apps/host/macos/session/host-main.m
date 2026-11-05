@@ -307,6 +307,7 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
             // Root LoginWindow retains its existing session-scoped SCK path;
             // never construct a global root Core Audio tap.
             PLANKMacScreenCapture *capture = [[PLANKMacScreenCapture alloc] initWithDesktopAudioTap:phase == PLANKMacScopeDesktop];
+            capture.sharedDesktopAudio = sharedUser != nil;
             if (phase == PLANKMacScopeDesktop) capture.outputRoute = ^PLANKMacOutputRoute *(dispatch_queue_t queue) {
                 PLANKMacGraphicalIdentity scope = [weakAgent bindGraphicalScope:[authority snapshot]];
                 if (!plank_macos_graphical_identity_valid(scope)) return nil;
