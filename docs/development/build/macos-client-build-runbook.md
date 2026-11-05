@@ -170,6 +170,13 @@ and macOS27 as described in the Qt session plan.
   permissions; a successful command-line probe does not establish the GUI app's
   access. Preserve rollback copies and do not reset privacy databases to make a
   test pass.
+- For coordinate automation with the retained SDL session frontend, switch to
+  windowed mode with Ctrl+Alt+Shift+X before testing remote clicks. SDL's macOS26+
+  fullscreen workaround reads the global cursor position; per-app injected
+  events can leave that position stale. A windowed right-click on empty remote
+  desktop has been verified to open the context menu at the requested point.
+  Qualify fullscreen pointer behavior separately with physical mouse input;
+  do not alter production pointer mapping to accommodate injected events.
 - Optional media permission requests belong to the ordinary launcher, not
   session constructors: microphone consent completes asynchronously before the
   bookmark UI is created; attached USB Wacom Input Monitoring is requested there
