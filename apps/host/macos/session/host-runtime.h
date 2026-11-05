@@ -11,6 +11,9 @@
 // Factories permit non-posting/synthetic qualification without a second launch
 // implementation; the application supplies ScreenCapture and QuartzInput.
 @interface PLANKMacHostRuntime : NSObject
+// Configure before start, only after checking shared_desktop_user against the
+// positively identified local desktop account. No LoginWindow admission.
+@property(nonatomic) BOOL sharedDesktop;
 // Optional desktop-only mode preparation, configured before start. Called on
 // the auth lane with a cancellation/authority predicate; must finish boundedly.
 @property(copy) BOOL (^prepareDisplay)(unsigned width, unsigned height, unsigned scale, NSString *encodingMode, BOOL (^valid)(void));

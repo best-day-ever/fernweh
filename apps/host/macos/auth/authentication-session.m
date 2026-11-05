@@ -29,7 +29,7 @@
     PLANKMacGraphicalSnapshot _snapshot;
     NSMutableDictionary<NSString *, PLANKMacAuthRecord *> *_pending;
     NSMutableDictionary<NSString *, PLANKMacAuthRecord *> *_tokens;
-    PLANKMacStreamLease *_lease;
+    NSMutableSet<PLANKMacStreamLease *> *_leases;
     atomic_bool _hasStreamLease;
     uint64_t _revocationGeneration;
     BOOL _verifying;
@@ -69,6 +69,7 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
         _snapshot = [snapshot copy];
         _pending = [NSMutableDictionary dictionary];
         _tokens = [NSMutableDictionary dictionary];
+        _leases = [NSMutableSet set];
         atomic_init(&_hasStreamLease, false);
     }
     return self;
@@ -85,15 +86,18 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
         }
     }
     if (_takeoverToken && (now >= _takeoverDeadline || !_tokens[_takeoverToken])) _takeoverToken = nil;
-    if (_lease && ((!_lease.active && _lease.activateBefore <= now) ||
-            !plank_macos_account_may_attach(_lease.record.account, _lease.record.scope, current))) {
-        [self endStreamLease:_lease];
+    for (PLANKMacStreamLease *lease in _leases.copy) {
+        if ((!lease.active && lease.activateBefore <= now) ||
+            (self.sharedDesktop && current.phase != PLANKMacScopeDesktop) ||
+            !plank_macos_account_may_attach(lease.record.account, lease.record.scope, current))
+            [self endStreamLease:lease];
     }
 }
 
 - (NSDictionary *)startForPeer:(NSData *)peer username:(NSString *)username {
     @synchronized(self) {
-        if (!validPeer(peer) || ![username isKindOfClass:NSString.class]) return denied();
+        if (!validPeer(peer) || ![username isKindOfClass:NSString.class] ||
+            (self.sharedDesktop && _snapshot().phase != PLANKMacScopeDesktop)) return denied();
         NSData *nameBytes = [username dataUsingEncoding:NSUTF8StringEncoding];
         if (!nameBytes.length || nameBytes.length > 255 || memchr(nameBytes.bytes, 0, nameBytes.length))
             return denied();
@@ -157,11 +161,11 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
                 NSMutableArray<NSString *> *superseded = [NSMutableArray array];
                 for (NSString *key in _tokens) {
                     PLANKMacAuthRecord *old = _tokens[key];
-                    if (![key isEqual:_takeoverToken] && [old.peer isEqual:peer] && old.account.uid == account.uid &&
+                    if (!self.sharedDesktop && ![key isEqual:_takeoverToken] && [old.peer isEqual:peer] && old.account.uid == account.uid &&
                             !memcmp(old.account.uuid, account.uuid, sizeof(account.uuid)))
                         [superseded addObject:key];
                 }
-                if (_tokens.count - superseded.count >= MaximumSetupTokens) return busy();
+                if (_tokens.count - superseded.count >= (self.sharedDesktop ? 32u : MaximumSetupTokens)) return busy();
                 NSString *token = randomToken();
                 if (!token || _tokens[token]) return denied();
                 [_tokens removeObjectsForKeys:superseded];
@@ -169,14 +173,34 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
                 record.username = nil;
                 record.expires = monotonicSeconds() + 300;
                 _tokens[token] = record;
-                return @{@"state": @"authenticated", @"session_token": token,
-                    @"desktop_stage": record.scope.phase == PLANKMacScopeSignIn ? @"greeter" : @"desktop"};
+                NSMutableDictionary *reply = [@{@"state": @"authenticated", @"session_token": token,
+                    @"desktop_stage": record.scope.phase == PLANKMacScopeSignIn ? @"greeter" : @"desktop"} mutableCopy];
+                if (self.sharedDesktop) reply[@"shared_desktop"] = @YES;
+                return reply;
             }
         } @finally {
             @synchronized(self) { _verifying = NO; }
         }
     } @finally {
         [password resetBytesInRange:NSMakeRange(0, password.length)];
+    }
+}
+
+- (NSDictionary *)authenticateBrokerAccount:(PLANKMacAccountIdentity)account peer:(NSData *)peer {
+    @synchronized(self) {
+        [self prune];
+        PLANKMacGraphicalIdentity scope = _snapshot();
+        if (!self.sharedDesktop || !validPeer(peer) || scope.phase != PLANKMacScopeDesktop ||
+            !plank_macos_account_may_attach(account, scope, scope)) return denied();
+        if (_tokens.count >= 32) return busy();
+        NSString *token = randomToken();
+        if (!token || _tokens[token]) return denied();
+        PLANKMacAuthRecord *record = [PLANKMacAuthRecord new];
+        record.peer = peer; record.scope = scope; record.account = account;
+        record.expires = monotonicSeconds() + 300;
+        _tokens[token] = record;
+        return @{@"state": @"authenticated", @"session_token": token,
+                 @"desktop_stage": @"desktop", @"shared_desktop": @YES};
     }
 }
 
@@ -200,7 +224,7 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
         [_pending removeAllObjects];
         [_tokens removeAllObjects];
         _takeoverToken = nil;
-        [self endStreamLease:_lease];
+        for (PLANKMacStreamLease *lease in _leases.copy) [self endStreamLease:lease];
     }
 }
 
@@ -209,7 +233,8 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
         if ([token isKindOfClass:NSString.class]) {
             if ([_takeoverToken isEqual:token]) _takeoverToken = nil;
             [_tokens removeObjectForKey:token];
-            if ([_lease.claimedToken isEqual:token]) [self endStreamLease:_lease];
+            for (PLANKMacStreamLease *lease in _leases.copy)
+                if ([lease.claimedToken isEqual:token]) [self endStreamLease:lease];
         }
     }
 }
@@ -218,7 +243,9 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
     @synchronized(self) {
         [self prune];
         PLANKMacAccountIdentity account = {0};
-        if (_lease || ![self authorizeToken:token peer:peer identity:&account]) return nil;
+        if (_leases.count >= (self.sharedDesktop ? 32u : 1u) ||
+            (self.sharedDesktop && _snapshot().phase != PLANKMacScopeDesktop) ||
+            ![self authorizeToken:token peer:peer identity:&account]) return nil;
         NSString *transportToken = randomToken();
         if (!transportToken || [transportToken isEqual:token]) return nil;
         PLANKMacStreamLease *lease = [PLANKMacStreamLease new];
@@ -227,7 +254,7 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
         lease.transportToken = transportToken;
         lease.activateBefore = monotonicSeconds() + 15;
         [_tokens removeObjectForKey:token];
-        _lease = lease;
+        [_leases addObject:lease];
         atomic_store_explicit(&_hasStreamLease, true, memory_order_relaxed);
         return lease;
     }
@@ -236,7 +263,7 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
 - (BOOL)activateStreamLease:(PLANKMacStreamLease *)lease {
     @synchronized(self) {
         [self prune];
-        if (!lease || lease != _lease || lease.active) return NO;
+        if (!lease || ![_leases containsObject:lease] || lease.active) return NO;
         lease.active = YES;
         return YES;
     }
@@ -246,7 +273,7 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
     if (identity) memset(identity, 0, sizeof(*identity));
     @synchronized(self) {
         [self prune];
-        if (!identity || !lease || lease != _lease || !lease.active) return NO;
+        if (!identity || !lease || ![_leases containsObject:lease] || !lease.active) return NO;
         *identity = lease.record.account;
         return YES;
     }
@@ -254,13 +281,13 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
 
 - (void)endStreamLease:(PLANKMacStreamLease *)lease {
     @synchronized(self) {
-        if (!lease || lease != _lease) return;
+        if (!lease || ![_leases containsObject:lease]) return;
         lease.active = NO;
         lease.transportToken = nil;
         lease.claimedToken = nil;
         lease.record = nil;
-        _lease = nil;
-        atomic_store_explicit(&_hasStreamLease, false, memory_order_relaxed);
+        [_leases removeObject:lease];
+        atomic_store_explicit(&_hasStreamLease, _leases.count != 0, memory_order_relaxed);
     }
 }
 
@@ -272,8 +299,8 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
                          lease:(PLANKMacStreamLease *)lease {
     @synchronized(self) {
         PLANKMacAccountIdentity account = {0};
-        return [self authorizeToken:token peer:peer identity:&account] &&
-            lease && lease == _lease && lease.record &&
+        return !self.sharedDesktop && [self authorizeToken:token peer:peer identity:&account] &&
+            lease && [_leases containsObject:lease] && lease.record &&
             account.uid == lease.record.account.uid &&
             !memcmp(account.uuid, lease.record.account.uuid, sizeof(account.uuid));
     }
@@ -295,7 +322,7 @@ enum { MaximumPendingChallenges = 16, MaximumSetupTokens = 4 };
 - (BOOL)performWithStreamLease:(PLANKMacStreamLease *)lease action:(void (^)(void))action {
     @synchronized(self) {
         [self prune];
-        if (!action || !lease || lease != _lease || !lease.active) return NO;
+        if (!action || !lease || ![_leases containsObject:lease] || !lease.active) return NO;
         action();
         return YES;
     }

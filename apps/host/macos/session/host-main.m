@@ -220,12 +220,15 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
     NSMutableData *certificatePEM = readPrivate(fd, "cert.pem"), *keyPEM = readPrivate(fd, "key.pem");
     close(fd);
     NSDictionary *config = publicConfiguration ?: PLANKMacReadHostConfiguration(directory, directory, geteuid(), YES);
-    if (![config isKindOfClass:NSDictionary.class] || config.count != 7 ||
+    if (![config isKindOfClass:NSDictionary.class] ||
         ![config[@"Address"] isKindOfClass:NSString.class] || ![config[@"Name"] isKindOfClass:NSString.class] ||
         ![config[@"UUID"] isKindOfClass:NSString.class] || ![config[@"Port"] isKindOfClass:NSNumber.class] ||
         CFGetTypeID((__bridge CFTypeRef)config[@"Port"]) == CFBooleanGetTypeID() ||
         [config[@"Port"] doubleValue] != [config[@"Port"] unsignedShortValue] ||
         [config[@"Port"] unsignedShortValue] == 0) return startupFailure("configuration-values");
+    NSString *sharedUser = config[@"SharedDesktopUser"];
+    if (sharedUser && (phase != PLANKMacScopeDesktop || ![sharedUser isEqual:desktopAccountName]))
+        return startupFailure("shared-desktop-account-unavailable");
     if (!samePEM(certificatePEM, certificateBytes, @"CERTIFICATE")) return startupFailure("certificate-files");
     if (!samePEM(keyPEM, keyBytes, @"RSA PRIVATE KEY")) return startupFailure("private-key-files");
     SecCertificateRef certificate = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificateBytes);
@@ -316,6 +319,7 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
             return capture;
         }
         input:^id<PLANKMacInputDevice> { return [PLANKMacQuartzInput new]; }];
+    runtime.sharedDesktop = sharedUser != nil;
     if (desktopDisplay.mirrorHostDisplays) runtime.releaseDisplay = ^BOOL {
         dispatch_semaphore_t finished = dispatch_semaphore_create(0);
         __block atomic_bool restored = false;
