@@ -160,6 +160,16 @@ and macOS27 as described in the Qt session plan.
 
 ## Known failure signatures
 
+- Test local-network discovery from the installed app's canonical location in
+  `/Applications`, after quitting other Client copies. A signed development
+  copy launched from a build directory can report `Host unreachable` even when
+  command-line probes succeed and Local Network access appears enabled. Apple
+  documents unexpected privacy-setting behavior with multiple installed app
+  versions in [TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
+  Verify the running app's path, signature and executable UUID before changing
+  permissions; a successful command-line probe does not establish the GUI app's
+  access. Preserve rollback copies and do not reset privacy databases to make a
+  test pass.
 - Optional media permission requests belong to the ordinary launcher, not
   session constructors: microphone consent completes asynchronously before the
   bookmark UI is created; attached USB Wacom Input Monitoring is requested there
