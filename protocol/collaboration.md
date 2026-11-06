@@ -1,8 +1,8 @@
-# Consented desktop collaboration
+# Desktop collaboration admission
 
 The Linux Host advertises feature `0x20000000` for collaboration. An authenticated
 guest joins the current owner's desktop after that owner explicitly grants
-view or interaction permission, or an explicit Host support policy authorizes it.
+view or interaction permission, or an explicit Host policy authorizes it.
 Normal PAM/GSSAPI authentication and host access
 policy still apply independently to every guest. A broker route is reachability,
 never desktop authorization.
@@ -22,7 +22,26 @@ guest or change their permission. Guest input must be inhibited while the consen
 or participant control UI is being used, so an existing controller cannot approve
 another controller or change its own permission.
 
-## Administrator support override
+## Automatic joining for authorized workstation users
+
+Set `collaboration_require_approval = false` in `[collaboration]` to allow every
+user who passes the Host's existing authentication and workstation access policy
+to join the current unlocked desktop with interaction. The default is `true`.
+This policy needs no group membership and never accepts a client claim of access.
+A broker route alone is insufficient: the guest must have their own authenticated
+Host session before requesting or claiming a grant.
+
+Automatic grants use the same bounded, desktop-bound, one-use path described
+below. Owner denial, downgrade, revocation and helper closure do not block them.
+The participant indicator describes authorized access without identifying ordinary
+users as administrators. Locks and all other desktop lifecycle revocations remain.
+A policy change back to requiring approval is checked at status and launch;
+already active streams end through the ordinary desktop/disconnect lifecycle.
+The existing `support: true` wire field denotes an owner-approval exemption under
+either automatic joining or the optional support group; it does not assert an
+administrator identity. There are at most four automatically authorized guests.
+
+## Optional administrator support override
 
 An administrator may configure `collaboration_support_group` in the Host's
 `[collaboration]` section. It defaults to empty (disabled). The Host resolves
@@ -35,7 +54,7 @@ Members receive a desktop-bound interaction grant without waiting for approval.
 The Host rechecks membership on guest status and at launch. The grant is still
 single-use and expires after two minutes if unused. Owner deny/revoke/downgrade
 controls cannot change a support grant. The local indicator labels it as
-administrator support and exposes no permission buttons for it. A missing or
+authorized access and exposes no permission buttons for it. A missing or
 closed helper revokes ordinary guests but does not block support. The Host keeps
 trying to start the indicator; it also logs successful support joins by UID,
 without grant secrets. Input remains suspended while owner security controls
@@ -56,7 +75,7 @@ To end it immediately, disconnect the support stream or lock/end the desktop.
 The wire negotiation is unchanged (`0x20000000`). Request creation retains its
 `pending` acknowledgement for existing clients; the next status response returns
 `control` with the existing grant/capture fields. Owner/helper participant records
-add `support: true` for support grants; absent/false means ordinary consent.
+add `support: true` for approval-exempt grants; absent/false means ordinary consent.
 
 ## Host HTTPS API
 
@@ -66,7 +85,7 @@ grants are not logged.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /plank/collaboration/request` | Request owner consent; returns an opaque `request_id` and `state`. |
+| `POST /plank/collaboration/request` | Request admission under Host policy; returns an opaque `request_id` and `state`. |
 | `GET /plank/collaboration/status?request_id=…` | The requesting guest polls its own request; approved replies include permission, a launch grant and current owner stream settings. |
 | `GET /plank/collaboration/status` | Owner-only participant and pending-request status. |
 | `POST /plank/collaboration/decision` | Owner-only decision for a request. |
@@ -77,7 +96,7 @@ An approved guest supplies `plankCollaboration=<grant>` to `/launch`. The Host
 revalidates the authenticated guest, owner, desktop and permission before creating
 any guest media endpoint. A feature bit alone or a client-supplied permission is
 never sufficient. Reconnecting an ordinary guest requires another approval; support
-requires a fresh group check.
+requires a fresh policy check.
 
 ## Display ownership
 
