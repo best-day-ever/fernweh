@@ -1,7 +1,7 @@
 //! Broker flow tests against fakes (Kerberos, directory, relay, prober, clock).
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -382,8 +382,8 @@ async fn auth_flow_and_reply_shapes() {
     assert_eq!(
         j,
         serde_json::json!({"hosts":[
-            {"id":WS1,"name":"ws1","online":true,"busy":null,"in_use_by":null,"connectable":true,"reason":null},
-            {"id":WS2,"name":"ws2","online":true,"busy":null,"in_use_by":null,"connectable":true,"reason":null}
+            {"id":WS1,"name":"ws1","online":true,"busy":null,"in_use_by":null,"connected_users":[],"connectable":true,"reason":null},
+            {"id":WS2,"name":"ws2","online":true,"busy":null,"in_use_by":null,"connected_users":[],"connectable":true,"reason":null}
         ]})
     );
 
@@ -700,6 +700,123 @@ async fn collaboration_users_keep_independent_direct_grants() {
     assert!(h.b.keepalive(LAN, &owner, WS1).await.is_ok());
     assert_eq!(h.b.keepalive(LAN, &guest, WS1).await.unwrap_err(), ApiError::Unauthorized);
     assert!(h.relay_calls().is_empty());
+}
+
+const CONNECTION_A: &str = "11111111111111111111111111111111";
+const CONNECTION_B: &str = "22222222222222222222222222222222";
+
+#[tokio::test]
+async fn presence_tracks_streams_not_grants_and_deduplicates_people() {
+    for direct in [false, true] {
+        let h = if direct { harness_direct() } else { harness() };
+        let ip = if direct { LAN } else { IP };
+        let owner = h.login_from(ip, "anna", "secret", "123456").await.unwrap();
+        let guest = h.login_from(ip, "bob", "hunter2", "654321").await.unwrap();
+        let users = || async { h.b.list_hosts(ip, &owner).await.unwrap().hosts[0].connected_users.clone() };
+        assert_eq!(h.b.presence(ip, &owner, WS1, CONNECTION_A, 1, true).await, Err(ApiError::NoLease));
+        for token in [&owner, &guest] {
+            h.b.connect(ip, token, WS1, "remote.example.org").await.unwrap();
+        }
+        assert!(users().await.is_empty(), "a prepared transport is not a connected person");
+        h.b.presence(ip, &owner, WS1, CONNECTION_A, 1, true).await.unwrap();
+        h.b.presence(ip, &owner, WS1, CONNECTION_B, 1, true).await.unwrap();
+        h.b.presence(ip, &guest, WS1, CONNECTION_A, 1, true).await.unwrap();
+        assert_eq!(users().await, vec!["anna", "bob"]);
+        assert_eq!(h.b.list_hosts(ip, &guest).await.unwrap().hosts.len(), 1, "names do not extend host access");
+        assert_eq!(h.b.presence(ip, &guest, WS2, CONNECTION_B, 1, true).await, Err(ApiError::Denied));
+        assert_eq!(
+            h.b.presence(IP3, &owner, WS1, "33333333333333333333333333333333", 1, true).await,
+            Err(ApiError::NoLease)
+        );
+        h.b.presence(ip, &owner, WS1, CONNECTION_A, 3, false).await.unwrap();
+        h.b.presence(ip, &owner, WS1, CONNECTION_A, 2, true).await.unwrap();
+        assert_eq!(users().await, vec!["anna", "bob"], "the owner's other stream remains connected");
+        h.b.presence(ip, &owner, WS1, CONNECTION_B, 2, false).await.unwrap();
+        assert_eq!(users().await, vec!["bob"]);
+        h.b.logout(&guest).await.unwrap();
+        assert!(users().await.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn presence_expires_without_heartbeats_even_when_dashboard_refreshes() {
+    let h = harness();
+    let token = h.login().await;
+    h.b.connect(IP, &token, WS1, "remote.example.org").await.unwrap();
+    h.b.presence(IP, &token, WS1, CONNECTION_A, 1, true).await.unwrap();
+    for _ in 0..3 {
+        h.clock.advance(Duration::from_secs(19));
+        assert_eq!(h.b.list_hosts(IP, &token).await.unwrap().hosts[0].connected_users, vec!["anna"]);
+    }
+    h.clock.advance(Duration::from_secs(3));
+    assert!(h.b.list_hosts(IP, &token).await.unwrap().hosts[0].connected_users.is_empty());
+    // Stop may arrive before the first heartbeat. Later packets never revive it.
+    h.b.presence(IP, &token, WS1, CONNECTION_B, 2, false).await.unwrap();
+    h.b.presence(IP, &token, WS1, CONNECTION_B, 1, true).await.unwrap();
+    h.b.presence(IP, &token, WS1, CONNECTION_B, 3, true).await.unwrap();
+    assert!(h.b.list_hosts(IP, &token).await.unwrap().hosts[0].connected_users.is_empty());
+    assert_eq!(h.b.presence(IP, &token, WS1, "bad", 1, true).await, Err(ApiError::BadRequest));
+    assert_eq!(h.b.presence(IP, &token, WS1, CONNECTION_A, 0, true).await, Err(ApiError::BadRequest));
+}
+
+#[tokio::test]
+async fn presence_heartbeat_extends_only_its_stream_and_hides_untrusted_hosts() {
+    let h = harness();
+    let token = h.login().await;
+    let guest = h.login_from(IP, "bob", "hunter2", "654321").await.unwrap();
+    for t in [&token, &guest] {
+        h.b.connect(IP, t, WS1, "remote.example.org").await.unwrap();
+        h.b.presence(IP, t, WS1, CONNECTION_A, 1, true).await.unwrap();
+    }
+    for sequence in 2..=5 {
+        h.clock.advance(Duration::from_secs(20));
+        h.b.list_hosts(IP, &token).await.unwrap(); // Refreshes the owner's grant, not presence.
+        h.b.presence(IP, &token, WS1, CONNECTION_A, sequence, true).await.unwrap();
+    }
+    assert_eq!(h.b.list_hosts(IP, &token).await.unwrap().hosts[0].connected_users, vec!["anna"]);
+    h.prober.certs.lock().unwrap().insert(WS1.into(), None);
+    h.b.probe_all().await;
+    assert!(h.b.list_hosts(IP, &token).await.unwrap().hosts[0].connected_users.is_empty());
+    h.prober.certs.lock().unwrap().insert(WS1.into(), Some([9u8; 32]));
+    h.b.probe_all().await;
+    let host = &h.b.list_hosts(IP, &token).await.unwrap().hosts[0];
+    assert_eq!(host.reason.as_deref(), Some("certificate changed"));
+    assert!(host.connected_users.is_empty());
+}
+
+#[tokio::test]
+async fn presence_http_requires_authentication_and_rejects_client_supplied_names() {
+    let h = harness();
+    let token = h.login().await;
+    h.b.connect(IP, &token, WS1, "remote.example.org").await.unwrap();
+    let app = crate::api::router(h.b.clone());
+    for (auth, body, status) in [
+        (
+            "garbage",
+            serde_json::json!({"connection_id": CONNECTION_A, "sequence":1, "connected":true}),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            token.as_str(),
+            serde_json::json!({"connection_id": CONNECTION_A, "sequence":1, "connected":true, "username":"someone"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            token.as_str(),
+            serde_json::json!({"connection_id": CONNECTION_A, "sequence":1, "connected":true}),
+            StatusCode::OK,
+        ),
+    ] {
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/hosts/{WS1}/presence"))
+            .header("authorization", format!("Bearer {auth}"))
+            .extension(ConnectInfo(SocketAddr::new(IP, 12345)))
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        assert_eq!(app.clone().oneshot(request).await.unwrap().status(), status);
+    }
+    assert_eq!(h.b.list_hosts(IP, &token).await.unwrap().hosts[0].connected_users, vec!["anna"]);
 }
 
 #[tokio::test]
