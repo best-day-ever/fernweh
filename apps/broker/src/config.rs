@@ -36,6 +36,9 @@ pub struct Config {
     /// Optional directories containing the current platform client releases.
     #[serde(default)]
     pub client_updates: Option<ClientUpdatesConfig>,
+    /// Beta-only diagnostic collection, disabled unless explicitly configured.
+    #[serde(default)]
+    pub diagnostics: Option<crate::diagnostics::Config>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -470,6 +473,11 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(diagnostics) = &self.diagnostics {
+            if !diagnostics.directory.is_absolute() || diagnostics.enabled_until_unix == 0 {
+                bail!("diagnostics requires an absolute directory and an explicit beta expiry");
+            }
+        }
         if let Some(updates) = &self.client_updates {
             if updates.windows_directory.as_ref().is_some_and(|p| !p.is_absolute()) {
                 bail!("client_updates.windows_directory must be absolute");

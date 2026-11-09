@@ -344,6 +344,7 @@ pub struct Deps {
 
 pub struct Broker {
     pub cfg: Config,
+    pub(crate) diagnostic_writer: Arc<tokio::sync::Semaphore>,
     d: Deps,
     direct_nets: Vec<ipnet::Ipv4Net>,
     st: Mutex<State>,
@@ -380,6 +381,7 @@ impl Broker {
         let passkey_rp_id = cfg.passkey.rp_id(&cfg.kerberos.realm);
         Arc::new(Broker {
             cfg,
+            diagnostic_writer: Arc::new(tokio::sync::Semaphore::new(1)),
             d,
             direct_nets,
             st: Mutex::new(st),
@@ -912,7 +914,7 @@ impl Broker {
 
     /// A remembered login never replaces the current directory account check.
     /// Directory outages preserve the login but deny the operation.
-    async fn session<'a>(
+    pub(crate) async fn session<'a>(
         &self,
         bearer: impl Into<Bearer<'a>>,
         expect: (&str, &str),

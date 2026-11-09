@@ -1477,6 +1477,42 @@ mod device_sessions {
     use crate::broker::Bearer;
 
     #[tokio::test]
+    async fn diagnostics_require_a_valid_device_signature_over_the_actual_body() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("plank-bound-diagnostics-{}", rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let h = harness_cfg(kdc(), |cfg| {
+            cfg.diagnostics = Some(crate::diagnostics::Config { directory: dir.clone(), enabled_until_unix: u64::MAX })
+        });
+        let d = TestDevice::new();
+        let token = h.bound_login(&d).await.session_token;
+        let body = diagnostic_report(1).to_string();
+        let app = crate::api::router(h.b.clone());
+        let request = |proof_body: &[u8], signed: bool| {
+            let p = proof(&d, "POST", "/v1/diagnostics", h.now(), &token, proof_body);
+            let mut r = Request::builder()
+                .method("POST")
+                .uri("/v1/diagnostics")
+                .header("authorization", format!("Bearer {token}"));
+            if signed {
+                r = r
+                    .header("x-plank-device-time", h.now().to_string())
+                    .header("x-plank-device-proof", base64::engine::general_purpose::STANDARD.encode(p.signature));
+            }
+            r.body(Body::from(body.clone())).unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(request(body.as_bytes(), false)).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(app.clone().oneshot(request(b"tampered", true)).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert_eq!(app.oneshot(request(body.as_bytes(), true)).await.unwrap().status(), StatusCode::ACCEPTED);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn bound_login_is_renewable_persistent_and_long() {
         let h = harness_with(kdc());
         let d = TestDevice::new();
@@ -1814,5 +1850,101 @@ mod device_sessions {
         let body = format!(r#"{{"conversation_id":"{conv}","responses":["hunter2","654321"]}}"#);
         let (_, _, j) = call(&app, "POST", "/v1/auth/respond", None, &body).await;
         assert!(j.get("device_bound").is_none());
+    }
+}
+
+pub(crate) fn diagnostic_report(id: usize) -> serde_json::Value {
+    serde_json::json!({"schema":1,"report_id":format!("{id:032x}"),"version":"1.2.20-beta","platform":"windows","os_version":"11",
+        "started_unix":1794211200u64,"duration_ms":1000,"outcome":"completed",
+        "displays_end":[],"displays":[{"width":3840,"height":2160,"refresh_millihz":120000,"hdr_supported":null,"hdr_enabled":true,"bits_per_color":10}],
+        "samples":[{"elapsed_ms":10,"fps_x100":6000,"video_kbps":150000,"rtt_ms":12,"received_age_ms":2,"statistics_age_ms":3}],
+        "events":[{"elapsed_ms":0,"kind":"prepared","code":0}]})
+}
+#[tokio::test]
+async fn diagnostics_authentication_schema_retention_limits_and_idempotency() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("plank-diagnostics-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "secret123456")]), |cfg| {
+        cfg.diagnostics = Some(crate::diagnostics::Config { directory: dir.clone(), enabled_until_unix: u64::MAX });
+    });
+    let token = h.login().await;
+    let app = crate::api::router(h.b.clone());
+    let request = |token: &str, body: serde_json::Value| {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/diagnostics")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(request("bogus", diagnostic_report(1))).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let mut bad = diagnostic_report(1);
+    bad["token"] = serde_json::json!("must-not-be-stored");
+    assert_eq!(app.clone().oneshot(request(&token, bad)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let mut bad = diagnostic_report(1);
+    bad["events"][0]["kind"] = serde_json::json!("arbitrary-raw-log");
+    assert_eq!(app.clone().oneshot(request(&token, bad)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let mut bad = diagnostic_report(1);
+    bad["displays"][0]["width"] = serde_json::json!(999999);
+    assert_eq!(app.clone().oneshot(request(&token, bad)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let mut big = diagnostic_report(1);
+    big["version"] = serde_json::json!("x".repeat(65536));
+    assert_eq!(app.clone().oneshot(request(&token, big)).await.unwrap().status(), StatusCode::PAYLOAD_TOO_LARGE);
+    // Typical bounded reports exceed the normal 8 KiB auth body limit.
+    let mut full = diagnostic_report(1);
+    full["samples"] = serde_json::Value::Array(vec![full["samples"][0].clone(); 120]);
+    assert!(full.to_string().len() > 8192);
+    assert_eq!(app.clone().oneshot(request(&token, full)).await.unwrap().status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        app.clone().oneshot(request(&token, diagnostic_report(1))).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    for id in 2..=6 {
+        assert_eq!(
+            app.clone().oneshot(request(&token, diagnostic_report(id))).await.unwrap().status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    assert_eq!(
+        app.clone().oneshot(request(&token, diagnostic_report(7))).await.unwrap().status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let files = std::fs::read_dir(&dir).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(files.len(), 6);
+    for file in files {
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    // Revoked accounts retain no upload privilege.
+    h.dir.users.lock().unwrap().get_mut("anna").unwrap().disabled = true;
+    h.clock.advance(Duration::from_secs(h.cfg.ldap.cache_ttl_secs + 1));
+    assert_eq!(app.oneshot(request(&token, diagnostic_report(8))).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+#[tokio::test]
+async fn diagnostics_are_disabled_without_configuration_and_after_beta_expiry() {
+    for expiry in [None, Some(1)] {
+        let h = harness_cfg(FakeKerberos::new(&[]), |cfg| {
+            cfg.diagnostics = expiry.map(|enabled_until_unix| crate::diagnostics::Config {
+                directory: "/nonexistent".into(),
+                enabled_until_unix,
+            })
+        });
+        let response = crate::api::router(h.b)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/diagnostics")
+                    .body(Body::from(diagnostic_report(1).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
