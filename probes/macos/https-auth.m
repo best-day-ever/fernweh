@@ -62,7 +62,7 @@ int main(int argc, const char *argv[]) {
         if (argc == 3) {
             testScreenAllowed = strcmp(argv[2], "screen-denied") != 0;
             testInputAllowed = strcmp(argv[2], "input-denied") != 0;
-            if (!strcmp(argv[2], "display-lease")) { fixtureLifetime = 85; alarm(90); } // Exercise the real 60s lease plus TLS setup.
+            if (!strcmp(argv[2], "display-lease") || !strcmp(argv[2], "shared-desktop")) { fixtureLifetime = 85; alarm(90); } // Exercise the real 60s lease plus TLS setup.
             else if (testScreenAllowed && testInputAllowed) return 2;
         } else
 #endif
@@ -135,6 +135,7 @@ int main(int argc, const char *argv[]) {
 #endif
             }];
 #ifdef PLANK_SYNTHETIC_AUTH_TEST
+        runtime.sharedDesktop = argc == 3 && !strcmp(argv[2], "shared-desktop");
         runtime.releaseDisplay = ^BOOL {
             desktopWidth = 1920; desktopHeight = 1080; desktopScale = 1;
             puts("macos_display_released"); fflush(stdout); return YES;

@@ -27,6 +27,20 @@ signin=la.instinctual.PLANK.Host.sign-in
 team='@TEAM@'
 version='@VERSION@'
 minimum_macos='@MIN_MACOS@'
+camera_extension='@CAMERA@'
+
+camera_extensions() { /usr/bin/systemextensionsctl list; }
+verify_camera_variant() {
+    local extensions
+    case $camera_extension in
+      1) return 0 ;;
+      0) ;;
+      *) fail 'Invalid Host camera package variant' ;;
+    esac
+    extensions=$(camera_extensions) || fail 'Cannot inspect installed camera extensions; Host was not changed.'
+    [[ $extensions != *'la.instinctual.PLANK.Host.Camera'* ]] ||
+        fail 'Disable PLANK Camera using the existing camera-enabled Host before installing this camera-free build. Host was not changed.'
+}
 
 fail() { echo "PLANK: $*" >&2; exit 1; }
 present() { [[ -e $1 || -L $1 ]]; }
@@ -213,7 +227,7 @@ check_configuration() {
 platform_compatible() {
     local version=$1 architecture=$2 major minor required_major required_minor
     [[ $architecture = arm64 && $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
-    case $minimum_macos in 26.7|27.0) ;; *) return 1 ;; esac
+    case $minimum_macos in 15.4|26.7|27.0) ;; *) return 1 ;; esac
     major=${version%%.*}; minor=${version#*.}; minor=${minor%%.*}
     required_major=${minimum_macos%%.*}; required_minor=${minimum_macos#*.}
     [[ $major -gt $required_major || ( $major -eq $required_major && $minor -ge $required_minor ) ]]

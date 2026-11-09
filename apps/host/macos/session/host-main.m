@@ -16,6 +16,7 @@
 #include "permission-status.h"
 #import "desktop-provisioning.h"
 #import "host-configuration.h"
+#import "broker-admission.h"
 #import "machine-identity.h"
 #import "desktop-start.h"
 #import "permission-setup.h"
@@ -220,12 +221,15 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
     NSMutableData *certificatePEM = readPrivate(fd, "cert.pem"), *keyPEM = readPrivate(fd, "key.pem");
     close(fd);
     NSDictionary *config = publicConfiguration ?: PLANKMacReadHostConfiguration(directory, directory, geteuid(), YES);
-    if (![config isKindOfClass:NSDictionary.class] || config.count != 7 ||
+    if (![config isKindOfClass:NSDictionary.class] ||
         ![config[@"Address"] isKindOfClass:NSString.class] || ![config[@"Name"] isKindOfClass:NSString.class] ||
         ![config[@"UUID"] isKindOfClass:NSString.class] || ![config[@"Port"] isKindOfClass:NSNumber.class] ||
         CFGetTypeID((__bridge CFTypeRef)config[@"Port"]) == CFBooleanGetTypeID() ||
         [config[@"Port"] doubleValue] != [config[@"Port"] unsignedShortValue] ||
         [config[@"Port"] unsignedShortValue] == 0) return startupFailure("configuration-values");
+    NSString *sharedUser = config[@"SharedDesktopUser"];
+    if (sharedUser && (phase != PLANKMacScopeDesktop || ![sharedUser isEqual:desktopAccountName]))
+        return startupFailure("shared-desktop-account-unavailable");
     if (!samePEM(certificatePEM, certificateBytes, @"CERTIFICATE")) return startupFailure("certificate-files");
     if (!samePEM(keyPEM, keyBytes, @"RSA PRIVATE KEY")) return startupFailure("private-key-files");
     SecCertificateRef certificate = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificateBytes);
@@ -303,6 +307,7 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
             // Root LoginWindow retains its existing session-scoped SCK path;
             // never construct a global root Core Audio tap.
             PLANKMacScreenCapture *capture = [[PLANKMacScreenCapture alloc] initWithDesktopAudioTap:phase == PLANKMacScopeDesktop];
+            capture.sharedDesktopAudio = sharedUser != nil;
             if (phase == PLANKMacScopeDesktop) capture.outputRoute = ^PLANKMacOutputRoute *(dispatch_queue_t queue) {
                 PLANKMacGraphicalIdentity scope = [weakAgent bindGraphicalScope:[authority snapshot]];
                 if (!plank_macos_graphical_identity_valid(scope)) return nil;
@@ -316,6 +321,17 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
             return capture;
         }
         input:^id<PLANKMacInputDevice> { return [PLANKMacQuartzInput new]; }];
+    runtime.sharedDesktop = sharedUser != nil;
+    if (config[@"BrokerPublicKey"]) {
+        NSData *brokerKey = [[NSData alloc] initWithBase64EncodedString:config[@"BrokerPublicKey"] options:0];
+        PLANKMacBrokerAdmission *broker = [[PLANKMacBrokerAdmission alloc] initWithPublicKey:brokerKey
+            host:config[@"BrokerHost"] localUser:sharedUser certificateDER:certificateBytes
+            replayPath:[directory stringByAppendingPathComponent:@"broker-nonces"]];
+        if (!broker) return startupFailure("broker-admission-configuration");
+        runtime.verifyBrokerAdmission = ^BOOL(NSString *token, NSString *subject, PLANKMacAccountIdentity *account) {
+            return [broker verifyToken:token subject:subject now:(uint64_t)time(NULL) identity:account];
+        };
+    }
     if (desktopDisplay.mirrorHostDisplays) runtime.releaseDisplay = ^BOOL {
         dispatch_semaphore_t finished = dispatch_semaphore_create(0);
         __block atomic_bool restored = false;

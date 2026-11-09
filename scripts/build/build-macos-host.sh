@@ -8,6 +8,10 @@ fi
 : "${PLANK_MACOS_HOST_VERSION:?Explicit branch-qualified version required}"
 [[ $PLANK_MACOS_HOST_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-z][a-z0-9.-]*)?$ ]]
 source_root=$1; output=$2; archive=$3
+camera_extension=${PLANK_MACOS_CAMERA_EXTENSION:-1}
+case $camera_extension in 0|1) ;; *) echo 'PLANK_MACOS_CAMERA_EXTENSION must be 0 or 1' >&2; exit 2 ;; esac
+camera_variant=enabled; camera_included=true
+if [[ $camera_extension = 0 ]]; then camera_variant=disabled; camera_included=false; fi
 source "$source_root/scripts/build/macos-host-target.sh"
 plank_macos_host_target
 source "$source_root/scripts/build/build-paths.sh"
@@ -29,6 +33,7 @@ xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -W
 xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
     tests/auth/macos-permission-setup.m -framework Foundation -framework AppKit \
     -framework ApplicationServices -framework CoreAudio -o "$output/permission-setup-test"
+bash "$source_root/scripts/test/build-macos-camera-option.sh" "$source_root" "$output/camera-option-tests"
 "$output/permission-setup-test"
 # Host-only checkouts deliberately do not initialize the Client submodule.
 python3 tests/packaging/test-startup-permissions.py HostPermissions
@@ -72,9 +77,14 @@ xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -W
 xcrun clang -std=c11 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
     -Iapps/host/macos/media tests/auth/macos-stream-diagnostics.c -o "$output/stream-diagnostics-test"
 "$output/stream-diagnostics-test"
+xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
+    -Iapps/host/macos/auth apps/host/macos/auth/broker-admission.m tests/auth/macos-broker-admission.m \
+    -framework Foundation -framework Security -o "$output/broker-admission-test"
+"$output/broker-admission-test"
 python3 "$source_root/tests/packaging/test-macos-host-permissions.py"
 python3 "$source_root/tests/packaging/test-macos-installer-preflight.py"
 python3 "$source_root/tests/packaging/test-macos-camera-profile.py"
+python3 "$source_root/tests/packaging/test-macos-camera-disabled.py"
 xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
     -DPLANK_CLIPBOARD_TEST_PASTEBOARD -Iapps/host/macos/media -Iprotocol/plank-transport/include \
     apps/host/macos/media/clipboard-sync.m tests/input/macos-clipboard.m \
@@ -146,7 +156,7 @@ xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werr
 xcrun clang -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
     -Iapps/host/macos/media tests/video/macos-video-recovery.c -o "$output/video-recovery-test"
 "$output/video-recovery-test"
-common=("${PLANK_FILE_FLAGS[@]}" -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new
+common=("${PLANK_FILE_FLAGS[@]}" "-DPLANK_MACOS_CAMERA_EXTENSION=$camera_extension" -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new
     -Iapps/host/macos/auth -Iapps/host/macos/control -Iapps/host/macos/media -Iapps/host/macos/input
     -Iapps/host/macos/session -Iprotocol/plank-transport/include
     -framework Foundation -framework Security -framework SystemConfiguration -framework CoreFoundation
@@ -154,7 +164,7 @@ common=("${PLANK_FILE_FLAGS[@]}" -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET
     -framework CoreVideo -framework ScreenCaptureKit -framework VideoToolbox -framework AudioToolbox -framework CoreAudio
     -framework Carbon -framework ApplicationServices -framework OpenDirectory -framework IOKit -framework SystemExtensions
     -Wl,-fatal_warnings -Wl,-sectcreate,__CGPreLoginApp,__cgpreloginapp,/dev/null)
-sources=(apps/host/macos/auth/authentication-session.m apps/host/macos/auth/graphical-authority.m
+sources=(apps/host/macos/auth/broker-admission.m apps/host/macos/auth/authentication-session.m apps/host/macos/auth/graphical-authority.m
     apps/host/macos/auth/account-verifier.m apps/host/macos/auth/account-channel.m
     apps/host/macos/control/http-request.m apps/host/macos/control/server-information.m
     apps/host/macos/control/fixed-capture.m apps/host/macos/control/desktop-display.m apps/host/macos/control/display-layout.m apps/host/macos/control/https-auth-server.m
@@ -217,7 +227,7 @@ shasum -a 256 "$archive" "$output/plank-host"
         : "${PLANK_MACOS_TEAM_ID:?Developer Team ID required}"
         [[ $PLANK_MACOS_TEAM_ID =~ ^[A-Z0-9]{10}$ ]]
         sed -e "s/@TEAM@/$PLANK_MACOS_TEAM_ID/g" -e "s/@VERSION@/$PLANK_MACOS_HOST_VERSION/g" \
-            -e "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" \
+            -e "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" -e "s/@CAMERA@/$camera_extension/g" \
             packaging/host/macos/pkg-common.sh > "$app/Contents/Resources/uninstall.sh"
         cat packaging/host/macos/uninstall.sh >> "$app/Contents/Resources/uninstall.sh"
         chmod 0755 "$app/Contents/Resources/uninstall.sh"
@@ -229,28 +239,33 @@ shasum -a 256 "$archive" "$output/plank-host"
     /usr/libexec/PlistBuddy -c "Add :PLANKVersion string $PLANK_MACOS_HOST_VERSION" "$app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${PLANK_MACOS_HOST_VERSION%%-*}" "$app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${PLANK_MACOS_HOST_VERSION%%-*}" "$app/Contents/Info.plist"
-    camera_metadata=(--app "$app" --output "$output" --version "${PLANK_MACOS_HOST_VERSION%%-*}"
-        --team "${PLANK_MACOS_TEAM_ID:-PLANKTEST0}" --identity "$signing_identity"
-        --minimum-macos "$MACOSX_DEPLOYMENT_TARGET")
-    if [[ $signing_identity != - ]]; then
-        : "${PLANK_MACOS_APP_PROVISION_PROFILE:?Production Host system-extension installation profile required}"
-        camera_metadata+=(--profile "$PLANK_MACOS_APP_PROVISION_PROFILE")
+    /usr/libexec/PlistBuddy -c "Add :PLANKCameraExtensionIncluded bool $camera_included" "$app/Contents/Info.plist"
+    if [[ $camera_extension = 1 ]]; then
+        camera_metadata=(--app "$app" --output "$output" --version "${PLANK_MACOS_HOST_VERSION%%-*}"
+            --team "${PLANK_MACOS_TEAM_ID:-PLANKTEST0}" --identity "$signing_identity"
+            --minimum-macos "$MACOSX_DEPLOYMENT_TARGET")
+        if [[ $signing_identity != - ]]; then
+            : "${PLANK_MACOS_APP_PROVISION_PROFILE:?Production Host system-extension installation profile required}"
+            camera_metadata+=(--profile "$PLANK_MACOS_APP_PROVISION_PROFILE")
+        fi
+        python3 scripts/package/prepare-macos-camera.py "${camera_metadata[@]}"
+        extension="$app/Contents/Library/SystemExtensions/la.instinctual.PLANK.Host.Camera.systemextension"
+        xcrun clang "${PLANK_FILE_FLAGS[@]}" -O2 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
+            -Iapps/host/macos/media -Iprotocol/plank-transport/include \
+            apps/host/macos/camera-device/camera-{extension,consumer,signing}.m \
+            apps/host/macos/media/native-camera-{sample,output}.m \
+            -framework Foundation -framework Security -framework CoreMediaIO -framework CoreMedia \
+            -framework CoreVideo -framework VideoToolbox -framework CoreGraphics \
+            -o "$extension/Contents/MacOS/plank-camera"
+        strip -S "$extension/Contents/MacOS/plank-camera"
+        codesign --force --sign "$signing_identity" "${signing_flags[@]}" \
+            --entitlements "$output/camera-extension-entitlements.plist" "$extension"
+        codesign --verify --strict "$extension"
+        codesign --force --sign "$signing_identity" "${signing_flags[@]}" \
+            --entitlements "$output/camera-host-entitlements.plist" --identifier la.instinctual.PLANK.Host "$app"
+    else
+        codesign --force --sign "$signing_identity" "${signing_flags[@]}" --identifier la.instinctual.PLANK.Host "$app"
     fi
-    python3 scripts/package/prepare-macos-camera.py "${camera_metadata[@]}"
-    extension="$app/Contents/Library/SystemExtensions/la.instinctual.PLANK.Host.Camera.systemextension"
-    xcrun clang "${PLANK_FILE_FLAGS[@]}" -O2 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new \
-        -Iapps/host/macos/media -Iprotocol/plank-transport/include \
-        apps/host/macos/camera-device/camera-{extension,consumer,signing}.m \
-        apps/host/macos/media/native-camera-{sample,output}.m \
-        -framework Foundation -framework Security -framework CoreMediaIO -framework CoreMedia \
-        -framework CoreVideo -framework VideoToolbox -framework CoreGraphics \
-        -o "$extension/Contents/MacOS/plank-camera"
-    strip -S "$extension/Contents/MacOS/plank-camera"
-    codesign --force --sign "$signing_identity" "${signing_flags[@]}" \
-        --entitlements "$output/camera-extension-entitlements.plist" "$extension"
-    codesign --verify --strict "$extension"
-    codesign --force --sign "$signing_identity" "${signing_flags[@]}" \
-        --entitlements "$output/camera-host-entitlements.plist" --identifier la.instinctual.PLANK.Host "$app"
     codesign --verify --strict "$app"
     driver="$output/PLANK Microphone.driver"
     mkdir -p "$driver/Contents/MacOS"
@@ -280,8 +295,9 @@ shasum -a 256 "$archive" "$output/plank-host"
     strip -S "$driver/Contents/MacOS/plank-output"
     codesign --force --sign "$signing_identity" "${signing_flags[@]}" "$driver"
     codesign --verify --strict "$driver"
-    python3 "$source_root/scripts/test/check-macos-host-permissions.py" --app "$app"
-    for tree in "$app" "$extension" "$output/PLANK Microphone.driver" "$output/PLANK Output.driver"; do
+    python3 "$source_root/scripts/test/check-macos-host-permissions.py" --app "$app" --camera-extension "$camera_variant"
+    python3 "$source_root/scripts/test/check-macos-camera-package.py" "$app" --camera-extension "$camera_variant"
+    for tree in "$app" "$output/PLANK Microphone.driver" "$output/PLANK Output.driver"; do
         python3 "$source_root/scripts/test/check-macos-client-target.py" "$tree" --target "$MACOSX_DEPLOYMENT_TARGET"
     done
     shasum -a 256 "$app/Contents/MacOS/plank-host"

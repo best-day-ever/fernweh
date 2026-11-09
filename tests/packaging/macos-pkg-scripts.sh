@@ -3,6 +3,19 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 source "$root/packaging/host/macos/pkg-common.sh"
+# A camera-free package cannot replace the app needed to deactivate an old extension.
+(
+    camera_extension=0
+    camera_extensions() { echo '0 extension(s)'; }
+    verify_camera_variant
+    camera_extensions() { echo 'la.instinctual.PLANK.Host.Camera'; }
+    if (verify_camera_variant) >/dev/null 2>&1; then exit 1; fi
+    camera_extensions() { return 1; }
+    if (verify_camera_variant) >/dev/null 2>&1; then exit 1; fi
+    camera_extension=1
+    camera_extensions() { fail 'Camera-enabled upgrade must retain its ordinary lifecycle'; }
+    verify_camera_variant
+)
 checks=0
 ok() { checks=$((checks+1)); }
 reject() { if ( "$@" ) >/dev/null 2>&1; then fail "Expected rejection: $*"; fi; ok; }

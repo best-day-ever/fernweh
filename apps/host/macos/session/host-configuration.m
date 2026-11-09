@@ -39,7 +39,8 @@ NSDictionary *PLANKMacParseHostConfiguration(NSData *data) {
         NSString *value = [[line substringFromIndex:separator.location + 1] stringByTrimmingCharactersInSet:spaces];
         key = [NSString stringWithFormat:@"%@.%@", section, key];
         if ((![key isEqual:@"general.host_name"] && ![key isEqual:@"network.port"] &&
-             ![key isEqual:@"network.ping_timeout"] && ![key isEqual:@"general.mirror_host_displays"] && ![key isEqual:@"security.publish_session_user"]) || values[key]) return nil;
+             ![key isEqual:@"network.ping_timeout"] && ![key isEqual:@"general.mirror_host_displays"] && ![key isEqual:@"security.publish_session_user"] && ![key isEqual:@"security.shared_desktop_user"] &&
+             ![key isEqual:@"security.broker_public_key"] && ![key isEqual:@"security.broker_host"]) || values[key]) return nil;
         values[key] = value;
     }
     NSString *name = values[@"general.host_name"] ?: systemHostName();
@@ -56,9 +57,32 @@ NSDictionary *PLANKMacParseHostConfiguration(NSData *data) {
     if (![publishUser isEqual:@"true"] && ![publishUser isEqual:@"false"]) return nil;
     NSString *mirrorHostDisplays = values[@"general.mirror_host_displays"] ?: @"false";
     if (![mirrorHostDisplays isEqual:@"true"] && ![mirrorHostDisplays isEqual:@"false"]) return nil;
+    NSString *sharedUser = values[@"security.shared_desktop_user"];
+    if (sharedUser && (!sharedUser.length || sharedUser.length > 64 ||
+        [sharedUser rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:
+            @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"] invertedSet]].location != NSNotFound ||
+        [sharedUser isEqual:@"root"])) return nil;
+    NSString *brokerKey = values[@"security.broker_public_key"];
+    NSString *brokerHost = values[@"security.broker_host"];
+    if (brokerKey || brokerHost) {
+        NSData *key = [[NSData alloc] initWithBase64EncodedString:brokerKey ?: @"" options:0];
+        if (!sharedUser || !brokerHost.length || brokerHost.length > 253 || key.length != 65 ||
+            ((const unsigned char *)key.bytes)[0] != 4 ||
+            ![[key base64EncodedStringWithOptions:0] isEqual:brokerKey]) return nil;
+        NSArray *labels = [brokerHost componentsSeparatedByString:@"."];
+        if (labels.count < 2) return nil;
+        for (NSString *label in labels) {
+            if (!label.length || label.length > 63 || [label hasPrefix:@"-"] || [label hasSuffix:@"-"] ||
+                [label rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:
+                    @"abcdefghijklmnopqrstuvwxyz0123456789-"] invertedSet]].location != NSNotFound) return nil;
+        }
+    }
     // Listening on all interfaces is product policy, not a second configuration key.
-    return @{@"Address": @"0.0.0.0", @"Name": name, @"Port": @(port.integerValue),
-             @"MirrorHostDisplays": @([mirrorHostDisplays isEqual:@"true"]), @"PingTimeoutMs": @(timeout.integerValue), @"PublishSessionUser": @([publishUser isEqual:@"true"])};
+    NSMutableDictionary *result = [@{@"Address": @"0.0.0.0", @"Name": name, @"Port": @(port.integerValue),
+             @"MirrorHostDisplays": @([mirrorHostDisplays isEqual:@"true"]), @"PingTimeoutMs": @(timeout.integerValue), @"PublishSessionUser": @([publishUser isEqual:@"true"])} mutableCopy];
+    if (sharedUser) result[@"SharedDesktopUser"] = sharedUser;
+    if (brokerKey) { result[@"BrokerPublicKey"] = brokerKey; result[@"BrokerHost"] = brokerHost; }
+    return result;
 }
 
 NSString *PLANKMacReadWorkstationUUID(NSData *data) {

@@ -1,0 +1,72 @@
+PLANK local patch for SDL 3.4.2: preserve posted pointer positions.
+
+Keep upstream c39d772a07b57e841be4f46e81f72b4d3b6316a8's physical mouse
+workaround, while allowing remotely posted absolute input in fullscreen.
+No relative input, other platform, permission or event-routing policy changes.
+
+--- a/src/video/cocoa/SDL_cocoawindow.m
++++ b/src/video/cocoa/SDL_cocoawindow.m
+@@ -1715,11 +1715,37 @@
+     return NO; // not a special area, carry on.
+ }
+
++// PLANK posted-pointer policy begin. Local modification to SDL 3.4.2.
++// A process may post mouse input without moving the desktop's global cursor
++// (remote-control software and accessibility automation do this). Preserve the
++// event's position for those sources; physical events keep SDL's macOS 26
++// fullscreen Spaces workaround. This is coordinate selection, not trust.
++static bool Cocoa_GetPostedMousePosition(NSEvent *event, int windowHeight, float *x, float *y)
++{
++    CGEventRef quartzEvent = event.CGEvent;
++    if (!quartzEvent || CGEventGetIntegerValueField(quartzEvent, kCGEventSourceUnixProcessID) <= 0) {
++        return false;
++    }
++    const NSPoint point = event.locationInWindow;
++    *x = point.x;
++    *y = windowHeight - point.y;
++    return true;
++}
++// PLANK posted-pointer policy end.
++
+ static void Cocoa_SendMouseButtonClicks(SDL_Mouse *mouse, NSEvent *theEvent, SDL_Window *window, Uint8 button, bool down)
+ {
+     SDL_MouseID mouseID = SDL_DEFAULT_MOUSE_ID;
+     //const int clicks = (int)[theEvent clickCount];
+     SDL_Window *focus = SDL_GetKeyboardFocus();
++
++    float posted_x, posted_y;
++    if (!mouse->relative_mode && Cocoa_GetPostedMousePosition(theEvent, window->h, &posted_x, &posted_y)) {
++        // A posted click need not have a preceding motion event. Update SDL's
++        // absolute position before forwarding the button, so both the button
++        // coordinates and subsequent motion use the received event position.
++        SDL_SendMouseMotion(Cocoa_GetEventTimestamp([theEvent timestamp]), window, mouseID, false, posted_x, posted_y);
++    }
+
+     // macOS will send non-left clicks to background windows without raising them, so we need to
+     //  temporarily adjust the mouse position when this happens, as `mouse` will be tracking
+@@ -1910,7 +1936,8 @@
+     // values at the top of the screen. The global mouse position query is still correct, so we'll fall
+     // back to that until this is fixed by Apple. Mouse button events are interestingly not affected.
+     if (@available(macOS 26.0, *)) {
+-        if ([_data.listener isInFullscreenSpace]) {
++        if ([_data.listener isInFullscreenSpace] &&
++            !Cocoa_GetPostedMousePosition(theEvent, window->h, &x, &y)) {
+             int posx = 0, posy = 0;
+             SDL_GetWindowPosition(window, &posx, &posy);
+             SDL_GetGlobalMouseState(&x, &y);
+--- a/src/video/cocoa/SDL_cocoamouse.m
++++ b/src/video/cocoa/SDL_cocoamouse.m
+@@ -495,6 +495,13 @@
+
+ static void Cocoa_ReconcileButtonState(NSEvent *event)
+ {
++    CGEventRef quartzEvent = event.CGEvent;
++    if (quartzEvent && CGEventGetIntegerValueField(quartzEvent, kCGEventSourceUnixProcessID) > 0) {
++        // Posted input has its own down/up sequence and need not change the
++        // global button state. Reconciling it against that state releases a
++        // remotely held button before the first drag event.
++        return;
++    }
+     // Send mouse up events for any buttons that are no longer pressed
+     Uint32 buttons = SDL_GetMouseState(NULL, NULL);
+     if (buttons && ![NSEvent pressedMouseButtons]) {

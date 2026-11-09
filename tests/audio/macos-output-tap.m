@@ -120,7 +120,8 @@ static void exercise(NSArray<NSNumber *> *allowed, BOOL present, BOOL matchingCl
     if (present) {
         assert(created && [created.deviceUID isEqualToString:@PLANK_OUTPUT_DEVICE_UID]);
         assert([created.stream isEqual:@0] && !created.isMixdown && !created.isExclusive);
-        assert(created.isPrivate && !created.isProcessRestoreEnabled && created.muteBehavior == CATapUnmuted);
+        if (@available(macOS 26.0, *)) assert(!created.isProcessRestoreEnabled);
+        assert(created.isPrivate && created.muteBehavior == CATapUnmuted);
         assert([created.processes isEqual:allowed]);
         assert([aggregate[@kAudioAggregateDeviceMainSubDeviceKey] isEqual:@PLANK_OUTPUT_DEVICE_UID]);
         assert([aggregate[@kAudioAggregateDeviceSubDeviceListKey] isEqual:@[@{

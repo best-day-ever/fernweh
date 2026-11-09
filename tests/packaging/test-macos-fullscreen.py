@@ -18,13 +18,13 @@ class NativeFullscreenTests(unittest.TestCase):
 int main() {
     for (int count : {1, 2, 3}) assert(MacDisplayGeometry::useNativeFullscreen(count));
     for (int count : {-1, 0}) assert(!MacDisplayGeometry::useNativeFullscreen(count));
-    assert(MacDisplayGeometry::nativeFullscreenTopInset(0, 15) == 0);
-    assert(MacDisplayGeometry::nativeFullscreenTopInset(32, 15) == 37);
-    assert(MacDisplayGeometry::nativeFullscreenTopInset(38, 15) == 43);
-    assert(MacDisplayGeometry::nativeFullscreenTopInset(38, 26) == 38);
+    assert(MacDisplayGeometry::nativeFullscreenTopInset(0, 39) == 0);
+    assert(MacDisplayGeometry::nativeFullscreenTopInset(32, 37) == 37);
+    assert(MacDisplayGeometry::nativeFullscreenTopInset(38, 43) == 43);
+    assert(MacDisplayGeometry::nativeFullscreenTopInset(38, 39) == 39);
     int measuredHeight = 1329, measuredPixels = 2658;
     assert(MacDisplayGeometry::insetTop(2056, measuredHeight, 4112, measuredPixels,
-        MacDisplayGeometry::nativeFullscreenTopInset(38, 15)));
+        MacDisplayGeometry::nativeFullscreenTopInset(38, 43)));
     assert(measuredHeight == 1286 && measuredPixels == 2572);
     for (int scale : {1, 2}) {
         for (int top : {0, 24, 34, 38}) {

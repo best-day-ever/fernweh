@@ -313,6 +313,45 @@ int main(void) {
         ++desktop.generation; // replacement LoginWindow agent
         CHECK(![sessions authorizeToken:token peer:peer identity:&identity]);
         [sessions revokeAll];
+        // Shared desktop: independent peers behind one relay retain tokens and
+        // streams, and revocation/disconnect affects only its own lease.
+        desktop = (PLANKMacGraphicalIdentity){true, 99, {123, {1}}, PLANKMacScopeDesktop};
+        sessions.sharedDesktop = YES;
+        start = [sessions startForPeer:peer username:@"test"];
+        NSDictionary *sharedReply = respond(sessions, peer, start[@"conversation_id"]);
+        CHECK([sharedReply[@"shared_desktop"] boolValue]);
+        NSString *first = sharedReply[@"session_token"];
+        start = [sessions startForPeer:peer username:@"test"];
+        NSString *sharedSecond = respond(sessions, peer, start[@"conversation_id"])[@"session_token"];
+        CHECK(first && sharedSecond && ![first isEqual:sharedSecond]);
+        CHECK([sessions authorizeToken:first peer:peer identity:&identity]);
+        PLANKMacStreamLease *firstLease = [sessions claimToken:first peer:peer];
+        PLANKMacStreamLease *secondLease = [sessions claimToken:sharedSecond peer:peer];
+        CHECK([sessions activateStreamLease:firstLease]);
+        CHECK([sessions activateStreamLease:secondLease]);
+        CHECK(![sessions claimToken:first peer:peer]);
+        [sessions endStreamLease:firstLease];
+        CHECK([sessions hasStreamLease]);
+        CHECK([sessions authorizeStreamLease:secondLease identity:&identity]);
+        CHECK(![sessions authorizeStreamLease:firstLease identity:&identity]);
+        NSString *broker = [sessions authenticateBrokerAccount:desktop.account peer:peer][@"session_token"];
+        CHECK(broker && [sessions authorizeToken:broker peer:peer identity:&identity]);
+        CHECK(([[sessions authenticateBrokerAccount:(PLANKMacAccountIdentity){456,{1}} peer:peer][@"state"] isEqual:@"denied"]));
+        CHECK(![sessions authorizeTakeoverToken:broker peer:peer lease:secondLease]);
+        [sessions revokeToken:sharedSecond];
+        CHECK(![sessions hasStreamLease]);
+        CHECK([sessions authorizeToken:broker peer:peer identity:&identity]);
+        PLANKMacStreamLease *brokerLease = [sessions claimToken:broker peer:peer];
+        CHECK([sessions activateStreamLease:brokerLease]);
+        ++desktop.generation;
+        CHECK(![sessions authorizeStreamLease:brokerLease identity:&identity]);
+        CHECK(![sessions hasStreamLease]);
+        desktop = (PLANKMacGraphicalIdentity){true, 100, {0, {0}}, PLANKMacScopeSignIn};
+        CHECK([[sessions startForPeer:peer username:@"test"][@"state"] isEqual:@"denied"]);
+        CHECK(([[sessions authenticateBrokerAccount:(PLANKMacAccountIdentity){123,{1}} peer:peer][@"state"] isEqual:@"denied"]));
+        [sessions revokeAll];
+        sessions.sharedDesktop = NO;
+        CHECK(([[sessions authenticateBrokerAccount:(PLANKMacAccountIdentity){123,{1}} peer:peer][@"state"] isEqual:@"denied"]));
         printf("macos_authentication_session=pass checks=%u synthetic_only=1\n", checks);
     }
 }

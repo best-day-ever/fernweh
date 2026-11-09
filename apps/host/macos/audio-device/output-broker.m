@@ -42,9 +42,17 @@ static uint64_t outputNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC);
     if (!peer || peer.closed) return;
     peer.closed = YES; [_peers removeObject:peer];
     BOOL owned = _owner == peer;
-    if (owned) _owner = nil;
+    if (owned) {
+        _owner = nil;
+        for (PLANKOutputPeer *candidate in _peers) {
+            if (candidate.ready && candidate.generation == peer.generation &&
+                candidate.identity.uid == peer.identity.uid && candidate.identity.pid == peer.identity.pid &&
+                candidate.identity.auditSession == peer.identity.auditSession) { _owner = candidate; break; }
+        }
+    }
+    BOOL restore = owned && !_owner;
     dispatch_async(_hal, ^{
-        BOOL restored = !owned || [self->_selection restore];
+        BOOL restored = !restore || [self->_selection restore];
         dispatch_async(self->_queue, ^{
             if (reply) {
                 xpc_dictionary_set_bool(reply, "accepted", restored);
@@ -72,12 +80,22 @@ static uint64_t outputNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC);
     if (!reply) { [self close:peer reply:NULL]; return; }
     if (!xpc_bool_get_value(active)) { [self close:peer reply:reply]; return; }
     if (peer.generation) {
-        if (_owner != peer || !peer.ready) { [self close:peer reply:NULL]; return; }
+        if (!_owner || !peer.ready) { [self close:peer reply:NULL]; return; }
         peer.lastRenew = outputNow();
         xpc_dictionary_set_bool(reply, "accepted", true);
         xpc_connection_send_message(peer.connection, reply); return;
     }
-    if (_owner) { [self close:peer reply:NULL]; return; }
+    if (_owner) {
+        // One admitted desktop worker may own independent stream captures.
+        // Share its route only across the exact kernel identity and generation;
+        // the last surviving owner performs restoration.
+        if (!_owner.ready || _owner.generation != value ||
+            _owner.identity.uid != peer.identity.uid || _owner.identity.pid != peer.identity.pid ||
+            _owner.identity.auditSession != peer.identity.auditSession) { [self close:peer reply:NULL]; return; }
+        peer.generation = value; peer.lastRenew = outputNow(); peer.ready = YES;
+        xpc_dictionary_set_bool(reply, "accepted", true);
+        xpc_connection_send_message(peer.connection, reply); return;
+    }
     peer.generation = value; peer.lastRenew = outputNow(); _owner = peer;
     dispatch_async(_hal, ^{
         BOOL selected = [self->_selection select];
@@ -93,7 +111,7 @@ static uint64_t outputNow(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC);
     });
 }
 - (void)accept:(xpc_connection_t)connection {
-    if (_stopped || _peers.count >= 8 ||
+    if (_stopped || _peers.count >= 32 ||
         xpc_connection_set_peer_code_signing_requirement(connection, _requirement.UTF8String)) {
         xpc_connection_set_event_handler(connection, ^(xpc_object_t message) { (void)message; });
         xpc_connection_cancel(connection); xpc_connection_activate(connection); return;

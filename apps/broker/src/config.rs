@@ -23,6 +23,9 @@ pub struct Config {
     pub ldap: LdapConfig,
     #[serde(default)]
     pub hosts: HostsConfig,
+    /// Explicit broker-trusted admission for unjoined, shared macOS desktops.
+    #[serde(default)]
+    pub mac_admission: Option<crate::mac_admission::MacAdmissionConfig>,
     #[serde(default)]
     pub relay: RelayConfig,
     #[serde(default)]
@@ -466,6 +469,15 @@ impl Config {
         Self::parse(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
+    /// The relay shares the policy file but must never open the API service's
+    /// private signing key. Broker startup and check-config use `load` instead.
+    pub fn load_for_relay(path: &Path) -> Result<Config> {
+        let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let cfg: Config = toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        cfg.validate_policy()?;
+        Ok(cfg)
+    }
+
     pub fn parse(text: &str) -> Result<Config> {
         let cfg: Config = toml::from_str(text)?;
         cfg.validate()?;
@@ -473,6 +485,17 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.validate_policy()?;
+        if let Some(mac) = &self.mac_admission {
+            mac.validate()?;
+        }
+        Ok(())
+    }
+
+    fn validate_policy(&self) -> Result<()> {
+        if let Some(mac) = &self.mac_admission {
+            mac.validate_policy()?;
+        }
         if let Some(diagnostics) = &self.diagnostics {
             if !diagnostics.directory.is_absolute() || diagnostics.enabled_until_unix == 0 {
                 bail!("diagnostics requires an absolute directory and an explicit beta expiry");

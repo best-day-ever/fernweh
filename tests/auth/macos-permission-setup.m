@@ -164,6 +164,24 @@ static void testPresentation(void) {
 int main(void) {
     @autoreleasepool {
         [[TestApplication sharedApplication] setActivationPolicy:NSApplicationActivationPolicyProhibited];
+        if (!PLANK_MACOS_CAMERA_EXTENSION) {
+            PLANKPermissionSetup *view = [[PLANKPermissionSetup alloc] initWithVersion:@"camera-disabled"];
+            [view refresh];
+            assert(rowContains(view, @"camera", @"Not included in this build"));
+            assert(!view.rows[@"camera"].action.enabled && !cameraReply);
+            [view activateCamera];
+            assert(cameraActivations == 0);
+            [view requestPermissions];
+            assert(permissionRequests == 3 && !cameraReply);
+            screen = accessibility = events = devices = YES;
+            [view refresh];
+            assert(rowContains(view, @"microphone", @"Loaded"));
+            assert(rowContains(view, @"output", @"Loaded"));
+            assert(audioStarts == 1 && cameraActivations == 0);
+            view.closing = YES;
+            puts("Camera-disabled setup: unavailable camera, unchanged desktop/audio permissions passed");
+            return 0;
+        }
         testPresentation();
         testDisplayChanges();
         PLANKPermissionSetup *view = [[PLANKPermissionSetup alloc] initWithVersion:@"1.2.3-test"];

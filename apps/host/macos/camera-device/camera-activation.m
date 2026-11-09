@@ -94,7 +94,7 @@ void PLANKMacRemoveCameraExtension(void (^completion)(PLANKCameraRemovalResult))
 }
 void PLANKMacRequestCameraExtension(BOOL enable, void (^completion)(BOOL)) {
     dispatch_assert_queue(dispatch_get_main_queue());
-    if (pending || !completion || geteuid() == 0) { if (completion) completion(NO); return; }
+    if (!PLANK_MACOS_CAMERA_EXTENSION || pending || !completion || geteuid() == 0) { if (completion) completion(NO); return; }
     pending = [PLANKCameraActivation new]; pending.completion = completion;
     OSSystemExtensionRequest *request = enable ?
         [OSSystemExtensionRequest activationRequestForExtension:@PLANK_CAMERA_EXTENSION_ID queue:dispatch_get_main_queue()] :
