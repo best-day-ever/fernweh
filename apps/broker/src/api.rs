@@ -74,7 +74,12 @@ fn bearer(h: &HeaderMap) -> Result<&str, ApiError> {
 
 /// Bearer plus the optional device proof (§14.2) of this request. Malformed
 /// proof headers count as absent: a bound session then refuses the request.
-fn device_bearer<'a>(h: &'a HeaderMap, method: &str, path: &str, body: &[u8]) -> Result<Bearer<'a>, ApiError> {
+pub(crate) fn device_bearer<'a>(
+    h: &'a HeaderMap,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> Result<Bearer<'a>, ApiError> {
     let token = bearer(h)?;
     let header = |name: &str| h.get(name).and_then(|v| v.to_str().ok()).map(str::trim);
     let proof = match (header("x-plank-device-time"), header("x-plank-device-proof")) {
@@ -472,6 +477,10 @@ pub fn router(b: Arc<Broker>) -> Router {
         .route("/v1/client-updates/windows-x64/{filename}", get(crate::updates::windows_download))
         .route("/v1/auth/start", post(auth_start))
         .route("/v1/auth/respond", post(auth_respond))
+        .route(
+            "/v1/diagnostics",
+            post(crate::diagnostics::submit).layer(DefaultBodyLimit::max(crate::diagnostics::MAX_BODY)),
+        )
         .route("/v1/hosts", get(hosts))
         .route("/v1/hosts/{id}/connect", post(connect))
         .route("/v1/hosts/{id}/keepalive", post(keepalive))

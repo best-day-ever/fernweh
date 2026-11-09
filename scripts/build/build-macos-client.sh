@@ -51,6 +51,7 @@ run_shared_client_test() {
     )
 }
 # These small policy/network fixtures need no application objects; fail early.
+run_shared_client_test betadiagnostics
 run_shared_client_test plankclientpolicy
 run_shared_client_test internetconnectivity
 run_shared_client_test macqtsession
