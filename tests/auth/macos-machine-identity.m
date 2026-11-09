@@ -28,6 +28,62 @@ static NSData *fixtureRead(NSString *directory, NSString *name) {
     return data;
 }
 
+static BOOL installFixture(NSDictionary *issued, NSString *directory, NSData *key) {
+    NSString *stage = stageIn(directory);
+    CHECK(stage);
+    BOOL ok = installWorkerIdentity(issued, directory, stage, key, NSDate.date);
+    removeStage(stage);
+    return ok;
+}
+
+static void restartTests(NSString *authorityDirectory, NSString *desktop, NSDictionary *issued) {
+    run(authorityDirectory, @[@"rsa", @"-in", @"worker.key", @"-RSAPublicKey_out", @"-outform", @"DER", @"-out", @"worker-public.der"]);
+    NSData *key = fixtureRead(authorityDirectory, @"worker-public.der");
+    NSData *authority = issued[@"authority"];
+    CHECK(validWorkerCertificate(issued[@"der"], authority, key, NSDate.date));
+    // The fixture authority lives 730 days; its worker leaf lives 365. Check
+    // actual leaf expiry independently of the authority's validity.
+    CHECK(!validWorkerCertificate(issued[@"der"], authority, key,
+        [NSDate dateWithTimeIntervalSinceNow:366 * 24 * 60 * 60]));
+    CHECK(!validWorkerCertificate(issued[@"der"], authority, key,
+        [NSDate dateWithTimeIntervalSinceNow:-24 * 60 * 60]));
+    CHECK(!validWorkerCertificate(issued[@"der"], authority, [@"wrong-key" dataUsingEncoding:NSUTF8StringEncoding], NSDate.date));
+    CHECK(!validWorkerCertificate(issued[@"der"], [@"wrong-authority" dataUsingEncoding:NSUTF8StringEncoding], key, NSDate.date));
+    CHECK(installFixture(issued, desktop, key));
+    CHECK([fixtureRead(desktop, @"cert.der") isEqual:issued[@"der"]]);
+    NSData *originalPEM = fixtureRead(desktop, @"cert.pem"), *originalDER = fixtureRead(desktop, @"cert.der");
+    NSDictionary *newIssue = PLANKMacIssueWorkerIdentity(fixtureRead(authorityDirectory, @"worker.csr"), authorityDirectory);
+    CHECK(newIssue && ![newIssue[@"der"] isEqual:originalDER]);
+    // Simulate repeated launches with the real newly issued response: the
+    // installed leaf and PEM must remain byte-for-byte unchanged each time.
+    for (unsigned restart = 0; restart < 3; ++restart) {
+        CHECK(installFixture(newIssue, desktop, key));
+        CHECK([fixtureRead(desktop, @"cert.der") isEqual:originalDER]);
+        CHECK([fixtureRead(desktop, @"cert.pem") isEqual:originalPEM]);
+    }
+    NSMutableDictionary *badIssue = [newIssue mutableCopy];
+    badIssue[@"authority"] = [@"not a certificate" dataUsingEncoding:NSUTF8StringEncoding];
+    CHECK(!installFixture(badIssue, desktop, key));
+    CHECK(!installFixture(newIssue, desktop, [@"another key" dataUsingEncoding:NSUTF8StringEncoding]));
+    CHECK([fixtureRead(desktop, @"cert.der") isEqual:originalDER]);
+    // A parseable, same-key self-signed leaf must not be reused: only the
+    // currently authenticated machine authority can authorize the chain.
+    run(authorityDirectory, @[@"x509", @"-req", @"-in", @"worker.csr", @"-signkey", @"worker.key",
+        @"-days", @"365", @"-out", @"self.pem"]);
+    run(authorityDirectory, @[@"x509", @"-in", @"self.pem", @"-outform", @"DER", @"-out", @"self.der"]);
+    NSData *selfDER = fixtureRead(authorityDirectory, @"self.der");
+    CHECK(!validWorkerCertificate(selfDER, authority, key, NSDate.date));
+    CHECK([selfDER writeToFile:[desktop stringByAppendingPathComponent:@"cert.der"] atomically:NO]);
+    CHECK([fixtureRead(authorityDirectory, @"self.pem") writeToFile:[desktop stringByAppendingPathComponent:@"cert.pem"] atomically:NO]);
+    CHECK(installFixture(newIssue, desktop, key));
+    CHECK([fixtureRead(desktop, @"cert.der") isEqual:newIssue[@"der"]]);
+    // An interrupted PEM/DER publication cannot make the wrong pair reusable.
+    CHECK([originalPEM writeToFile:[desktop stringByAppendingPathComponent:@"cert.pem"] atomically:NO]);
+    CHECK(installFixture(newIssue, desktop, key));
+    CHECK(certificatePEMMatches(fixtureRead(desktop, @"cert.pem"), fixtureRead(desktop, @"cert.der")));
+    puts("macos_identity_restart_leaf=pass");
+}
+
 static NSTask *delayedTask(NSString *executable, NSString *delay) {
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:executable];
@@ -82,13 +138,16 @@ int main(int argc, const char **argv) { @autoreleasepool {
     CHECK(canonical);
     directory = [NSString stringWithUTF8String:canonical];
     free(canonical);
-    run(directory, @[@"req", @"-new", @"-x509", @"-newkey", @"rsa:3072", @"-nodes", @"-days", @"2",
+    run(directory, @[@"req", @"-new", @"-x509", @"-newkey", @"rsa:3072", @"-nodes", @"-days", @"730",
         @"-sha256", @"-subj", @"/CN=PLANK Host Machine", @"-addext", @"subjectAltName=DNS:plank-host",
         @"-addext", @"basicConstraints=critical,CA:TRUE,pathlen:0", @"-addext", @"keyUsage=critical,digitalSignature,keyCertSign",
         @"-keyout", @"key.pem", @"-out", @"cert.pem"]);
     run(directory, @[@"x509", @"-in", @"cert.pem", @"-outform", @"DER", @"-out", @"cert.der"]);
     CHECK(!chmod([directory stringByAppendingPathComponent:@"cert.der"].fileSystemRepresentation, 0600));
     NSData *machineKey = fixtureRead(directory, @"key.pem"), *authority = fixtureRead(directory, @"cert.der");
+    NSString *desktop = [directory stringByAppendingPathComponent:@"desktop"];
+    CHECK(!mkdir(desktop.fileSystemRepresentation, 0700));
+    NSData *previousLeaf = nil;
     for (unsigned worker = 0; worker < 2; ++worker) {
         run(directory, @[@"req", @"-new", @"-newkey", @"rsa:3072", @"-nodes", @"-sha256",
             @"-subj", @"/CN=PLANK Host", @"-addext", @"basicConstraints=critical,CA:TRUE",
@@ -110,6 +169,12 @@ int main(int argc, const char **argv) { @autoreleasepool {
         CFRelease(trust); CFRelease(policy); CFRelease(root); CFRelease(leaf);
         CHECK([fixtureRead(directory, @"key.pem") isEqual:machineKey]);
         CHECK(!issued[@"key"] && !issued[@"path"]);
+        restartTests(directory, desktop, issued);
+        NSData *installed = fixtureRead(desktop, @"cert.der");
+        // Second iteration rotates the worker key. A matching authority alone
+        // must not preserve a leaf bound to the previous worker key.
+        CHECK(!previousLeaf || ![previousLeaf isEqual:installed]);
+        previousLeaf = installed;
         NSArray *remaining = [files contentsOfDirectoryAtPath:directory error:NULL];
         for (NSString *name in remaining) CHECK(![name hasPrefix:@".certificate-"]);
     }

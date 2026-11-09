@@ -221,7 +221,10 @@ static BOOL setupMoveIsUserDrag(NSWindow *window, NSWindow *eventWindow,
         [self setRow:key text:available ? @"Loaded" : @"Not loaded" verified:available required:NO];
         _rows[key].status.toolTip = @"If installed but unavailable, restart the Mac to load the audio component.";
     }
-    if (!_checkingCamera && !_activatingCamera) {
+    if (!PLANK_MACOS_CAMERA_EXTENSION) {
+        [self setRow:@"camera" text:@"Not included in this build" verified:NO required:NO];
+        _rows[@"camera"].action.enabled = NO;
+    } else if (!_checkingCamera && !_activatingCamera) {
         _checkingCamera = YES;
         _rows[@"camera"].action.enabled = NO;
         __weak typeof(self) weakSelf = self;
@@ -267,7 +270,7 @@ static BOOL setupMoveIsUserDrag(NSWindow *window, NSWindow *eventWindow,
     [self refresh];
 }
 - (void)activateCamera {
-    if (_closing || _checkingCamera || _activatingCamera) return;
+    if (!PLANK_MACOS_CAMERA_EXTENSION || _closing || _checkingCamera || _activatingCamera) return;
     _reconciledCamera = YES;
     _activatingCamera = YES;
     _rows[@"camera"].action.enabled = NO;

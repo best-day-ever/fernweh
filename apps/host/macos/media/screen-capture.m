@@ -134,7 +134,7 @@
 - (void)createDesktopAudioTap {
     __weak typeof(self) weakSelf = self;
     _audioReady = NO;
-    _audioTap = [[PLANKMacAudioTap alloc] initWithQueue:_queue sample:^BOOL(CMSampleBufferRef sample) {
+    _audioTap = [[PLANKMacAudioTap alloc] initWithQueue:_queue sharedDesktop:self.sharedDesktopAudio sample:^BOOL(CMSampleBufferRef sample) {
         typeof(self) capture = weakSelf;
         return capture && !capture->_stopping && [capture->_audioEncoder encodeSample:sample];
     } failed:^{

@@ -48,7 +48,7 @@ def collect(args):
     if args.product == 'host' and args.platform == 'macos':
         # Match plank_load_macos_host_package_version. Historical macos-27
         # artifacts retain their original identity when transferred/re-collected.
-        if args.target_os not in ('macos-27', 'macos-27.0', 'macos-26.7'):
+        if args.target_os not in ('macos-27', 'macos-27.0', 'macos-26.7', 'macos-15.4'):
             raise ValueError('unsupported macOS Host package target')
         # Mainline now targets 26.7; retain original target metadata when
         # transferring historical 27-only packages. Conflicting provenance

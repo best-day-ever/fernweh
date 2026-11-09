@@ -78,9 +78,12 @@ int main(void) { @autoreleasepool {
     assert(request(owner, message(7, true), queue) && atomic_load(&selections) == 1);
     assert(request(owner, message(7, true), queue) && atomic_load(&selections) == 1);
     xpc_connection_t contender = connectPeer(endpoint, queue);
-    assert(!request(contender, message(7, true), queue));
+    assert(request(contender, message(7, true), queue));
     assert(!atomic_load(&restorations));
     assert(request(owner, message(7, false), queue));
+    assert(!atomic_load(&restorations));
+    assert(request(contender, message(7, true), queue));
+    assert(request(contender, message(7, false), queue));
     assert(atomic_load(&restorations) == 1);
     xpc_connection_t replacement = connectPeer(endpoint, queue);
     assert(request(replacement, message(7, true), queue));

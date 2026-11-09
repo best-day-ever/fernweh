@@ -139,6 +139,15 @@
                     [value[@"username"] isKindOfClass:NSString.class]) {
                     reply = [_sessions startForPeer:request.peer username:value[@"username"]];
                     status = 200;
+                } else if ([path isEqual:@"/plank/auth/start"] && [value count] == 2 &&
+                    [value[@"username"] isKindOfClass:NSString.class] &&
+                    [value[@"broker_token"] isKindOfClass:NSString.class] && self.verifyBrokerAdmission) {
+                    PLANKMacAccountIdentity localAccount = {0};
+                    status = 200;
+                    if (self.verifyBrokerAdmission(value[@"broker_token"], value[@"username"], &localAccount) &&
+                        !request.finished) {
+                        reply = [_sessions authenticateBrokerAccount:localAccount peer:request.peer];
+                    }
                 } else if ([path isEqual:@"/plank/auth/respond"] && [value count] == 2 &&
                     [value[@"conversation_id"] isKindOfClass:NSString.class] &&
                     [value[@"responses"] isKindOfClass:NSArray.class] && [value[@"responses"] count] == 1 &&

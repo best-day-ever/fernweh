@@ -125,3 +125,36 @@ check normal QUIC disconnect, failed preparation and the production 60-second
 abandoned-prepare deadline.
 Existing native session tests check the post-drain notification and all retained
 teardown cases. These fixtures never qualify physical mirroring or restoration.
+
+## Shared local desktop mode
+
+Administrators may set `[security] shared_desktop_user` to an existing local
+short account name. That account must already own the graphical desktop; the
+Host does not log it in, switch users, or expose LoginWindow in this mode.
+Every connection still authenticates and receives its own peer-bound one-use
+transport token. Up to 32 streams can share the desktop, including clients
+behind the same relay address, without taking over another connection.
+
+The first display preparation selects the virtual workspace. Later clients
+receive its existing size, scale and encoding profile and must adopt it after
+authentication returns `shared_desktop: true`. They cannot resize a live shared
+workspace. The last stream releases any display-mirroring lease and the shared
+PLANK Output routing lease. Each stream has independent capture, encoder,
+transport, desktop audio tap and input lifetime. Shared audio uses at most 32
+independent taps with the existing local-user process allowlist; pending consent
+and deferred HAL cleanup keep their reservation until cleanup completes.
+Clipboard changes intentionally affect the common
+desktop. Local microphone and camera devices still have one active producer;
+shared reverse-media mixing is not implemented.
+
+Optional `broker_public_key` and `broker_host` configuration provisions a public
+verification key and canonical host audience for shared-desktop admission.
+Both require `shared_desktop_user`. Capability signature verification and policy
+remain required before issuing a token for the configured local account; the
+configuration itself does not grant remote access. Omission keeps the existing
+exclusive password-authenticated Host behavior.
+
+The synthetic authentication, output-routing and multi-client runtime tests
+exercise lease separation, same-relay setup, later joins, disconnect/rejoin and
+last-disconnect restoration. They do not qualify real ScreenCaptureKit pixels,
+audio, permissions, simultaneous physical input or display behavior.

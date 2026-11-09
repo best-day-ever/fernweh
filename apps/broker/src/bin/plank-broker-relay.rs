@@ -44,7 +44,7 @@ fn uid_of(user: &str) -> Result<u32> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let cfg = Config::load(&cli.config)?;
+    let cfg = Config::load_for_relay(&cli.config)?;
     let core = RelayCore::new(
         &cfg.relay,
         cfg.hosts.port,

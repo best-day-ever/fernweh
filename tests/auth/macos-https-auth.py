@@ -206,7 +206,7 @@ def preview(tls, port, token, topology, receiver, media, seconds=3):
         # A transient display failure retains this authorization, without a
         # second password exchange. Invalid requests above still consume it.
         status, resized = launch(mode, token, "/plank/display")
-        assert status == 200 and resized["capture"]["width"] == 1920
+        assert status == 200 and resized["capture"]["width"] == 1920, (status, resized)
         assert resized["capture"]["logical_bounds"]["width"] == 1920
         retina = json.loads((Path(__file__).resolve().parents[1] / "protocol/macos-display-v3.json").read_text())
         status, matched = launch(retina, token, "/plank/display")
@@ -269,7 +269,7 @@ def preview(tls, port, token, topology, receiver, media, seconds=3):
             replacement, original = authenticate(tls, port, "synthetic", "test")
             assert original == topology
             status, resized = launch(dict(change, takeover_session_id=session_id), replacement, "/plank/display")
-            assert status == 200 and resized["capture"]["width"] == 1920
+            assert status == 200 and resized["capture"]["width"] == 1920, (status, resized)
             assert old.wait(timeout=7) == 0
             assert old.stdout.read() == b"takeover_receiver_terminal=1\n"
             # A fresh login from the displaced peer cannot invalidate the
@@ -393,10 +393,10 @@ def aqua(executable, config, receiver=None, seconds=3):
 
 
 def synthetic(executable, config, receiver=None):
-    with tempfile.TemporaryDirectory(prefix="plank-https-qualification-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="plank-https-qualification-") as temporary, tempfile.TemporaryFile() as server_log:
         cert = create_identity(temporary, config)
         process = subprocess.Popen([str(executable), temporary], stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True)
+                                   stderr=server_log, text=True)
         try:
             if not select.select([process.stdout], [], [], 10)[0]:
                 raise AssertionError("HTTPS listener readiness timed out")
@@ -469,7 +469,7 @@ def synthetic(executable, config, receiver=None):
 
 def machine_authority_chain(executable, config):
     """Exercise the real Network.framework chain, without installed Host state."""
-    with tempfile.TemporaryDirectory(prefix="plank-https-chain-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="plank-https-chain-") as temporary, tempfile.TemporaryFile() as server_log:
         stage = Path(temporary)
         root = stage / "machine"
         root.mkdir(mode=0o700)
@@ -486,7 +486,7 @@ def machine_authority_chain(executable, config):
                 "-set_serial", "123", "-days", "1", "-sha256", "-extfile", "leaf.cnf", "-out", "cert.pem"])
         crypto(["x509", "-in", "cert.pem", "-outform", "DER", "-out", "cert.der"])
         process = subprocess.Popen([str(executable), temporary], stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True)
+                                   stderr=server_log, text=True)
         try:
             assert select.select([process.stdout], [], [], 10)[0], "Chain listener readiness timed out"
             match = re.fullmatch(r"macos_https_auth_ready port=(\d+) desktop_active=1\n", process.stdout.readline())

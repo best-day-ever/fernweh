@@ -43,6 +43,13 @@ echo "$MACOSX_DEPLOYMENT_TARGET"
         self.assertEqual(self.select('27.0').stdout.strip(), '27.0')
         self.assertNotEqual(self.select('27.0', system='26.7').returncode, 0)
 
+    def test_explicit_shared_desktop_canary_floor(self):
+        for system in ('15.4', '15.7.4', '26.7', '27.0'):
+            result = self.select('15.4', system=system)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), '15.4')
+        self.assertNotEqual(self.select('15.4', system='15.3').returncode, 0)
+
     def test_rejects_older_os_sdk_architecture_and_malformed_targets(self):
         for arguments in (
             {'system': '26.6'}, {'system': '15.7'}, {'system': 'unknown'},
@@ -61,8 +68,8 @@ echo "$MACOSX_DEPLOYMENT_TARGET"
 
     def test_installer_uses_sealed_floor_and_rejects_unknown_values(self):
         template = (ROOT / 'packaging/host/macos/pkg-common.sh').read_text()
-        for minimum in ('26.7', '27.0', 'unknown'):
-            for system in ('26.6', '26.7', '26.7.1', '27.0'):
+        for minimum in ('15.4', '26.7', '27.0', 'unknown'):
+            for system in ('15.3', '15.4', '15.7.4', '26.6', '26.7', '26.7.1', '27.0'):
                 for arch in ('arm64', 'x86_64'):
                     # Source pure policy only; never call preflight or installer.
                     with tempfile.TemporaryDirectory() as temporary:
@@ -81,7 +88,7 @@ echo "$MACOSX_DEPLOYMENT_TARGET"
     def test_camera_metadata_matches_candidate_without_changing_entitlements(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
-            for minimum in ('default', '26.7', '27.0'):
+            for minimum in ('default', '15.4', '26.7', '27.0'):
                 output = base / minimum
                 output.mkdir()
                 app = output / 'Host.app'

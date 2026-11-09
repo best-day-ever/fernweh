@@ -3,6 +3,7 @@
 #import <Foundation/Foundation.h>
 #import "fixed-capture.h"
 #include <math.h>
+#include "../camera-device/camera-build.h"
 
 static inline NSArray<NSString *> *PLANKMacMediaNames(void) {
     return @[@"desktop", @"audio", @"input", @"clipboard", @"microphone", @"camera"];
@@ -21,7 +22,7 @@ static inline NSDictionary *PLANKMacMediaProfile(NSString *name, NSString *mode)
     if ([name isEqual:@"clipboard"]) return @{@"schema_version": @1};
     if ([name isEqual:@"microphone"]) return @{@"schema_version": @2, @"codec": @"opus",
         @"sample_rate": @48000, @"channels": @2, @"packet_duration_ms": @10};
-    if ([name isEqual:@"camera"]) return @{@"schema_version": @1, @"codecs": @[@"h264-annex-b", @"mjpeg"]};
+    if ([name isEqual:@"camera"] && PLANK_MACOS_CAMERA_EXTENSION) return @{@"schema_version": @1, @"codecs": @[@"h264-annex-b", @"mjpeg"]};
     return nil;
 }
 static inline unsigned PLANKMacMicrophoneSchema(NSDictionary *request) {

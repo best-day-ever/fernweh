@@ -29,6 +29,10 @@ typedef NSDictionary *(^PLANKMacPrepareDisplayHandler)(NSDictionary *request, NS
 // Read-only, authenticated feature negotiation before display/stream setup.
 @property(copy) NSDictionary *(^negotiateMedia)(NSDictionary *request, unsigned *status);
 @property(copy) BOOL (^recoverTopology)(BOOL (^valid)(void));
+// Administrator-pinned broker proof for a shared local desktop. Verification
+// consumes its nonce; the sessions layer independently enforces desktop scope.
+@property(copy) BOOL (^verifyBrokerAdmission)(NSString *token, NSString *subject,
+                                            PLANKMacAccountIdentity *identity);
 - (instancetype)initWithIdentity:(SecIdentityRef)identity authority:(NSData *)authority
                        sessions:(PLANKMacAuthenticationSession *)sessions
                     information:(PLANKMacServerInformation *)information

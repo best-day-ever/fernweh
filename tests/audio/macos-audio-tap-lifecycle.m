@@ -36,8 +36,8 @@
 static void waitFor(dispatch_semaphore_t signal) {
     assert(!dispatch_semaphore_wait(signal, dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC)));
 }
-static TestTap *makeTap(dispatch_queue_t owner) {
-    TestTap *tap = [[TestTap alloc] initWithQueue:owner sample:^BOOL(CMSampleBufferRef sample) {
+static TestTap *makeConfiguredTap(dispatch_queue_t owner, BOOL shared) {
+    TestTap *tap = [[TestTap alloc] initWithQueue:owner sharedDesktop:shared sample:^BOOL(CMSampleBufferRef sample) {
         (void)sample; assert(0); return NO;
     } failed:^{ assert(0); }];
     assert(tap);
@@ -48,6 +48,14 @@ static TestTap *makeTap(dispatch_queue_t owner) {
     atomic_init(&tap->activations, 0); atomic_init(&tap->callbacks, 0); atomic_init(&tap->stops, 0);
     tap->permitted = YES;
     return tap;
+}
+static TestTap *makeTap(dispatch_queue_t owner) { return makeConfiguredTap(owner, NO); }
+static void drainTap(TestTap *tap, dispatch_queue_t owner) {
+    dispatch_semaphore_t stopped = dispatch_semaphore_create(0);
+    dispatch_sync(owner, ^{ [tap stopWithCompletion:^{ dispatch_semaphore_signal(stopped); }]; });
+    waitFor(stopped); waitFor(tap->destroyed);
+    dispatch_sync((dispatch_queue_t)[tap valueForKey:@"control"], ^{});
+    dispatch_sync(owner, ^{});
 }
 // Destruction's signal precedes the real class releasing its global slot.
 // Starting another tap in the same owner turn as stop completion is a stronger
@@ -139,6 +147,64 @@ int main(void) {
             assert(atomic_load(&race->activations) == activationsAtStop); // never start after stopped
             assert(atomic_load(&race->callbacks) <= 1);
         }
+        // Every shared client activates independently. Removing one cannot
+        // cancel another's tap; an exclusive tap cannot enter the shared set.
+        NSMutableArray<TestTap *> *shared = [NSMutableArray array];
+        for (unsigned i = 0; i < 32; ++i) {
+            TestTap *tap = makeConfiguredTap(owner, YES);
+            dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+            dispatch_sync(owner, ^{
+                [tap startWithCompletion:^(BOOL value) { assert(value); dispatch_semaphore_signal(ready); }];
+            });
+            waitFor(tap->entered); dispatch_semaphore_signal(tap->releasePrepare); waitFor(ready);
+            [shared addObject:tap];
+        }
+        for (unsigned mode = 0; mode < 2; ++mode) {
+            TestTap *overflow = makeConfiguredTap(owner, mode == 1);
+            dispatch_sync(owner, ^{
+                [overflow startWithCompletion:^(BOOL ready) { assert(!ready); atomic_fetch_add(&overflow->callbacks, 1); }];
+            });
+            assert(atomic_load(&overflow->callbacks) == 1 && !atomic_load(&overflow->activations));
+            drainTap(overflow, owner);
+        }
+        TestTap *departing = shared[0]; departing->holdDestroy = YES;
+        dispatch_semaphore_t departed = dispatch_semaphore_create(0);
+        dispatch_sync(owner, ^{ [departing stopWithCompletion:^{ dispatch_semaphore_signal(departed); }]; });
+        waitFor(departing->destroyed);
+        TestTap *blocked = makeConfiguredTap(owner, YES);
+        dispatch_sync(owner, ^{
+            [blocked startWithCompletion:^(BOOL ready) { assert(!ready); atomic_fetch_add(&blocked->callbacks, 1); }];
+        });
+        assert(atomic_load(&blocked->callbacks) == 1); // cleanup still owns slot
+        drainTap(blocked, owner);
+        dispatch_semaphore_signal(departing->releaseDestroy); waitFor(departed);
+        for (NSUInteger i = 1; i < shared.count; ++i) {
+            TestTap *survivor = shared[i];
+            assert(atomic_load(&survivor->activations) == 1);
+            assert(![[survivor valueForKey:@"stopped"] boolValue]);
+        }
+        TestTap *replacement = makeConfiguredTap(owner, YES);
+        dispatch_semaphore_t replacementReady = dispatch_semaphore_create(0);
+        dispatch_sync(owner, ^{
+            [replacement startWithCompletion:^(BOOL ready) { assert(ready); dispatch_semaphore_signal(replacementReady); }];
+        });
+        waitFor(replacement->entered); dispatch_semaphore_signal(replacement->releasePrepare); waitFor(replacementReady);
+        drainTap(replacement, owner);
+        for (NSUInteger i = 1; i < shared.count; ++i) drainTap(shared[i], owner);
+        // The final shared release restores exclusive admission.
+        TestTap *exclusive = makeTap(owner);
+        dispatch_semaphore_t exclusiveReady = dispatch_semaphore_create(0);
+        dispatch_sync(owner, ^{
+            [exclusive startWithCompletion:^(BOOL ready) { assert(ready); dispatch_semaphore_signal(exclusiveReady); }];
+        });
+        waitFor(exclusive->entered); dispatch_semaphore_signal(exclusive->releasePrepare); waitFor(exclusiveReady);
+        TestTap *mixed = makeConfiguredTap(owner, YES);
+        dispatch_sync(owner, ^{
+            [mixed startWithCompletion:^(BOOL ready) { assert(!ready); atomic_fetch_add(&mixed->callbacks, 1); }];
+        });
+        assert(atomic_load(&mixed->callbacks) == 1);
+        drainTap(mixed, owner); drainTap(exclusive, owner);
+        puts("shared_audio_taps_pass limit=32 overflow=1 independent_stop=1 cleanup_reservation=1 rejoin=1 exclusive_isolation=1 real_hal=0");
         puts("audio_tap_lifecycle_pass pending_cancel=1 late_consent=1 bounded_reconnect=1 active_drain=1 denied=1 races=100 real_hal=0");
     }
 }

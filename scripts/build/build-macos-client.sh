@@ -27,7 +27,12 @@ version=$PLANK_PACKAGE_VERSION
 client="$source_root/apps/client"
 test "$(qmake -query QT_VERSION)" = 6.10.2
 test "$(rustc --version | awk '{print $2}')" = 1.89.0
+# A restored dependency cache may predate the posted-pointer fix. Rebuild SDL
+# alone when its patch, target or installed binary no longer matches the stamp.
+bash "$source_root/scripts/build/ensure-macos-client-sdl.sh" "$source_root"
+python3 "$source_root/tests/packaging/test-macos-sdl-posted-pointer.py" "$PLANK_MAC_CLIENT_DEPS/src/SDL3-3.4.2"
 python3 "$source_root/tests/packaging/test-macos-client-target.py"
+python3 "$source_root/tests/packaging/test-macos-client-version-cache.py"
 python3 "$source_root/tests/packaging/test-macos-app-icons.py"
 # BDE ships a signed DMG with a broker update feed, not upstream's .pkg
 # installer, so its install/uninstall package gates do not apply here.
@@ -96,14 +101,17 @@ qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
     QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
     PLANK_VERSION="$version" PLANK_MAC_CLIENT_MIN_MACOS="$PLANK_MAC_CLIENT_MIN_MACOS" PLANK_MACOS_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
     "QMAKE_CFLAGS+=$PLANK_C_FILE_FLAGS" "QMAKE_CXXFLAGS+=$PLANK_C_FILE_FLAGS"
+source "$source_root/scripts/build/macos-client-version-cache.sh"
+plank_macos_client_prepare_version "$build" "$version"
 make -j"${PLANK_BUILD_JOBS:-8}" release
+plank_macos_client_record_version "$build" "$version"
 # Touch ID sign-in helper (bde-linux docs/plank-broker.md 13.4): bundled by
 # app.pro; prove its signature format with a software key (no Touch ID).
 passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
 test -x "$passkey_helper"
 bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
+for suite in hostpolling clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
     run_shared_client_test "$suite"
 done
 # Dummy input only: no microphone permission or physical recording on builders.

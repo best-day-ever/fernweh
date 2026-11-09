@@ -1812,6 +1812,21 @@ mod device_sessions {
     }
 
     #[tokio::test]
+    async fn mac_admission_requires_mfa_and_fresh_device_proof() {
+        let key = crate::mac_admission::tests::TestKey::new(WS1);
+        let h = harness_cfg(kdc(), |cfg| { cfg.mac_admission = Some(key.config.clone()); });
+        assert!(h.login_from(IP, "anna", "secret", "wrong").await.is_err());
+        let d = TestDevice::new();
+        let token = h.bound_login(&d).await.session_token;
+        assert_eq!(h.b.connect(IP, &token, WS1, "e").await.unwrap_err(), ApiError::Unauthorized);
+        let path = format!("/v1/hosts/{WS1}/connect");
+        let bearer = Bearer { token: &token, proof: Some(proof(&d, "POST", &path, h.now(), &token, b"{}")) };
+        let reply = h.b.connect(IP, bearer.clone(), WS1, "e").await.unwrap();
+        assert_eq!(key.verify(reply.broker_token.as_ref().unwrap()).subject, "anna");
+        assert_eq!(h.b.connect(IP, bearer, WS1, "e").await.unwrap_err(), ApiError::Unauthorized);
+    }
+
+    #[tokio::test]
     async fn http_device_key_and_proof_headers() {
         let h = harness_with(kdc());
         let app = crate::api::router(h.b.clone());
@@ -1947,4 +1962,100 @@ async fn diagnostics_are_disabled_without_configuration_and_after_beta_expiry() 
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn mac_admission_is_explicit_hbac_bound_and_preserves_linux_gssapi() {
+    let key = crate::mac_admission::tests::TestKey::new(WS1);
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "pw123456"), ("bob", "pw123456")]), |cfg| {
+        cfg.mac_admission = Some(key.config.clone());
+    });
+    let owner = h.login_from(IP, "anna", "pw", "123456").await.unwrap();
+    h.prober.busy.lock().unwrap().insert(WS1.into(), Some(true));
+    let hosts = h.b.list_hosts(IP, &owner).await.unwrap().hosts;
+    assert_eq!(hosts[0].shared_desktop, Some(true));
+    assert_eq!(hosts[0].busy, Some(true));
+    assert!(hosts[0].connectable);
+    assert!(hosts[1].shared_desktop.is_none());
+    assert!(serde_json::to_value(&hosts[1]).unwrap().get("shared_desktop").is_none());
+    let reply = h.b.connect(IP, &owner, WS1, "remote.example.org").await.unwrap();
+    assert_eq!(reply.auth_method, Some("broker_capability"));
+    assert!(reply.gssapi_token.is_empty());
+    assert_eq!(reply.username, "anna");
+    assert_eq!(reply.local_username.as_deref(), Some("studio"));
+    let claims = key.verify(reply.broker_token.as_ref().unwrap());
+    assert_eq!(claims.host, WS1);
+    assert_eq!(claims.subject, "anna");
+    assert_eq!(claims.cert_sha256, reply.host_cert_sha256);
+    assert_eq!(claims.exp - claims.iat, 60);
+    assert!(!h.krb.log.lock().unwrap().iter().any(|line| line.starts_with("ap_req")));
+    let linux = h.b.connect(IP, &owner, WS2, "remote.example.org").await.unwrap();
+    assert!(!linux.gssapi_token.is_empty());
+    assert!(linux.auth_method.is_none() && linux.broker_token.is_none() && linux.local_username.is_none());
+    let body = serde_json::to_value(&linux).unwrap();
+    assert!(body.get("broker_token").is_none() && body.get("auth_method").is_none());
+    assert_eq!(h.b.connect(IP, &owner, "unassigned.example.org", "e").await.unwrap_err(), ApiError::Denied);
+}
+
+#[tokio::test]
+async fn mac_admission_concurrent_users_behind_nat_have_independent_routes() {
+    let key = crate::mac_admission::tests::TestKey::new(WS1);
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "pw123456"), ("bob", "pw123456")]), |cfg| {
+        cfg.mac_admission = Some(key.config.clone());
+    });
+    let owner = h.login_from(IP, "anna", "pw", "123456").await.unwrap();
+    let guest = h.login_from(IP, "bob", "pw", "123456").await.unwrap();
+    let first = h.b.connect(IP, &owner, WS1, "remote.example.org").await.unwrap();
+    let second = h.b.connect(IP, &guest, WS1, "remote.example.org").await.unwrap();
+    assert_ne!(first.port, second.port);
+    assert_eq!(key.verify(second.broker_token.as_ref().unwrap()).subject, "bob");
+    assert_ne!(first.broker_token, second.broker_token);
+    h.b.presence(IP, &owner, WS1, CONNECTION_A, 1, true).await.unwrap();
+    h.b.presence(IP, &guest, WS1, CONNECTION_B, 1, true).await.unwrap();
+    let host = h.b.list_hosts(IP, &owner).await.unwrap().hosts.remove(0);
+    assert_eq!(host.shared_desktop, Some(true));
+    assert_eq!(host.connected_users, vec!["anna", "bob"]);
+    h.b.logout(&guest).await.unwrap();
+    assert_eq!(h.b.list_hosts(IP, &owner).await.unwrap().hosts[0].connected_users, vec!["anna"]);
+    assert!(h.b.keepalive(IP, &owner, WS1).await.is_ok());
+    assert_eq!(h.b.keepalive(IP, &guest, WS1).await.unwrap_err(), ApiError::Unauthorized);
+}
+
+#[tokio::test]
+async fn mac_admission_denies_bad_key_pins_and_disabled_user() {
+    let key = crate::mac_admission::tests::TestKey::new(WS1);
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "pw123456")]), |cfg| {
+        cfg.mac_admission = Some(key.config.clone());
+    });
+    let token = h.login_from(IP, "anna", "pw", "123456").await.unwrap();
+    h.b.list_hosts(IP, &token).await.unwrap();
+    h.prober.certs.lock().unwrap().insert(WS1.into(), Some([9; 32]));
+    h.b.probe_all().await;
+    assert_eq!(h.b.connect(IP, &token, WS1, "e").await.unwrap_err(), ApiError::Unavailable("certificate changed"));
+    h.prober.certs.lock().unwrap().insert(WS1.into(), Some([1; 32]));
+    h.b.probe_all().await;
+    std::fs::write(&key.config.signing_key_file, b"invalid").unwrap();
+    assert_eq!(h.b.connect(IP, &token, WS1, "e").await.unwrap_err(), ApiError::Internal("Mac admission unavailable"));
+    assert!(h.relay.calls.lock().unwrap().is_empty());
+    h.dir.users.lock().unwrap().get_mut("anna").unwrap().disabled = true;
+    h.clock.advance(Duration::from_secs(61));
+    assert_eq!(h.b.connect(IP, &token, WS1, "e").await.unwrap_err(), ApiError::Unauthorized);
+}
+
+#[tokio::test]
+async fn mac_admission_direct_route_and_hbac_revocation_keep_existing_policy() {
+    let key = crate::mac_admission::tests::TestKey::new(WS1);
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "pw123456")]), |cfg| {
+        cfg.mac_admission = Some(key.config.clone());
+        cfg.routing.direct_client_cidrs = vec!["10.1.0.0/24".into()];
+    });
+    let token = h.login_from(LAN, "anna", "pw", "123456").await.unwrap();
+    let first = h.b.connect(LAN, &token, WS1, "e").await.unwrap();
+    assert_eq!(first.route, "direct");
+    assert_eq!(key.verify(first.broker_token.as_ref().unwrap()).host, WS1);
+    assert!(h.relay_calls().is_empty());
+    h.dir.view.lock().unwrap().rules[0].enabled = false;
+    h.clock.advance(Duration::from_secs(61));
+    assert_eq!(h.b.connect(LAN, &token, WS1, "e").await.unwrap_err(), ApiError::Denied);
+    assert_eq!(h.b.keepalive(LAN, &token, WS1).await.unwrap_err(), ApiError::Unauthorized);
 }

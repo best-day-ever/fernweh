@@ -122,6 +122,9 @@ pub struct HostEntry {
     pub in_use_by: Option<String>,
     pub connected_users: Vec<String>,
     pub connectable: bool,
+    /// Set only by administrator admission policy, never Host discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_desktop: Option<bool>,
     pub reason: Option<String>,
 }
 
@@ -139,6 +142,12 @@ pub struct ConnectReply {
     pub host_cert_sha256: String,
     pub username: String,
     pub gssapi_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_method: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_username: Option<String>,
     pub expires_in: u64,
 }
 
@@ -1227,6 +1236,8 @@ impl Broker {
             in_use_by: None,
             connected_users: if reason.is_none() { self.connected_users(fqdn) } else { Vec::new() },
             connectable: reason.is_none(),
+            shared_desktop: self.cfg.mac_admission.as_ref()
+                .filter(|cfg| cfg.hosts.contains_key(fqdn)).map(|_| true),
             reason: reason.map(str::to_string),
         }
     }
@@ -1451,26 +1462,47 @@ impl Broker {
             return Err(ApiError::Unavailable("offline"));
         };
 
-        let krb = self.d.krb.clone();
-        let fq = host.to_string();
-        let tok = tokio::task::spawn_blocking(move || krb.ap_req(&ccache, &fq, &cert))
+        // Configuration, never discovery metadata, selects this trust boundary.
+        // The same authenticated session, HBAC assignment and pinned Host gates
+        // above apply to both methods. Shared Mac users never receive an OS password.
+        let mac = self.cfg.mac_admission.as_ref()
+            .and_then(|cfg| cfg.hosts.get(host).map(|local| (cfg.clone(), local.clone())));
+        let (gssapi_token, broker_token, local_username) = if let Some((cfg, local)) = mac {
+            let issued = self.d.clock.unix();
+            let host = host.to_string();
+            let subject = user.clone();
+            let local_for_signing = local.clone();
+            let token = tokio::task::spawn_blocking(move || {
+                cfg.issue(&host, &cert, &subject, &local_for_signing, issued)
+            })
             .await
-            .unwrap_or_else(|_| Err(KrbError::Unavailable("ap_req task panicked".into())));
-        let tok = match tok {
-            Ok(t) => t,
-            Err(KrbError::Denied(m)) => {
-                info!(user = %user, host = %host, "service ticket refused: {m}");
-                self.audit(
-                    "connect_denied",
-                    json!({"user": user, "ip": ip.to_string(), "host": host, "reason": "kdc"}),
-                );
-                return Err(ApiError::Denied);
-            }
-            Err(KrbError::Unavailable(m)) => {
-                error!("KDC unavailable: {m}");
-                return Err(ApiError::Internal("kdc unavailable"));
-            }
+            .map_err(|_| ApiError::Internal("Mac admission unavailable"))?
+            .map_err(|_| ApiError::Internal("Mac admission unavailable"))?;
+            (String::new(), Some(token), Some(local))
+        } else {
+            let krb = self.d.krb.clone();
+            let fq = host.to_string();
+            let tok = tokio::task::spawn_blocking(move || krb.ap_req(&ccache, &fq, &cert))
+                .await
+                .unwrap_or_else(|_| Err(KrbError::Unavailable("ap_req task panicked".into())));
+            let tok = match tok {
+                Ok(t) => t,
+                Err(KrbError::Denied(m)) => {
+                    info!(user = %user, host = %host, "service ticket refused: {m}");
+                    self.audit(
+                        "connect_denied",
+                        json!({"user": user, "ip": ip.to_string(), "host": host, "reason": "kdc"}),
+                    );
+                    return Err(ApiError::Denied);
+                }
+                Err(KrbError::Unavailable(m)) => {
+                    error!("KDC unavailable: {m}");
+                    return Err(ApiError::Internal("kdc unavailable"));
+                }
+            };
+            (STANDARD.encode(tok), None, None)
         };
+        let auth_method = broker_token.as_ref().map(|_| "broker_capability");
 
         let now = self.now();
         let initial = self.cfg.relay.lease_initial_secs;
@@ -1507,7 +1539,10 @@ impl Broker {
                 port: self.cfg.hosts.port,
                 host_cert_sha256: hex::encode(cert),
                 username: user,
-                gssapi_token: STANDARD.encode(tok),
+                gssapi_token,
+                auth_method,
+                broker_token,
+                local_username,
                 expires_in: initial,
             });
         }
@@ -1578,7 +1613,10 @@ impl Broker {
             port,
             host_cert_sha256: hex::encode(cert),
             username: user,
-            gssapi_token: STANDARD.encode(tok),
+            gssapi_token,
+            auth_method,
+            broker_token,
+            local_username,
             expires_in: initial,
         })
     }

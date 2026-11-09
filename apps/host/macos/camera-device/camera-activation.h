@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #import <Foundation/Foundation.h>
+#include "camera-build.h"
 // Explicit graphical setup only. Never starts capture or approves the OS prompt.
 void PLANKMacRequestCameraExtension(BOOL enable, void (^completion)(BOOL));
 // Signed Host command used by uninstall in the console user's GUI session.
