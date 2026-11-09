@@ -58,7 +58,10 @@ authorized access and exposes no permission buttons for it. A missing or
 closed helper revokes ordinary guests but does not block support. The Host keeps
 trying to start the indicator; it also logs successful support joins by UID,
 without grant secrets. Input remains suspended while owner security controls
-are open, including during other guests' pending consent.
+are open. A pending request alone does not suspend existing guests: the helper
+first asks for suspension and waits for the acknowledgement before exposing
+permission buttons. A participant list with only automatically authorized users
+is read-only and never requests that suspension.
 
 Support remains bound to the unlocked desktop: lock, logout, generation change,
 primary stream termination and guest cancellation revoke it and release held
@@ -152,3 +155,30 @@ requires the actual consent UI, two simultaneous clients, view-only input denial
 permission changes, owner disconnect/lock, and unchanged monitor geometry before
 and after guest join/leave. Unit tests and package builds alone do not prove those
 hardware/UI outcomes.
+
+## Shared pointer behavior
+
+The existing cursor-position channel is sufficient to visualize the Host's active
+mouse without moving the viewer's local compositor cursor. The Client presents a
+small cyan **Remote** pointer when the Host pointer is separate from the viewer's
+idle local pointer, and throughout view-only use. It follows the same capture to
+window mapping as input, including packed displays, resizing and letterboxing.
+It disappears on focus loss, reconnect and teardown. It is presentation only:
+it cannot receive clicks, become keyboard focus or synthesize remote motion.
+This is the one active desktop pointer; independent named pointers for every
+participant are not part of this wire format.
+
+Native Host mouse input keeps one participant's rapid movement together until
+250 ms of inactivity. An accepted drag retains ownership until all accepted
+buttons are released; disconnect, permission downgrade and security-panel
+suspension release ownership immediately. Rejected motion never extends that
+hold. Keys already held by another participant can still be released, while a
+new shortcut from that participant cannot alter an active drag. Per-participant
+key and button accounting remains authoritative. Raw-HID tablets retain their
+existing owner-only path; mixed tablet/mouse sharing needs hardware acceptance.
+
+Automatically opened consent panels close when the final pending decision is
+reflected by the Host, so interaction no longer requires a second Done click.
+Explicitly opened permission management stays suspended until Done. Clients poll
+a new request immediately and then at most four times per second while pending.
+No new feature flag or wire field is required for these behavior changes.
