@@ -2,7 +2,7 @@
 //! connect/lease bookkeeping, probes and the reaper. The HTTP layer (`api.rs`)
 //! only parses requests and maps results to status codes.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -120,6 +120,7 @@ pub struct HostEntry {
     pub online: bool,
     pub busy: Option<bool>,
     pub in_use_by: Option<String>,
+    pub connected_users: Vec<String>,
     pub connectable: bool,
     pub reason: Option<String>,
 }
@@ -297,12 +298,25 @@ struct DirectGrant {
     expires: Instant,
 }
 
+// Client-reported streaming presence, separate from transport grants: preparing
+// a connection and browsing the dashboard must never imply a live stream.
+struct Presence {
+    host: String,
+    sequence: u64,
+    connected: bool,
+    expires: Instant,
+}
+
+const PRESENCE_TTL: Duration = Duration::from_secs(60);
+const MAX_PRESENCES_PER_SESSION: usize = 64;
+
 #[derive(Default)]
 struct State {
     conversations: HashMap<String, Conversation>,
     sessions: HashMap<[u8; 32], Session>,
     leases: HashMap<u16, Lease>,
     direct: Vec<DirectGrant>,
+    presence: HashMap<([u8; 32], String), Presence>,
     next_port: u16,
     /// Passkey `auth/start` calls waiting for the KDC's challenge (reserved slots).
     passkey_starting: usize,
@@ -1041,6 +1055,7 @@ impl Broker {
             let leases: Vec<(u16, Lease)> =
                 ports.into_iter().filter_map(|p| st.leases.remove(&p).map(|l| (p, l))).collect();
             st.direct.retain(|g| g.session != key);
+            st.presence.retain(|(session, _), _| *session != key);
             (sess, leases)
         };
         let krb = self.d.krb.clone();
@@ -1208,6 +1223,7 @@ impl Broker {
             online,
             busy: st.and_then(|s| s.busy),
             in_use_by: None,
+            connected_users: if reason.is_none() { self.connected_users(fqdn) } else { Vec::new() },
             connectable: reason.is_none(),
             reason: reason.map(str::to_string),
         }
@@ -1217,6 +1233,67 @@ impl Broker {
         let max_age = Duration::from_secs(self.cfg.hosts.probe_interval_secs * 2 + self.cfg.hosts.probe_timeout_secs);
         let now = self.now();
         self.status.read().unwrap().get(fqdn).filter(|s| now.duration_since(s.checked) < max_age).cloned()
+    }
+
+    fn connected_users(&self, host: &str) -> Vec<String> {
+        let now = self.now();
+        let st = self.st.lock().unwrap();
+        st.presence
+            .iter()
+            .filter(|(_, p)| p.host == host && p.connected && p.expires > now)
+            .filter_map(|((key, _), _)| st.sessions.get(key).map(|s| s.username.clone()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// Names come only from authenticated sessions. The client supplies a random
+    /// per-stream ID and monotonic sequence, never a username. Keep stopped
+    /// records briefly so a delayed heartbeat cannot resurrect a disconnected stream.
+    pub async fn presence<'a>(
+        &self,
+        ip: IpAddr,
+        bearer: impl Into<Bearer<'a>>,
+        host: &str,
+        connection_id: &str,
+        sequence: u64,
+        connected: bool,
+    ) -> Result<(), ApiError> {
+        let path = format!("/v1/hosts/{host}/presence");
+        let (key, user, _) = self.session(bearer, ("POST", &path)).await?;
+        if connection_id.len() != 32 || !connection_id.bytes().all(|c| c.is_ascii_hexdigit()) || sequence == 0 {
+            return Err(ApiError::BadRequest);
+        }
+        let (_, hosts) = self.assigned(&user, false).await?;
+        if !hosts.iter().any(|h| h == host) {
+            return Err(ApiError::Denied);
+        }
+        let client = v4(ip).ok_or(ApiError::NoLease)?;
+        let now = self.now();
+        let mut st = self.st.lock().unwrap();
+        if !st.sessions.contains_key(&key) {
+            return Err(ApiError::Unauthorized);
+        }
+        if connected
+            && !st.direct.iter().any(|g| g.session == key && g.host == host && g.client == client && g.expires > now)
+            && !st.leases.values().any(|l| l.session == key && l.host == host && l.client == client && l.expires > now)
+        {
+            return Err(ApiError::NoLease);
+        }
+        st.presence.retain(|_, p| p.expires > now);
+        let id = (key, connection_id.to_string());
+        if let Some(previous) = st.presence.get(&id) {
+            if previous.host != host {
+                return Err(ApiError::Denied);
+            }
+            if sequence <= previous.sequence || !previous.connected {
+                return Ok(());
+            }
+        } else if st.presence.keys().filter(|(session, _)| *session == key).count() >= MAX_PRESENCES_PER_SESSION {
+            return Err(ApiError::Exhausted);
+        }
+        st.presence.insert(id, Presence { host: host.to_string(), sequence, connected, expires: now + PRESENCE_TTL });
+        Ok(())
     }
 
     // ------------------------------------------------------------ hosts / connect
@@ -1534,6 +1611,7 @@ impl Broker {
                 .collect();
             // Direct grants hold nothing open: they simply stop keeping the session alive.
             st.direct.retain(|g| g.expires > now);
+            st.presence.retain(|_, p| p.expires > now);
             let ports: Vec<u16> = st.leases.iter().filter(|(_, l)| l.expires <= now).map(|(p, _)| *p).collect();
             let lapsed: Vec<(u16, Lease, String)> = ports
                 .into_iter()

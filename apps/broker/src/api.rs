@@ -384,6 +384,34 @@ async fn keepalive(
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PresenceReq {
+    connection_id: String,
+    sequence: u64,
+    connected: bool,
+}
+
+async fn presence(
+    State(b): State<Arc<Broker>>,
+    ConnectInfo(ci): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    uri: Uri,
+    h: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let r = async {
+        let bearer = device_bearer(&h, "POST", uri.path(), &body)?;
+        let req: PresenceReq = serde_json::from_slice(&body).map_err(|_| ApiError::BadRequest)?;
+        b.presence(client_ip(&ci), bearer, &id, &req.connection_id, req.sequence, req.connected).await
+    }
+    .await;
+    match r {
+        Ok(()) => Json(json!({"state": "ok"})).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
 async fn logout(State(b): State<Arc<Broker>>, uri: Uri, h: HeaderMap, body: Bytes) -> Response {
     let r = async { b.logout(device_bearer(&h, "POST", uri.path(), &body)?).await }.await;
     match r {
@@ -447,6 +475,7 @@ pub fn router(b: Arc<Broker>) -> Router {
         .route("/v1/hosts", get(hosts))
         .route("/v1/hosts/{id}/connect", post(connect))
         .route("/v1/hosts/{id}/keepalive", post(keepalive))
+        .route("/v1/hosts/{id}/presence", post(presence))
         .route("/v1/logout", post(logout))
         .route("/v1/passkeys/setup", post(passkey_setup))
         .route("/v1/passkeys/setup/skip", post(passkey_setup_skip))
