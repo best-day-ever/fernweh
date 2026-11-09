@@ -50,6 +50,8 @@ add_executable(input-recovery
   input-config.cpp
   uhid-fixture.cpp
   "${HOST}/src/input.cpp"
+  "${HOST}/src/session/collaboration.cpp"
+  "${HOST}/tests/unit/test_collaboration.cpp"
   "${HOST}/src/process.cpp"
   "${HOST}/src/globals.cpp"
   "${HOST}/src/platform/virtualhid_input.cpp"
