@@ -1,6 +1,6 @@
 # Beta client diagnostics
 
-Implementation candidate; not released or enabled on any deployed broker.
+Merged source; not released or enabled on any deployed broker.
 
 Fernweh can automatically send a separate, structured diagnostic log to the
 configured remote-access broker. Ordinary text logs stay local. The feature is
