@@ -5,6 +5,11 @@ set -euo pipefail
 host_build=${1:?configured Host build directory required}
 root=${PLANK_SOURCE_ROOT:?source worktree required}
 host_source="$root/apps/host/linux"
+test_build_jobs=${PLANK_TEST_BUILD_JOBS:-2}
+if [[ ! $test_build_jobs =~ ^[12]$ ]]; then
+  echo 'PLANK_TEST_BUILD_JOBS must be 1 or 2' >&2
+  exit 2
+fi
 ffmpeg_dir=$(sed -n 's/^FFMPEG_PREPARED_BINARIES:[^=]*=//p' "$host_build/CMakeCache.txt")
 test -f "$ffmpeg_dir/include/libavutil/pixfmt.h"
 test -f "$ffmpeg_dir/lib/libavcodec.a"
@@ -15,11 +20,11 @@ env BRANCH=plank-package BUILD_VERSION="$PLANK_PACKAGE_VERSION" \
   cmake -S "$host_source" -B "$host_build" \
     -DFFMPEG_PREPARED_BINARIES="$ffmpeg_dir" -DBUILD_TESTS=ON
 # Coverage-enabled test objects are larger than production objects.
-cmake --build "$host_build" --parallel 2 --target test_sunshine
+cmake --build "$host_build" --parallel "$test_build_jobs" --target test_sunshine
 (
   cd "$host_source"
   "$host_build/tests/test_sunshine" --gtest_color=no \
-    --gtest_filter='InputConfigDefaults.*:InputRetainedSessionTest.*:RawHidTablet.*:RawHidContactIo.*:NormalizedPen.*:ReliableQueue.*:CudaPrimaryContext.*' \
+    --gtest_filter='InputConfigDefaults.*:InputRetainedSessionTest.*:RawHidTablet.*:RawHidContactIo.*:NormalizedPen.*:ReliableQueue.*:CudaPrimaryContext.*:CudaStreamWork.*' \
     --gtest_repeat=25 --gtest_shuffle --gtest_random_seed=837
 )
 # The full Host tests skip kernel-UHID cases on a builder. Run the link-wrapped
@@ -32,7 +37,7 @@ cmake -S "$root/tests/input/linux-recovery" -B "$fixture_build" \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER="$cxx_compiler" \
   -DPLANK_BOOST_SOURCE_DIR="${PLANK_BOOST_SOURCE_DIR:?qualified Boost source required}" \
   -DPLANK_FFMPEG_INCLUDE="$ffmpeg_dir/include"
-cmake --build "$fixture_build" --parallel 2
+cmake --build "$fixture_build" --parallel "$test_build_jobs"
 if rg -l --glob '*.o.d' '/usr/(local/)?include/boost/' \
     "$fixture_build/CMakeFiles/input-recovery.dir"; then
   echo 'Host input fixture used system Boost headers instead of the pinned source' >&2
