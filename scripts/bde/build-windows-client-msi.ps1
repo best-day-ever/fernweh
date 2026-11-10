@@ -87,4 +87,5 @@ try {
     (Join-Path $sourceRoot 'packaging/client/windows/Fernweh.wxs') $runtimeSource
 if ($LASTEXITCODE -ne 0) { throw "WiX build failed: $LASTEXITCODE" }
 Remove-Item $runtimeSource
+& "$PSScriptRoot\test-windows-updater-package.ps1" -Package $OutputPath -QtRoot $env:PLANK_QT_ROOT
 Write-Host "Unsigned BDE fernweh MSI candidate: $OutputPath"
