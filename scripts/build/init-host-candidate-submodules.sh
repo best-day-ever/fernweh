@@ -34,7 +34,10 @@ init_level() {
     name=${key#submodule.}
     name=${name%.path}
 
-    if ! git -C "$canonical_parent/$path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Git walks upward from an empty, uninitialized submodule directory. Being
+    # inside the parent's worktree does not make that directory a clone source.
+    if [[ $(git -C "$canonical_parent/$path" rev-parse --show-toplevel 2>/dev/null || true) != \
+          "$(realpath "$canonical_parent/$path")" ]]; then
       echo "Canonical submodule repository is unavailable: $canonical_parent/$path" >&2
       exit 1
     fi
