@@ -172,6 +172,14 @@ if [[ -L $ffmpeg_link && $(readlink -- "$ffmpeg_link") == "$PLANK_DEP_ROOT/host-
 fi
 bash /workspace/scripts/ci/build.sh linux-host
 
+# This wrapper owns a disposable root container, so exercise the real monitor's
+# /run/plank channel and unlock/grant race without touching a workstation.
+CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
+PLANK_GTEST_SOURCE=/workspace/apps/host/linux/third-party/googletest/googletest \
+PLANK_JSON_INCLUDE="$PLANK_WORK_ROOT/host-build/_deps/json-src/include" \
+  bash /workspace/apps/host/linux/tests/collaboration/run-monitor.sh
+echo "host_collaboration_monitor_gate=pass"
+
 echo "===stage:done==="
 find "$PLANK_ARTIFACT_ROOT" -maxdepth 1 -type f -name '*.rpm' -print
 EOS
