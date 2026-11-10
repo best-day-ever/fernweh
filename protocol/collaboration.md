@@ -10,7 +10,7 @@ never desktop authorization.
 ## Identity and consent
 
 The Host binds each request to the authenticated guest and current desktop
-identity. Approval grants access to that desktop only. It cannot unlock a screen,
+identity. Approval grants access to that desktop only. Ordinary approval cannot unlock a screen,
 sign another user out, log into GDM, survive a desktop change, or confer the
 owner's operating-system identity on the guest. Pending requests expire; silence
 is refusal. Session grants and transport tokens are separate opaque secrets.
@@ -79,6 +79,28 @@ The wire negotiation is unchanged (`0x20000000`). Request creation retains its
 `pending` acknowledgement for existing clients; the next status response returns
 `control` with the existing grant/capture fields. Owner/helper participant records
 add `support: true` for approval-exempt grants; absent/false means ordinary consent.
+
+## Explicit support unlock
+
+`collaboration_support_unlock` defaults to false. When enabled, only authenticated
+members of the configured support group may explicitly unlock the observed
+desktop. Automatic joining for ordinary authorized users does not confer this
+permission. A refused launch adds `PlankDesktopUnlockAvailable=1` and canonical
+decimal `PlankDesktopGeneration` only for an eligible locked target; the ordinary
+`PlankCollaborationAvailable` remains false.
+
+The Client offers **Unlock and join** and sends `unlock_desktop: true`, `owner`
+and `generation` strings to the existing request route. No password for the owner
+is required or requested. The Host rechecks membership, active attested session,
+owner and generation immediately before logind unlock. Only a confirmed unlock
+can proceed through normal desktop-bound grant creation. Changes/errors deny the
+request without signing anyone out. Audit records contain actor/owner UIDs,
+generation and outcome, never credentials or grants.
+
+The final guest disconnect relocks a support-unlocked desktop; a failed/abandoned
+join has a30-second no-stream safety relock. The root supervisor also relocks the
+exact desktop if its worker exits. Fresh owner authentication clears this support
+guard. Display ownership and all normal guest channel restrictions remain.
 
 ## Host HTTPS API
 
