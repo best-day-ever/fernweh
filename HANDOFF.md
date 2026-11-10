@@ -4,6 +4,33 @@ Read `AGENTS.md` and the relevant build runbook first. Machine-specific access,
 credentials, captures and operational evidence belong in the external private
 notes, never in Git.
 
+## Current — direct Linux CUDA/NVENC lifecycle repair
+
+Host [36](https://github.com/best-day-ever/plank-host-linux/pull/36), integrated by
+[124](https://github.com/best-day-ever/plank/pull/124), keeps direct CUDA teardown
+on its encode thread, owns an independent primary-context reference and drains
+partial conversion work before the caller can release a borrowed source frame.
+See [the lifetime contract](docs/development/nvenc-cuda-lifecycle.md).
+
+Revision2 candidate provenance is root `397b71b035ccb0897a5f00ae5d0850d7d879886a`,
+Host `e8edfce2e23b5d8136fef6273dac901b4ec71e67`, unchanged Client
+`1044faab1c089ae981e2ef414e26b5fa043b7bee` and Kyber
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`; recursive dependencies remain pinned
+by those commits and the RPM's build information. Its immutable catalog is
+`artifacts/packages/candidates/1.2.30-nvenc-lifecycle-r2/`, RPM SHA256
+`aaa278f2318c3d753c2790d07ab61ab0b892e42d845367df2b367c110caee77e`.
+It passes package/transport gates and root CI119. All25 shuffled native Host
+runs pass66 cases plus3 kernel-UHID skips, including350 CUDA checks. All25
+input-recovery runs pass89 cases, and2 collaboration-monitor cases pass.
+The original candidate remains separately catalogued. Do not relabel either.
+
+After integration, build the mainline RPM and qualify its exact installed worker
+bytes across native login, modeset, disconnect/reconnect and sign-out transitions.
+Inspect child wait status and coredumps so supervisor recovery cannot conceal a
+worker crash. Keep driver/kernel pins. Platform promotion and private hardware
+receipts belong to the deployment repository and external private audit notes.
+A passing transition does not explain a separate whole-machine access outage.
+
 ## Merged — macOS Qt session; mainline 1.2.13 built
 
 The operator authorized `macos-qt-session`, then explicitly approved merging the
