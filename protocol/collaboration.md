@@ -168,6 +168,12 @@ listener reuse must not depend on random `SO_REUSEPORT` routing.
 
 ## Acceptance
 
+An optional Host `collaboration_join_group` restricts sharing to current NSS
+members, independently of workstation assignment and owner consent. A nonmember
+receives no Join or Unlock hint and cannot request or redeem a sharing grant.
+The desktop owner retains their own login and permission controls. This gate
+also applies before explicit support unlock; no Client flag bypasses it.
+
 Behavioral tests must cover denial/expiry, wrong identity, stale desktop,
 single-use grants, revocation, guest input gating and owner layout inheritance.
 Transport loopbacks must cover concurrent clients on the same host port and peer
