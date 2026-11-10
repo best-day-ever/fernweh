@@ -32,7 +32,8 @@ try {
     if ($LASTEXITCODE) { Get-Content "$build\build.log" -Tail 30; throw 'Qt MSI fixture build failed.' }
     & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -File "$sourceRoot\apps\client\tests\fernwehupdater\test-windows-msi-service.ps1" `
-        -Package (Resolve-Path $Package).Path -QtFixture "$build\release\windows-msi-fixture.exe"
+        -Package (Resolve-Path $Package).Path -QtFixture "$build\release\windows-msi-fixture.exe" `
+        -Helper "$sourceRoot\apps\client\app\backend\fernweh-install-update.ps1"
     if ($LASTEXITCODE) { throw 'Real Windows Installer service regression failed.' }
 } finally {
     $env:PATH = $oldPath
