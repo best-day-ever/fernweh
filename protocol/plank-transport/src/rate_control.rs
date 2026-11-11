@@ -238,7 +238,7 @@ pub struct PlankRateControllerFactory {
 impl PlankRateControllerFactory {
     pub fn new(policy: Arc<TransportRatePolicy>) -> Arc<Self> {
         eprintln!(
-            "PLANK sender: bitrate-paced peak-limit=target*1.5 wire-budget=peak*1.4+1000000 burst-ms=2"
+            "PLANK sender: bitrate-paced peak-limit=target*1.5 wire-budget=peak*1.4+1000000 burst-ms=8"
         );
         Arc::new(Self {
             policy: RatePolicy::Fixed(policy),

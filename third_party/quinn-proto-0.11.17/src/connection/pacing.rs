@@ -148,7 +148,7 @@ impl Pacer {
         now: Instant,
         rate_bps: u64,
     ) -> Option<Instant> {
-        let capacity = ((u128::from(rate_bps) * BURST_INTERVAL_NANOS / 8_000_000_000)
+        let capacity = ((u128::from(rate_bps) * CAPPED_BURST_INTERVAL_NANOS / 8_000_000_000)
             .min(u128::from(u64::MAX)) as u64)
             .clamp(2 * u64::from(mtu), MAX_BURST_SIZE * u64::from(mtu));
         if self.last_rate != Some(rate_bps) || self.last_mtu != mtu {
@@ -222,6 +222,12 @@ fn optimal_capacity(smoothed_rtt: Duration, window: u64, mtu: u16) -> u64 {
 /// more applicable.
 const BURST_INTERVAL_NANOS: u128 = 2_000_000; // 2ms
 
+// A fixed rate has no window/RTT catch-up gain. Keep enough bounded credit for
+// ordinary multi-ms runtime wakeups, or a two-ms bucket underdelivers the video
+// rate whenever the sender is scheduled less frequently. Uncapped pacing keeps
+// the upstream interval above; neither policy accumulates unlimited idle credit.
+const CAPPED_BURST_INTERVAL_NANOS: u128 = 8_000_000; // 8ms
+
 /// Allows some usage of GSO, and doesn't slow down the handshake.
 const MIN_BURST_SIZE: u64 = 10;
 
@@ -255,11 +261,41 @@ mod tests {
             let allowance = rate * tick * 100 / 8_000_000 + pacer.capacity;
             assert!(sent <= allowance, "{sent} > {allowance} at tick {tick}");
         }
-        assert_eq!(pacer.capacity, 17_125);
+        assert_eq!(pacer.capacity, 68_500);
         assert!(largest_batch <= pacer.capacity);
         assert!(
             sent > rate / 8 / 10 * 99 / 100,
             "cap must still deliver the selected rate"
+        );
+    }
+
+    #[test]
+    fn capped_sender_delivers_the_selected_rate_with_coarse_timer_wakeups() {
+        let now = Instant::now();
+        let rate = 68_500_000;
+        let mtu = 1344;
+        let mut pacer = Pacer::new(Duration::from_micros(1), u64::MAX, mtu, now);
+        let mut sent = 0u64;
+        // Runtime scheduling is not a real-time clock. A four-ms wakeup must
+        // not turn the transport ceiling into half the required video rate.
+        for tick in 0..=250 {
+            let time = now + Duration::from_millis(tick * 4);
+            while pacer
+                .delay_with_rate(Duration::ZERO, mtu.into(), mtu, u64::MAX, time, Some(rate))
+                .is_none()
+            {
+                pacer.on_transmit(mtu);
+                sent += u64::from(mtu);
+            }
+            let allowed = rate * tick * 4 / 8_000 + pacer.capacity;
+            assert!(
+                sent <= allowed,
+                "rate envelope exceeded: {sent} > {allowed}"
+            );
+        }
+        assert!(
+            sent >= rate / 8 * 95 / 100,
+            "coarse timer starved the sender: {sent} bytes"
         );
     }
 
@@ -285,8 +321,8 @@ mod tests {
                 pacer.on_transmit(mtu);
                 burst += u64::from(mtu);
             }
-            assert!(burst <= 17_125);
-            assert!(burst >= 17_125 - u64::from(mtu));
+            assert!(burst <= 68_500);
+            assert!(burst >= 68_500 - u64::from(mtu));
             // A second poll at the same instant cannot re-credit the idle time.
             assert!(
                 pacer
@@ -329,8 +365,8 @@ mod tests {
             pacer.on_transmit(mtu);
             burst += u64::from(mtu);
         }
-        assert!(burst <= 17_125);
-        assert_eq!(pacer.capacity, 17_125);
+        assert!(burst <= 68_500);
+        assert_eq!(pacer.capacity, 68_500);
     }
 
     #[test]
