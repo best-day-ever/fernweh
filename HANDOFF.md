@@ -12,24 +12,39 @@ on its encode thread, owns an independent primary-context reference and drains
 partial conversion work before the caller can release a borrowed source frame.
 See [the lifetime contract](docs/development/nvenc-cuda-lifecycle.md).
 
-Revision2 candidate provenance is root `397b71b035ccb0897a5f00ae5d0850d7d879886a`,
-Host `e8edfce2e23b5d8136fef6273dac901b4ec71e67`, unchanged Client
-`1044faab1c089ae981e2ef414e26b5fa043b7bee` and Kyber
-`3f7a9d8618978287186e5d6ce0eaa067743cb06c`; recursive dependencies remain pinned
-by those commits and the RPM's build information. Its immutable catalog is
-`artifacts/packages/candidates/1.2.30-nvenc-lifecycle-r2/`, RPM SHA256
-`aaa278f2318c3d753c2790d07ab61ab0b892e42d845367df2b367c110caee77e`.
-It passes package/transport gates and root CI119. All25 shuffled native Host
-runs pass66 cases plus3 kernel-UHID skips, including350 CUDA checks. All25
-input-recovery runs pass89 cases, and2 collaboration-monitor cases pass.
-The original candidate remains separately catalogued. Do not relabel either.
+The accepted mainline Linux RPM is `plank-host-1.2.30-1.el9.x86_64.rpm`,
+9,286,890bytes, built from root `56dbf576f9439355ec75db942fdc65ec0028addf`
+and Host `e8edfce2e23b5d8136fef6273dac901b4ec71e67`. Unchanged Client is
+`1044faab1c089ae981e2ef414e26b5fa043b7bee`, Kyber
+`3f7a9d8618978287186e5d6ce0eaa067743cb06c`; recursive dependencies remain pinned.
+Catalog: `artifacts/packages/releases/1.2.30/linux/`. RPM SHA256:
+`26187de646c10c1f8ed58ef5751210708cfc3ab768609409a72bf32df1402384`.
+Packaged and installed media-worker SHA256:
+`a0b7ee3474e74035c419592fbc368b202f8c57efddf7f87dcb80f3f80f392f21`.
+Earlier R1/R2 candidate bytes remain separately catalogued, never relabelled.
 
-After integration, build the mainline RPM and qualify its exact installed worker
-bytes across native login, modeset, disconnect/reconnect and sign-out transitions.
-Inspect child wait status and coredumps so supervisor recovery cannot conceal a
-worker crash. Keep driver/kernel pins. Platform promotion and private hardware
-receipts belong to the deployment repository and external private audit notes.
-A passing transition does not explain a separate whole-machine access outage.
+The native mainline gates pass:25 shuffled Host runs, each66pass plus3
+kernel-UHID skips (350 CUDA checks);25 input-recovery runs, each89pass;
+2 collaboration-monitor cases; package/closure/transport gates. Root CI119 passes.
+The identical compiled native transport executable passes three900-frame150Mbps
+hardware matrices with zero unrecovered symbols and zero extra kernel drops.
+The earlier build-VM packet-loss failure is retained, not relabelled a pass.
+
+The identical installed RPM passes ordinary single-user fresh greeter logins,
+visible video, real keyboard/mouse input, reconnect and normal sign-out across
+A5000 Laptop/5090/4090/3090. A5000 and5090 also pass forced modesets with direct
+post-mode input. Recorded automatic handoff retries remain; no speed improvement
+is claimed. Observed greeter exits are0; desktop logout may use the explicit
+Xlib-EOF exit74 when Xorg ends. No new Host core is observed. The isolated Mac QA
+copy changes bundle identity/signing metadata only; it is not acceptance of a new
+signed Mac package. Private evidence and platform promotion live outside this tree.
+
+An administrative occupied-desktop VT-resume experiment failed separately with
+NVIDIA/Xorg modesetting-permission/EnterVT errors and ended the original desktop.
+GDM recovery restored subsequent normal single-user login; it did not restore
+that desktop. This release does not fix or qualify occupied-desktop VT resume,
+and does not explain a separate whole-machine access outage. Preserve driver/kernel
+pins and never run that experimental test route on an occupied artist seat.
 
 ## Merged — macOS Qt session; mainline 1.2.13 built
 
