@@ -5,8 +5,9 @@
 //! KyProto remains responsible for media packetization and RaptorQ. This
 //! module turns the requested encoder rate into a FEC-inclusive wire budget
 //! and supplies a Host Quinn controller whose window does not collapse on
-//! isolated repairable loss. Its budget has a 1 Gbps floor; Quinn alone schedules
-//! transmission. Encoder rate, FEC and bounded queues are unchanged.
+//! isolated repairable loss. Quinn enforces the selected rate with a bounded
+//! token bucket, independently of the window, with bounded encoder peak
+//! headroom. Encoder rate, FEC and bounded media queues are unchanged.
 
 use quinn_proto::RttEstimator;
 use quinn_proto::congestion::{Controller, ControllerFactory, ControllerMetrics};
@@ -16,15 +17,18 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const MIN_VIDEO_BITRATE_BPS: u64 = 10_000_000;
-const FEC_AND_PACKET_SCALE_NUMERATOR: u64 = 27;
-const FEC_AND_PACKET_SCALE_DENOMINATOR: u64 = 20;
+const FEC_AND_PACKET_SCALE_NUMERATOR: u64 = 7;
+const FEC_AND_PACKET_SCALE_DENOMINATOR: u64 = 5;
 const AUDIO_AND_CONTROL_RESERVE_BPS: u64 = 1_000_000;
 const MIN_WINDOW_PACKETS: u64 = 64;
 const STEADY_WINDOW_NUMERATOR: u64 = 3;
 const STEADY_WINDOW_DENOMINATOR: u64 = 2;
 const MAX_WINDOW_RTT: Duration = Duration::from_millis(100);
 const INITIAL_WINDOW_RTT: Duration = Duration::from_millis(200);
-const SEND_BUDGET_FLOOR_BPS: u64 = 1_000_000_000;
+
+fn bounded_peak_video_bps(target_bps: u64, peak_bps: u64) -> u64 {
+    peak_bps.clamp(target_bps, target_bps.saturating_add(target_bps / 2))
+}
 
 fn video_to_wire_bps(video_bps: u64) -> u64 {
     video_bps
@@ -50,7 +54,7 @@ fn window_for_rate(rate_bps: u64, rtt: Duration, mtu: u16) -> u64 {
 pub struct TransportRatePolicy {
     requested_video_bps: AtomicU64,
     active_video_bps: AtomicU64,
-    active_peak_video_bps: AtomicU64,
+    paced_peak_video_bps: AtomicU64,
     repairable_congestion_events: AtomicU64,
     persistent_congestion_events: AtomicU64,
 }
@@ -61,7 +65,10 @@ impl TransportRatePolicy {
         Arc::new(Self {
             requested_video_bps: AtomicU64::new(requested_video_bps),
             active_video_bps: AtomicU64::new(requested_video_bps),
-            active_peak_video_bps: AtomicU64::new(requested_video_bps),
+            paced_peak_video_bps: AtomicU64::new(bounded_peak_video_bps(
+                requested_video_bps,
+                u64::MAX,
+            )),
             repairable_congestion_events: AtomicU64::new(0),
             persistent_congestion_events: AtomicU64::new(0),
         })
@@ -76,19 +83,21 @@ impl TransportRatePolicy {
     }
 
     pub fn active_wire_bps(&self) -> u64 {
-        let budget = video_to_wire_bps(self.active_peak_video_bps.load(Ordering::Acquire));
-        budget.max(SEND_BUDGET_FLOOR_BPS)
+        video_to_wire_bps(self.paced_peak_video_bps.load(Ordering::Acquire))
     }
 
+    /// Allow the encoder's peak rate to drain variable-size frames, but never
+    /// grant more than 50% peak headroom over the selected target.
     pub fn set_requested_video_bps(&self, requested_video_bps: u64, peak_video_bps: u64) {
         let requested_video_bps = requested_video_bps.max(MIN_VIDEO_BITRATE_BPS);
-        let peak_video_bps = peak_video_bps.max(requested_video_bps);
         self.requested_video_bps
             .store(requested_video_bps, Ordering::Release);
         self.active_video_bps
             .store(requested_video_bps, Ordering::Release);
-        self.active_peak_video_bps
-            .store(peak_video_bps, Ordering::Release);
+        self.paced_peak_video_bps.store(
+            bounded_peak_video_bps(requested_video_bps, peak_video_bps),
+            Ordering::Release,
+        );
     }
 }
 
@@ -123,7 +132,6 @@ struct PlankRateController {
     policy: RatePolicy,
     current_mtu: u16,
     last_rtt: Duration,
-    window: u64,
     bandwidth_estimate_bps: u64,
 }
 
@@ -134,27 +142,16 @@ impl PlankRateController {
     }
 
     fn with_policy(policy: RatePolicy, current_mtu: u16) -> Self {
-        let initial_window = window_for_rate(
-            policy.current().active_wire_bps(),
-            INITIAL_WINDOW_RTT,
-            current_mtu,
-        );
         Self {
             policy,
             current_mtu,
             last_rtt: INITIAL_WINDOW_RTT,
-            window: initial_window,
             bandwidth_estimate_bps: 0,
         }
     }
 
-    fn update_window(&mut self, rtt: Duration) {
+    fn update_rtt(&mut self, rtt: Duration) {
         self.last_rtt = rtt;
-        self.window = window_for_rate(
-            self.policy.current().active_wire_bps(),
-            rtt,
-            self.current_mtu,
-        );
     }
 }
 
@@ -175,7 +172,7 @@ impl Controller for PlankRateController {
                 .unwrap_or_default()
                 .min(u64::MAX as u128) as u64;
         }
-        self.update_window(rtt.get());
+        self.update_rtt(rtt.get());
     }
 
     fn on_congestion_event(
@@ -196,17 +193,26 @@ impl Controller for PlankRateController {
 
     fn on_mtu_update(&mut self, new_mtu: u16) {
         self.current_mtu = new_mtu;
-        self.update_window(self.last_rtt);
     }
 
     fn window(&self) -> u64 {
-        self.window
+        // A live slider change or authenticated listener binding must take
+        // effect even before the next ACK refreshes the stored window.
+        window_for_rate(
+            self.policy.current().active_wire_bps(),
+            self.last_rtt,
+            self.current_mtu,
+        )
+    }
+
+    fn pacing_rate(&self) -> Option<u64> {
+        Some(self.policy.current().active_wire_bps())
     }
 
     fn metrics(&self) -> ControllerMetrics {
         let mut metrics = ControllerMetrics::default();
-        metrics.congestion_window = self.window;
-        metrics.pacing_rate = Some(self.policy.current().active_wire_bps());
+        metrics.congestion_window = self.window();
+        metrics.pacing_rate = self.pacing_rate();
         metrics.bandwidth_estimate = Some(self.bandwidth_estimate_bps);
         metrics
     }
@@ -216,7 +222,7 @@ impl Controller for PlankRateController {
     }
 
     fn initial_window(&self) -> u64 {
-        self.window
+        self.window()
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
@@ -231,7 +237,9 @@ pub struct PlankRateControllerFactory {
 
 impl PlankRateControllerFactory {
     pub fn new(policy: Arc<TransportRatePolicy>) -> Arc<Self> {
-        eprintln!("PLANK sender: controller-budget-floor-bps=1000000000");
+        eprintln!(
+            "PLANK sender: bitrate-paced peak-limit=target*1.5 wire-budget=peak*1.4+1000000 burst-ms=2"
+        );
         Arc::new(Self {
             policy: RatePolicy::Fixed(policy),
         })
@@ -264,8 +272,8 @@ mod tests {
 
     #[test]
     fn wire_budget_includes_fixed_raptorq_and_packet_overhead() {
-        assert_eq!(video_to_wire_bps(100_000_000), 136_000_000);
-        assert_eq!(video_to_wire_bps(150_000_000), 203_500_000);
+        assert_eq!(video_to_wire_bps(100_000_000), 141_000_000);
+        assert_eq!(video_to_wire_bps(150_000_000), 211_000_000);
     }
 
     #[test]
@@ -274,11 +282,38 @@ mod tests {
         policy.set_requested_video_bps(50_000_000, 100_000_000);
         assert_eq!(policy.requested_video_bps(), 50_000_000);
         assert_eq!(policy.active_video_bps(), 50_000_000);
-        assert_eq!(policy.active_wire_bps(), 1_000_000_000);
+        assert_eq!(policy.active_wire_bps(), 106_000_000);
     }
 
     #[test]
-    fn rate_floor_survives_slider_changes_without_capping_higher_rates() {
+    fn fifty_megabit_cbr_and_vbr_profiles_keep_bounded_headroom() {
+        let policy = TransportRatePolicy::new(50_000_000);
+        for (peak, wire) in [
+            (1_000_000, 71_000_000),
+            (50_000_000, 71_000_000),
+            (60_000_000, 85_000_000),
+            (75_000_000, 106_000_000),
+            (1_000_000_000, 106_000_000),
+        ] {
+            policy.set_requested_video_bps(50_000_000, peak);
+            assert_eq!(policy.active_video_bps(), 50_000_000);
+            assert_eq!(policy.active_wire_bps(), wire);
+        }
+    }
+
+    #[test]
+    fn live_rate_reduction_updates_scheduler_and_window_without_an_ack() {
+        let policy = TransportRatePolicy::new(500_000_000);
+        let controller = PlankRateController::new(policy.clone(), 1_344);
+        let previous_window = controller.window();
+        policy.set_requested_video_bps(50_000_000, 1_000_000_000);
+        assert_eq!(controller.pacing_rate(), Some(106_000_000));
+        assert!(controller.window() < previous_window);
+        assert_eq!(controller.metrics().pacing_rate, controller.pacing_rate());
+    }
+
+    #[test]
+    fn selected_target_controls_pacing_at_low_and_high_rates() {
         let policy = TransportRatePolicy::new(150_000_000);
         for (requested, peak) in [
             (10_000_000, 15_000_000),
@@ -288,20 +323,23 @@ mod tests {
             policy.set_requested_video_bps(requested, peak);
             assert_eq!(policy.active_video_bps(), requested);
             assert_eq!(policy.requested_video_bps(), requested);
-            let wire = video_to_wire_bps(peak);
-            assert_eq!(policy.active_wire_bps(), wire.max(SEND_BUDGET_FLOOR_BPS));
+            assert_eq!(
+                policy.active_wire_bps(),
+                video_to_wire_bps(bounded_peak_video_bps(requested, peak))
+            );
         }
     }
 
     #[test]
     fn controller_window_uses_selected_budget_and_stays_rtt_bounded() {
         let policy = TransportRatePolicy::new(100_000_000);
+        policy.set_requested_video_bps(100_000_000, 100_000_000);
         let mut controller = PlankRateController::new(policy, 1_344);
-        controller.update_window(Duration::from_millis(20));
-        assert_eq!(controller.window(), 3_750_000);
-        controller.update_window(Duration::from_secs(10));
-        assert_eq!(controller.window(), 18_750_000);
-        controller.update_window(Duration::from_micros(1));
+        controller.update_rtt(Duration::from_millis(20));
+        assert_eq!(controller.window(), 528_750);
+        controller.update_rtt(Duration::from_secs(10));
+        assert_eq!(controller.window(), 2_643_750);
+        controller.update_rtt(Duration::from_micros(1));
         assert_eq!(controller.window(), MIN_WINDOW_PACKETS * 1_344);
     }
 
@@ -318,15 +356,15 @@ mod tests {
     }
 
     #[test]
-    fn explicit_peak_rate_change_updates_the_controller_budget() {
+    fn excessive_encoder_peak_is_capped_at_fifty_percent_headroom() {
         let policy = TransportRatePolicy::new(100_000_000);
         policy.set_requested_video_bps(150_000_000, 225_000_000);
         assert_eq!(policy.requested_video_bps(), 150_000_000);
         assert_eq!(policy.active_video_bps(), 150_000_000);
-        assert_eq!(policy.active_wire_bps(), 1_000_000_000);
+        assert_eq!(policy.active_wire_bps(), 316_000_000);
         policy.set_requested_video_bps(150_000_000, 1_000_000_000);
         assert_eq!(policy.active_video_bps(), 150_000_000);
-        assert_eq!(policy.active_wire_bps(), 1_351_000_000);
+        assert_eq!(policy.active_wire_bps(), 316_000_000);
     }
 
     #[test]
@@ -358,8 +396,8 @@ mod tests {
         owner_binding.bind(owner_policy.clone());
         guest_binding.bind(guest_policy.clone());
         owner_policy.set_requested_video_bps(500_000_000, 1_000_000_000);
-        assert_eq!(owner.metrics().pacing_rate, Some(1_351_000_000));
-        assert_eq!(guest.metrics().pacing_rate, Some(1_000_000_000));
+        assert_eq!(owner.metrics().pacing_rate, Some(1_051_000_000));
+        assert_eq!(guest.metrics().pacing_rate, Some(106_000_000));
         owner.on_congestion_event(Instant::now(), Instant::now(), false, 1_344);
         guest.on_congestion_event(Instant::now(), Instant::now(), true, 1_344);
         assert_eq!(

@@ -742,10 +742,14 @@ Cargo and Boost cache groups are independent.
 
 Host packaging selects `PLANK_TRANSPORT_CARGO_FEATURES=quinn-telemetry` by
 default. The application datagram pacer and platform-specific fast-send switches
-have been removed. All builds use the same 1 Gbps floor for the Host's
-RTT-bounded Quinn window budget; encoder target, FEC, queues and MTU remain
-independent. Quinn still schedules packets. There is no paced comparison build
-to select, and the package always verifies its sender-budget marker.
+have been removed. All Host builds use a bitrate-derived Quinn pacing ceiling:
+encoder peak (bounded to 1.5 times the selected target) times 1.4 plus 1 Mbit/s.
+The packet scheduler bounds saved
+burst credit to two milliseconds (with two/256-MTU minimum/maximum bounds);
+encoder peaks cannot exceed the bounded headroom. The RTT-bounded window derives
+from the same budget. Encoder target, FEC, queues and MTU remain independent.
+There is no alternate comparison build to select. Packaging verifies the
+`PLANK sender: bitrate-paced` marker and runs the vendored pacing regressions.
 The historical experiment is retained in `docs/development/plans/linux-fast-send.plan`;
 do not reuse its removed feature flags. The simultaneous RaptorQ 2 upgrade
 requires matching Host/Client builds; do not apply the old host-only deployment
@@ -753,8 +757,8 @@ assumption to that wire change.
 
 Host packaging runs Rust unit tests and the real native/C ABI loopbacks against
 its selected Cargo features in the same `plank-transport-cargo` target directory.
-Packaging requires Rust unit tests, all three
-native loss matrices with unchanged recovery/performance limits, and the C ABI
+Packaging requires Rust unit tests, three native loss matrices each for CBR
+and VBR peaks with unchanged recovery/performance limits, and the C ABI
 checks. A failure in the shipping policy stops packaging. No retired pacer
 implementation or comparison selection remains.
 Standalone loopback runners also accept `PLANK_TRANSPORT_CARGO_FEATURES`; an

@@ -55,6 +55,11 @@ fi
 # macOS ships Bash3.2, where an empty array is unbound under nounset.
 cargo +1.89.0 build --target-dir "$shared_target_dir" --locked --release --message-format=json ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml > "$transport_build/cargo-build.jsonl"
 cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
+cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --offline --release \
+    --manifest-path third_party/quinn-proto-0.11.17/Cargo.toml --lib connection::pacing
+cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --offline --release \
+    --manifest-path third_party/quinn-proto-0.11.17/Cargo.toml \
+    --lib tests::plank_pacing_cap_bounds_encrypted_datagram_bursts -- --exact
 if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
     # Dependency unit tests are not run by the root Cargo test command.
     # Compile the production helper/tests against this exact archive's rlib.

@@ -2,7 +2,8 @@
 
 Historical experiment; superseded on `raptorq-upgrade` by deletion of the
 application datagram pacer and its platform feature switches. The shared Host
-sender always retains the 1 Gbps budget floor and Quinn scheduling. Do not use
+sender's former 1 Gbps budget floor is subsequently replaced by the explicit
+bitrate-derived Quinn ceiling in `docs/development/bitrate-pacing.md`. Do not use
 the old feature selections/comparison commands below for current builds; use
 the release runbook and RaptorQ qualification record. Historical measurements
 below remain historical, not acceptance evidence for the new combined build.

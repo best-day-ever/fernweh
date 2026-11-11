@@ -595,7 +595,10 @@ impl Connection {
 
                 // Congestion control and pacing checks
                 // Tail loss probes must not be blocked by congestion, or a deadlock could arise
-                if ack_eliciting && self.spaces[space_id].loss_probes == 0 {
+                let pacing_rate = self.path.congestion.pacing_rate();
+                if ack_eliciting
+                    && (self.spaces[space_id].loss_probes == 0 || pacing_rate.is_some())
+                {
                     // Assume the current packet will get padded to fill the segment
                     let untracked_bytes = if let Some(builder) = &builder_storage {
                         buf_capacity - builder.partial_encode.start
@@ -605,7 +608,9 @@ impl Connection {
                     debug_assert!(untracked_bytes <= segment_size as u64);
 
                     let bytes_to_send = segment_size as u64 + untracked_bytes;
-                    if self.path.in_flight.bytes + bytes_to_send >= self.path.congestion.window() {
+                    if self.spaces[space_id].loss_probes == 0
+                        && self.path.in_flight.bytes + bytes_to_send >= self.path.congestion.window()
+                    {
                         space_idx += 1;
                         congestion_blocked = true;
                         // We continue instead of breaking here in order to avoid
@@ -616,12 +621,13 @@ impl Connection {
 
                     // Check whether the next datagram is blocked by pacing
                     let smoothed_rtt = self.path.rtt.get();
-                    if let Some(delay) = self.path.pacing.delay(
+                    if let Some(delay) = self.path.pacing.delay_with_rate(
                         smoothed_rtt,
                         bytes_to_send,
                         self.path.current_mtu(),
                         self.path.congestion.window(),
                         now,
+                        pacing_rate,
                     ) {
                         self.timers.set(Timer::Pacing, delay);
                         congestion_blocked = true;

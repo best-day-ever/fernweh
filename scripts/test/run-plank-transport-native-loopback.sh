@@ -78,7 +78,8 @@ cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate
 
 # The throughput gate is timing-sensitive under x86 emulation. A release
 # builder may use three passes from a native x86_64 Rocky 9.7 machine, but only
-# for the identical compiled test executable. All other tests still run here.
+# for the identical compiled test executable: three VBR and three CBR runs.
+# All other tests still run here.
 # The operator must retain the native test log as release evidence.
 if [[ -n ${SC_NATIVE_LOSS_ATTESTED_SHA256:-} ]]; then
   [[ ${SC_NATIVE_CARGO_PROFILE:-release} == release && $(uname -m) == x86_64 ]] || {
@@ -97,13 +98,16 @@ if [[ -n ${SC_NATIVE_LOSS_ATTESTED_SHA256:-} ]]; then
     echo "native loss attestation does not match the compiled test executable" >&2
     exit 1
   }
-  echo "native_loss_matrix_attested=pass trials=3 executable_sha256=$actual_sha256"
+  echo "native_loss_matrix_attested=pass trials_per_mode=3 modes=vbr,cbr executable_sha256=$actual_sha256"
 else
   # Three required passes, not retries: set -e stops on the first failure.
   for loss_trial in 1 2 3; do
     echo "native_loss_matrix_trial=$loss_trial"
     cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
       native::tests::native_raptorq_survives_progressive_transport_loss_at_150_mbps \
+      -- --ignored --exact --nocapture
+    cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+      native::tests::native_raptorq_survives_progressive_transport_loss_at_150_mbps_cbr \
       -- --ignored --exact --nocapture
   done
 fi
