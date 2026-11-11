@@ -27,9 +27,9 @@ needs no new setting or wire version.
 
 ## Burst bound
 
-The scheduler uses a token bucket with two milliseconds of saved credit,
+The scheduler uses a token bucket with eight milliseconds of saved credit,
 bounded between two and 256 path MTUs. At the maximum 106 Mbit/s budget for a
-50 Mbit/s selection, the bucket holds 26,500 bytes. Over an interval of length
+50 Mbit/s selection, the bucket holds 106,000 bytes. Over an interval of length
 `t`, paced QUIC bytes are bounded by `budget * t / 8 + bucket capacity`.
 Packets in a small GSO batch can still leave at NIC speed; the bound controls
 batch size and refill rate. UDP/IP/Ethernet headers are outside this accounting.
@@ -92,3 +92,12 @@ symbols and zero reported sender queue evictions. Both fingerprint and
 setup-promoted C ABI trust paths pass video/audio/input/control and closure.
 Root CI runs 119 tests with one existing platform skip. These results do not
 qualify an installed Linux package, actual codec output or a real WAN path.
+
+The 1.2.31 two-ms candidate is rejected by installed software-codec qualification.
+A capped sender has no window/RTT refill gain: with four-ms runtime wakeups, its
+two-ms credit bucket delivered only about half the requested cap. A deterministic
+coarse-wakeup regression reproduces that underdelivery. The eight-ms capped bucket
+retains bounded idle recovery and rate envelopes while tolerating ordinary
+scheduler jitter. Uncapped controllers keep their upstream two-ms interval.
+Installed qualification must still pass; this unit finding alone is not a claim
+that every observed playback drop has the same cause.

@@ -1953,16 +1953,16 @@ fn plank_pacing_cap_bounds_encrypted_datagram_bursts() {
             received += 1;
         }
         let sent = pair.server_conn_mut(server).stats().udp_tx.bytes - baseline;
-        // Any sampled interval has at most two ms of saved credit plus its
+        // Any sampled interval has at most eight ms of saved credit plus its
         // elapsed-rate allowance. This also catches GSO batch accounting bugs.
         for &(earlier_tick, earlier_bytes) in &samples {
-            let allowed = 17_125 + 68_500_000 * (tick - earlier_tick) * 100 / 8_000_000;
+            let allowed = 68_500 + 68_500_000 * (tick - earlier_tick) * 100 / 8_000_000;
             assert!(
                 sent - earlier_bytes <= allowed,
                 "packet scheduler exceeded paced envelope"
             );
         }
-        assert!(sent <= 17_125 + 68_500_000 * tick * 100 / 8_000_000);
+        assert!(sent <= 68_500 + 68_500_000 * tick * 100 / 8_000_000);
         samples.push((tick, sent));
     }
     assert_eq!(received, 512);

@@ -537,7 +537,7 @@ Host and Client packages are required. See the native transport contract.
 All Host builds submit directly to Quinn, whose packet scheduler caps paced
 traffic at the encoder peak (bounded to 1.5 times the selected target) times 1.4
 plus 1 Mbit/s. Saved burst
-credit is bounded to two milliseconds, with two/256-MTU minimum/maximum bounds.
+credit is bounded to eight milliseconds, with two/256-MTU minimum/maximum bounds.
 The RTT-bounded window uses the same rate; encoder peak settings cannot exceed
 the bounded headroom. This is a QUIC byte budget with a small burst allowance,
 not an Ethernet line-rate policer. Encoder settings, FEC and queue capacities

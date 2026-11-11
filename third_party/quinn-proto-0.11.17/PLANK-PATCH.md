@@ -46,7 +46,7 @@ bits/s. Quinn enforces it in the packet scheduler with a token bucket separate
 from the congestion window. Controllers returning `None` retain window/RTT
 pacing. Controller metrics remain telemetry rather than scheduler configuration.
 
-The capped bucket holds two milliseconds of traffic, bounded between two and
+The capped bucket holds eight milliseconds of traffic, bounded between two and
 256 path MTUs. It cannot accumulate idle credit beyond that capacity. Refill
 preserves fractional bytes; rate reductions and authenticated policy binding
 clamp saved credit before the next transmission. The ceiling also applies to

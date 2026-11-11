@@ -1148,7 +1148,7 @@ cmake --build "$build_dir" --parallel "$build_jobs" \
 )
 echo "host_transport_policy_loopback_gate=pass features=$plank_transport_cargo_features"
 
-rg -a -Fq 'PLANK sender: bitrate-paced peak-limit=target*1.5 wire-budget=peak*1.4+1000000 burst-ms=2' \
+rg -a -Fq 'PLANK sender: bitrate-paced peak-limit=target*1.5 wire-budget=peak*1.4+1000000 burst-ms=8' \
   "$build_dir/plank-host" || {
   echo "host binary is missing the shared sender budget policy" >&2
   exit 1

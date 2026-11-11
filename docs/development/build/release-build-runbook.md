@@ -745,7 +745,7 @@ default. The application datagram pacer and platform-specific fast-send switches
 have been removed. All Host builds use a bitrate-derived Quinn pacing ceiling:
 encoder peak (bounded to 1.5 times the selected target) times 1.4 plus 1 Mbit/s.
 The packet scheduler bounds saved
-burst credit to two milliseconds (with two/256-MTU minimum/maximum bounds);
+burst credit to eight milliseconds (with two/256-MTU minimum/maximum bounds);
 encoder peaks cannot exceed the bounded headroom. The RTT-bounded window derives
 from the same budget. Encoder target, FEC, queues and MTU remain independent.
 There is no alternate comparison build to select. Packaging verifies the
