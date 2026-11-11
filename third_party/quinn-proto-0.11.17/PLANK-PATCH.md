@@ -38,3 +38,26 @@ canonical copy. Do not create a second probe-local vendor tree.
 Remove this override only after Kyber resolves to a released Quinn version
 that contains equivalent fixes and passes the PLANK 5% and 10% loss
 qualification tests.
+
+## Explicit sender pacing ceiling
+
+PLANK's Host controller supplies an optional `Controller::pacing_rate()` in
+bits/s. Quinn enforces it in the packet scheduler with a token bucket separate
+from the congestion window. Controllers returning `None` retain window/RTT
+pacing. Controller metrics remain telemetry rather than scheduler configuration.
+
+The capped bucket holds two milliseconds of traffic, bounded between two and
+256 path MTUs. It cannot accumulate idle credit beyond that capacity. Refill
+preserves fractional bytes; rate reductions and authenticated policy binding
+clamp saved credit before the next transmission. The ceiling also applies to
+ack-eliciting loss probes, which remain exempt from the congestion window.
+ACK-only and connection-close packets retain their normal QUIC exceptions.
+
+The Host uses the encoder peak, bounded to 1.5 times the selected video target,
+then adds 40% for repair/headers and 1 Mbit/s for audio/control. Excessive encoder
+peak settings cannot raise the ceiling beyond that bounded headroom. This is a paced QUIC
+byte budget with a bounded burst allowance, not an Ethernet line-rate policer.
+Pacer regressions cover idle recovery, rate changes, fractional credit, MTU and
+clock changes. An encrypted endpoint/GSO regression verifies the envelope over
+sampled intervals even with a congestion window large enough to disable the
+ordinary window-derived pacer.

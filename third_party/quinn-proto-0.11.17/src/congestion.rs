@@ -65,6 +65,15 @@ pub trait Controller: Send + Sync {
     /// Number of ack-eliciting bytes that may be in flight
     fn window(&self) -> u64;
 
+    /// Optional upper bound on paced ack-eliciting traffic, in bits/s.
+    ///
+    /// This is enforced by the packet scheduler independently of the congestion
+    /// window. `None` retains Quinn's ordinary window/RTT-derived pacing. Metrics
+    /// alone do not configure pacing. A supplied rate must be nonzero.
+    fn pacing_rate(&self) -> Option<u64> {
+        None
+    }
+
     /// Retrieve implementation-specific metrics used to populate `qlog` traces when they are enabled
     fn metrics(&self) -> ControllerMetrics {
         ControllerMetrics {

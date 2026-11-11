@@ -534,11 +534,14 @@ timing test is synthetic CPU preparation, not a network/performance gate.
 RaptorQ 2 changes repair IDs and the native QUIC protocol identifier; matching
 Host and Client packages are required. See the native transport contract.
 
-All Host builds use the shared sender policy: submit directly to Quinn and
-floor the rate-derived window budget at 1 Gbps. This is
-not an encoder bitrate, a measured link capacity, or a strict wire-rate cap;
-Quinn still schedules transmission. Encoder settings, FEC and queue capacities
-are unchanged by pacer removal. The `PLANK_MACOS_FAST_SEND` switch and
+All Host builds submit directly to Quinn, whose packet scheduler caps paced
+traffic at the encoder peak (bounded to 1.5 times the selected target) times 1.4
+plus 1 Mbit/s. Saved burst
+credit is bounded to two milliseconds, with two/256-MTU minimum/maximum bounds.
+The RTT-bounded window uses the same rate; encoder peak settings cannot exceed
+the bounded headroom. This is a QUIC byte budget with a small burst allowance,
+not an Ethernet line-rate policer. Encoder settings, FEC and queue capacities
+remain unchanged. The `PLANK_MACOS_FAST_SEND` switch and
 `macos-fast-send`/`linux-fast-send` Cargo features have been removed; there is
 no alternate paced baseline. Linux and macOS use the same sender budget policy.
 Check receiver loss as well as sender drain: immediate submission can move

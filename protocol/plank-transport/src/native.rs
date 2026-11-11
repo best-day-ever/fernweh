@@ -1013,6 +1013,16 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "run through scripts/test/run-plank-transport-native-loopback.sh"]
     async fn native_raptorq_survives_progressive_transport_loss_at_150_mbps() {
+        run_native_loss_matrix(225_000_000).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "run through scripts/test/run-plank-transport-native-loopback.sh"]
+    async fn native_raptorq_survives_progressive_transport_loss_at_150_mbps_cbr() {
+        run_native_loss_matrix(150_000_000).await;
+    }
+
+    async fn run_native_loss_matrix(peak_video_bps: u64) {
         crate::init_crypto_once();
         let (certificate_path, private_key_path, certificate_sha256) = test_certificate_paths();
         let certificate = kynet::cert::load_cert_from_pem_file(&certificate_path)
@@ -1032,6 +1042,7 @@ mod tests {
             file_clipboard_enabled: false,
         };
         let rate_policy = TransportRatePolicy::new(150_000_000);
+        rate_policy.set_requested_video_bps(150_000_000, peak_video_bps);
         let server_options = kynet::common::CommonServerOptions {
             max_idle_timeout: Some(options.idle_timeout),
             keep_alive_interval: Some(options.keep_alive_interval),
@@ -1193,6 +1204,12 @@ mod tests {
                 phase_start.elapsed().as_millis(), dropped - dropped_after_phase
             );
             dropped_after_phase = dropped;
+            // Preserve sender loss/queue telemetry even if the receiver has
+            // already missed a deadline and the final join will fail.
+            eprintln!(
+                "fec_loss_sender_basis_points={loss} stats={:?}",
+                server_connection.connection_stats().await
+            );
         }
         let received = tokio::time::timeout_at(
             matrix_start + frame_offset(TOTAL_FRAMES) + FRAME_DEADLINE,

@@ -18,6 +18,8 @@ pub(super) struct Pacer {
     last_mtu: u16,
     tokens: u64,
     prev: Instant,
+    last_rate: Option<u64>,
+    fractional_tokens: u128,
 }
 
 impl Pacer {
@@ -30,6 +32,8 @@ impl Pacer {
             last_mtu: mtu,
             tokens: capacity,
             prev: now,
+            last_rate: None,
+            fractional_tokens: 0,
         }
     }
 
@@ -45,7 +49,8 @@ impl Pacer {
     ///
     /// The 5/4 ratio used here comes from the suggestion that N = 1.25 in the draft IETF RFC for
     /// QUIC.
-    pub(super) fn delay(
+    #[cfg(test)]
+    fn delay(
         &mut self,
         smoothed_rtt: Duration,
         bytes_to_send: u64,
@@ -53,6 +58,28 @@ impl Pacer {
         window: u64,
         now: Instant,
     ) -> Option<Instant> {
+        self.delay_with_rate(smoothed_rtt, bytes_to_send, mtu, window, now, None)
+    }
+
+    pub(super) fn delay_with_rate(
+        &mut self,
+        smoothed_rtt: Duration,
+        bytes_to_send: u64,
+        mtu: u16,
+        window: u64,
+        now: Instant,
+        rate_bps: Option<u64>,
+    ) -> Option<Instant> {
+        if let Some(rate_bps) = rate_bps {
+            return self.delay_capped(bytes_to_send, mtu, now, rate_bps.max(1));
+        }
+
+        if self.last_rate.take().is_some() {
+            self.capacity = optimal_capacity(smoothed_rtt, window, mtu);
+            self.tokens = self.tokens.min(self.capacity);
+            self.prev = now;
+            self.fractional_tokens = 0;
+        }
         debug_assert_ne!(
             window, 0,
             "zero-sized congestion control window is nonsense"
@@ -111,6 +138,57 @@ impl Pacer {
         // this is the time at which the pacing window becomes empty
         Some(self.prev + (unscaled_delay / 5) * 4)
     }
+
+    /// A rate cap must not inherit the window/RTT gain, or bank idle time for
+    /// a later catch-up burst. Refill on every poll, even when tokens remain.
+    fn delay_capped(
+        &mut self,
+        bytes_to_send: u64,
+        mtu: u16,
+        now: Instant,
+        rate_bps: u64,
+    ) -> Option<Instant> {
+        let capacity = ((u128::from(rate_bps) * BURST_INTERVAL_NANOS / 8_000_000_000)
+            .min(u128::from(u64::MAX)) as u64)
+            .clamp(2 * u64::from(mtu), MAX_BURST_SIZE * u64::from(mtu));
+        if self.last_rate != Some(rate_bps) || self.last_mtu != mtu {
+            // Apply reductions before spending saved tokens. Time before a
+            // policy change is never credited at the new rate.
+            self.capacity = capacity;
+            self.tokens = self.tokens.min(capacity);
+            self.last_rate = Some(rate_bps);
+            self.last_mtu = mtu;
+            self.fractional_tokens = 0;
+            self.prev = now;
+        } else if let Some(elapsed) = now.checked_duration_since(self.prev) {
+            let credit = elapsed
+                .as_nanos()
+                .saturating_mul(u128::from(rate_bps))
+                .saturating_add(self.fractional_tokens);
+            let whole = (credit / 8_000_000_000).min(u128::from(u64::MAX)) as u64;
+            self.tokens = self.tokens.saturating_add(whole).min(capacity);
+            self.fractional_tokens = if self.tokens == capacity {
+                0
+            } else {
+                credit % 8_000_000_000
+            };
+            self.prev = now;
+        }
+
+        if self.tokens >= bytes_to_send {
+            return None;
+        }
+        // Wake when the next datagram fits. Waiting for the entire bucket
+        // makes coarse timer wakeups discard refill credit and underdeliver
+        // the selected rate. GSO may use the credit present at the wakeup.
+        let missing = u128::from(bytes_to_send - self.tokens);
+        let nanos = missing
+            .saturating_mul(8_000_000_000)
+            .saturating_sub(self.fractional_tokens)
+            .div_ceil(u128::from(rate_bps))
+            .min(u128::from(u64::MAX)) as u64;
+        Some(self.prev + Duration::from_nanos(nanos))
+    }
 }
 
 /// Calculates a pacer capacity for a certain window and RTT
@@ -153,6 +231,158 @@ const MAX_BURST_SIZE: u64 = 256;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capped_sender_obeys_rate_envelope_with_large_window_and_gso_batches() {
+        let now = Instant::now();
+        let mtu = 1344;
+        let rate = 68_500_000;
+        let mut pacer = Pacer::new(Duration::from_micros(1), u64::MAX, mtu, now);
+        let mut sent = 0;
+        let mut largest_batch = 0;
+        for tick in 0..=1000 {
+            let time = now + Duration::from_micros(tick * 100);
+            let mut batch = 0;
+            while pacer
+                .delay_with_rate(Duration::ZERO, mtu.into(), mtu, u64::MAX, time, Some(rate))
+                .is_none()
+            {
+                pacer.on_transmit(mtu);
+                sent += u64::from(mtu);
+                batch += u64::from(mtu);
+            }
+            largest_batch = largest_batch.max(batch);
+            let allowance = rate * tick * 100 / 8_000_000 + pacer.capacity;
+            assert!(sent <= allowance, "{sent} > {allowance} at tick {tick}");
+        }
+        assert_eq!(pacer.capacity, 17_125);
+        assert!(largest_batch <= pacer.capacity);
+        assert!(
+            sent > rate / 8 / 10 * 99 / 100,
+            "cap must still deliver the selected rate"
+        );
+    }
+
+    #[test]
+    fn capped_sender_cannot_bank_idle_time_or_resume_with_a_frame_sized_burst() {
+        let now = Instant::now();
+        let mtu = 1344;
+        let rate = 68_500_000;
+        let mut pacer = Pacer::new(Duration::from_millis(200), 10_000_000, mtu, now);
+        for time in [now, now + Duration::from_secs(60)] {
+            let mut burst = 0;
+            while pacer
+                .delay_with_rate(
+                    Duration::from_millis(200),
+                    mtu.into(),
+                    mtu,
+                    10_000_000,
+                    time,
+                    Some(rate),
+                )
+                .is_none()
+            {
+                pacer.on_transmit(mtu);
+                burst += u64::from(mtu);
+            }
+            assert!(burst <= 17_125);
+            assert!(burst >= 17_125 - u64::from(mtu));
+            // A second poll at the same instant cannot re-credit the idle time.
+            assert!(
+                pacer
+                    .delay_with_rate(Duration::ZERO, mtu.into(), mtu, u64::MAX, time, Some(rate))
+                    .is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn rate_reduction_clamps_saved_credit_immediately_before_next_ack() {
+        let now = Instant::now();
+        let mtu = 1344;
+        let mut pacer = Pacer::new(Duration::from_millis(20), 10_000_000, mtu, now);
+        assert!(
+            pacer
+                .delay_with_rate(
+                    Duration::from_millis(20),
+                    mtu.into(),
+                    mtu,
+                    10_000_000,
+                    now,
+                    Some(676_000_000)
+                )
+                .is_none()
+        );
+        let later = now + Duration::from_secs(1);
+        let mut burst = 0;
+        while pacer
+            .delay_with_rate(
+                Duration::from_millis(20),
+                mtu.into(),
+                mtu,
+                10_000_000,
+                later,
+                Some(68_500_000),
+            )
+            .is_none()
+        {
+            pacer.on_transmit(mtu);
+            burst += u64::from(mtu);
+        }
+        assert!(burst <= 17_125);
+        assert_eq!(pacer.capacity, 17_125);
+    }
+
+    #[test]
+    fn capped_sender_keeps_fractional_credit_between_frequent_polls() {
+        let now = Instant::now();
+        let mut pacer = Pacer::new(Duration::from_millis(20), 100_000, 1200, now);
+        pacer.delay_with_rate(Duration::ZERO, 1200, 1200, 100_000, now, Some(1_000_000));
+        pacer.tokens = 0;
+        for tick in 1..=8000 {
+            pacer.delay_with_rate(
+                Duration::ZERO,
+                1200,
+                1200,
+                100_000,
+                now + Duration::from_nanos(tick),
+                Some(1_000_000),
+            );
+        }
+        assert_eq!(pacer.tokens, 1);
+        assert_eq!(pacer.fractional_tokens, 0);
+    }
+
+    #[test]
+    fn capped_sender_handles_clock_regression_mtu_and_rate_changes() {
+        let now = Instant::now();
+        let mut pacer = Pacer::new(Duration::from_millis(20), 100_000, 1200, now);
+        pacer.delay_with_rate(Duration::ZERO, 1200, 1200, 100_000, now, Some(1_000_000));
+        pacer.tokens = 0;
+        assert!(
+            pacer
+                .delay_with_rate(
+                    Duration::ZERO,
+                    1200,
+                    1200,
+                    100_000,
+                    now - Duration::from_secs(1),
+                    Some(1_000_000)
+                )
+                .is_some()
+        );
+        assert_eq!(pacer.prev, now);
+        pacer.delay_with_rate(Duration::ZERO, 9000, 9000, u64::MAX, now, Some(1_000_000));
+        assert_eq!(pacer.capacity, 18_000);
+        assert_eq!(pacer.tokens, 0);
+        // The default controller still selects the upstream pacer.
+        pacer.delay_with_rate(Duration::from_millis(20), 1200, 1200, 100_000, now, None);
+        assert_eq!(pacer.last_rate, None);
+        assert_eq!(
+            pacer.capacity,
+            optimal_capacity(Duration::from_millis(20), 100_000, 1200)
+        );
+    }
 
     #[test]
     fn does_not_panic_on_bad_instant() {

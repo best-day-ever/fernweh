@@ -1135,6 +1135,12 @@ cmake --build "$build_dir" --parallel "$build_jobs" \
   # Qualify the shipping policy. There is no alternate application-paced mode.
   cargo test --locked --offline --release --features "$plank_transport_cargo_features" \
     --manifest-path "$plank_transport_dir/Cargo.toml"
+  cargo test --locked --offline --release \
+    --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+    --lib connection::pacing
+  cargo test --locked --offline --release \
+    --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+    --lib tests::plank_pacing_cap_bounds_encrypted_datagram_bursts -- --exact
   PLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features" SC_NATIVE_CARGO_PROFILE=release \
     bash "$repo_dir/scripts/test/run-plank-transport-native-loopback.sh"
   PLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features" \
@@ -1142,7 +1148,7 @@ cmake --build "$build_dir" --parallel "$build_jobs" \
 )
 echo "host_transport_policy_loopback_gate=pass features=$plank_transport_cargo_features"
 
-rg -a -Fq 'PLANK sender: controller-budget-floor-bps=1000000000' \
+rg -a -Fq 'PLANK sender: bitrate-paced peak-limit=target*1.5 wire-budget=peak*1.4+1000000 burst-ms=2' \
   "$build_dir/plank-host" || {
   echo "host binary is missing the shared sender budget policy" >&2
   exit 1

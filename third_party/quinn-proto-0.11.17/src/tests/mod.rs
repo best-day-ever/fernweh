@@ -1895,6 +1895,79 @@ fn datagram_send_recv() {
     assert_matches!(pair.server_datagrams(server_ch).recv(), None);
 }
 
+/// Exercise the actual encrypted packet/GSO scheduler, not only pacer math.
+#[test]
+fn plank_pacing_cap_bounds_encrypted_datagram_bursts() {
+    #[derive(Clone)]
+    struct CappedController;
+    impl congestion::Controller for CappedController {
+        fn on_congestion_event(&mut self, _: Instant, _: Instant, _: bool, _: u64) {}
+        fn on_mtu_update(&mut self, _: u16) {}
+        fn window(&self) -> u64 {
+            1 << 34
+        }
+        fn initial_window(&self) -> u64 {
+            self.window()
+        }
+        fn pacing_rate(&self) -> Option<u64> {
+            Some(68_500_000)
+        }
+        fn clone_box(&self) -> Box<dyn congestion::Controller> {
+            Box::new(self.clone())
+        }
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+            self
+        }
+    }
+    struct CappedFactory;
+    impl congestion::ControllerFactory for CappedFactory {
+        fn build(self: Arc<Self>, _: Instant, _: u16) -> Box<dyn congestion::Controller> {
+            Box::new(CappedController)
+        }
+    }
+
+    let mut config = server_config();
+    let mut transport = TransportConfig::default();
+    transport.congestion_controller_factory(Arc::new(CappedFactory));
+    transport.datagram_send_buffer_size(2 * 1024 * 1024);
+    transport.mtu_discovery_config(None);
+    transport.initial_mtu(1344);
+    config.transport = Arc::new(transport);
+    let mut pair = Pair::new(Default::default(), config);
+    let (client, server) = pair.connect();
+    let start = pair.time;
+    let baseline = pair.server_conn_mut(server).stats().udp_tx.bytes;
+    for _ in 0..512 {
+        pair.server_datagrams(server)
+            .send(Bytes::from_static(&[42; 1024]), false)
+            .unwrap();
+    }
+    let mut samples = Vec::new();
+    let mut received = 0;
+    for tick in 0..=1000 {
+        pair.time = start + Duration::from_micros(tick * 100);
+        pair.drive_server();
+        pair.drive_client();
+        while let Some(payload) = pair.client_datagrams(client).recv() {
+            assert_eq!(payload, &[42; 1024][..]);
+            received += 1;
+        }
+        let sent = pair.server_conn_mut(server).stats().udp_tx.bytes - baseline;
+        // Any sampled interval has at most two ms of saved credit plus its
+        // elapsed-rate allowance. This also catches GSO batch accounting bugs.
+        for &(earlier_tick, earlier_bytes) in &samples {
+            let allowed = 17_125 + 68_500_000 * (tick - earlier_tick) * 100 / 8_000_000;
+            assert!(
+                sent - earlier_bytes <= allowed,
+                "packet scheduler exceeded paced envelope"
+            );
+        }
+        assert!(sent <= 17_125 + 68_500_000 * tick * 100 / 8_000_000);
+        samples.push((tick, sent));
+    }
+    assert_eq!(received, 512);
+}
+
 #[cfg(feature = "plank-telemetry")]
 #[test]
 fn plank_telemetry_snapshot_is_owned_and_preserves_queue_counters() {
