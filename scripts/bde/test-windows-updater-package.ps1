@@ -35,6 +35,9 @@ try {
         -Package (Resolve-Path $Package).Path -QtFixture "$build\release\windows-msi-fixture.exe" `
         -Helper "$sourceRoot\apps\client\app\backend\fernweh-install-update.ps1"
     if ($LASTEXITCODE) { throw 'Real Windows Installer service regression failed.' }
+    & "$PSScriptRoot\test-windows-updater-standard-user.ps1" `
+        -Package (Resolve-Path $Package).Path -QtFixture "$build\release\windows-msi-fixture.exe" `
+        -QtRoot $QtRoot -Helper "$sourceRoot\apps\client\app\backend\fernweh-install-update.ps1"
 } finally {
     $env:PATH = $oldPath
     Remove-Item -LiteralPath $build -Recurse -Force
