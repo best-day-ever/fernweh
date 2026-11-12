@@ -14,13 +14,15 @@ $taskName = 'Fernweh-Standard-User-Test-' + [guid]::NewGuid().ToString('N')
 [void][IO.Directory]::CreateDirectory($directory)
 $resultFile = Join-Path $directory 'result.json'
 $wrapper = Join-Path $directory 'run.ps1'
+$workerLog = Join-Path $directory 'worker.log'
+$succeeded = $false
 function Quote-Literal([string]$value) { return "'" + $value.Replace("'", "''") + "'" }
 try {
     $command = '$env:PATH = ' + (Quote-Literal "$QtRoot\bin;") + ' + $env:PATH' + "`r`n" +
         '& ' + (Quote-Literal $worker) + ' -Package ' + (Quote-Literal (Resolve-Path $Package).Path) +
         ' -QtFixture ' + (Quote-Literal (Resolve-Path $QtFixture).Path) +
         ' -Helper ' + (Quote-Literal (Resolve-Path $Helper).Path) +
-        ' -ResultFile ' + (Quote-Literal $resultFile)
+        ' -ResultFile ' + (Quote-Literal $resultFile) + ' *> ' + (Quote-Literal $workerLog)
     [IO.File]::WriteAllText($wrapper, $command, [Text.UTF8Encoding]::new($true))
     $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $wrapper + '"')
@@ -34,8 +36,10 @@ try {
         Start-Sleep -Milliseconds 200
     }
     if (-not (Test-Path -LiteralPath $resultFile)) {
-        throw 'The standard-user regression did not finish. A logged-in builder desktop with a limited token is required.'
+        $taskResult = (Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult
+        throw "The standard-user regression did not finish (task result $taskResult). Evidence retained at $directory."
     }
+    $succeeded = $true
     $result = Get-Content -Raw -LiteralPath $resultFile | ConvertFrom-Json
     if (-not $result.passed -or $result.elevated -or $result.cases.Count -ne 2) {
         throw ('Standard-user updater regression failed: ' + $result.error)
@@ -47,5 +51,5 @@ try {
         if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName }
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
-    Remove-Item -LiteralPath $directory -Recurse -ErrorAction SilentlyContinue
+    if ($succeeded) { Remove-Item -LiteralPath $directory -Recurse -ErrorAction SilentlyContinue }
 }
