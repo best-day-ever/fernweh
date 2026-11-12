@@ -159,6 +159,12 @@ static void queuedRecovery(int codec, const unsigned char* key, size_t size) {
     CHECK(requests == before + 1);
     CHECK(frame(key, size, 27, true) == 0);
     stopVideoFrameAssembler();
+    // A producer already in flight at stop cannot transfer ownership to a
+    // shutdown queue or trigger another recovery cycle.
+    pullMode = false;
+    before = requests;
+    CHECK(frame(key, size, 28, true) == 0);
+    CHECK(LiGetPendingVideoFrames() == 0 && requests == before);
     destroyVideoFrameAssembler();
 }
 
