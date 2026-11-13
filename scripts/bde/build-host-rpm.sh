@@ -36,6 +36,7 @@ for path in "$PLANK_WORK_ROOT/host-build/quinn-tests" "$PLANK_WORK_ROOT/host-bui
     echo 'Existing candidate Cargo output does not use the shared target directory.' >&2; exit 1;
   }
 done
+cd "$repo_dir" # Apply the pinned rust-toolchain.toml to every dependency gate.
 bash "$repo_dir/scripts/ci/bootstrap.sh" linux-host
 # The ordinary CI driver creates this link; remove only our matching link when
 # resuming an interrupted candidate build.
