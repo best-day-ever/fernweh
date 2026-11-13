@@ -13,6 +13,7 @@ platform build script); do not edit the generated header or an installed binary.
 
 | Environment variable | Default | Meaning |
 | --- | --- | --- |
+| `FERNWEH_BROKER_ENABLED` | `0` | `0` builds a direct-only Client; `1` compiles broker support |
 | `FERNWEH_BROKER_HOST` | empty | Plain DNS name or IPv4 address, without scheme, path or port |
 | `FERNWEH_BROKER_PORT` | `29000` | TLS API port, integer 1–65535 |
 | `FERNWEH_BROKER_PINS` | empty | Comma-separated 64-digit SPKI SHA-256 hex hashes; current and optional rotation key |
@@ -20,11 +21,23 @@ platform build script); do not edit the generated header or an installed binary.
 | `FERNWEH_UPDATES_ENABLED` | `0` | `1` opts into the pinned broker's platform update feed |
 | `FERNWEH_CONFIG_PYTHON` | `python3` on Unix, `python` on Windows | Python 3 executable path, without command arguments |
 
-Host and pins must be supplied together. Malformed settings stop qmake before
+The default (`FERNWEH_BROKER_ENABLED=0`) compiles a direct-only executable.
+Broker networking, saved-session/device-key backends, enrollment, broker UI,
+passkey helper and broker updater are excluded. Broker deployment environment
+values are ignored, even if inherited from a studio shell. Saved broker user
+preferences cannot enable the feature and are preserved for a later broker build.
+The broker is not a Client build dependency. Direct Host bookmarks, ordinary
+Host authentication, display/input and streaming remain available. Shared display
+setup and in-session display changes remain available in both profiles; only
+their broker connection actions are excluded from a direct-only build.
+
+Set `FERNWEH_BROKER_ENABLED=1` to include the optional broker Client. An empty
+endpoint/pin configuration then lets users enter their own broker in Settings.
+With broker support enabled, host and pins must be supplied together. Malformed settings stop qmake before
 compilation. The validator lowercases DNS names/hashes and deduplicates pins.
 No pins means Remote mode refuses to authenticate. Local bookmarks remain
-available. A configured Client starts on Remote; an unconfigured Client starts
-on local workstations. Existing user settings can override the shipped broker,
+available. A configured broker-enabled Client starts on Remote; other builds start
+on direct workstations. In a broker-enabled build, user settings can override the shipped broker,
 port, pins and RP ID in Settings; changing build defaults does not migrate an
 existing user profile. Reset or explicitly update the saved fields when moving
 to another deployment.
@@ -32,6 +45,7 @@ to another deployment.
 Example for a POSIX shell, after generating your broker certificate:
 
 ```sh
+export FERNWEH_BROKER_ENABLED=1
 export FERNWEH_BROKER_HOST=remote.example.org
 export FERNWEH_BROKER_PORT=29000
 export FERNWEH_BROKER_PINS="$(plank-broker spki /path/to/broker.crt)"
@@ -43,6 +57,7 @@ export FERNWEH_UPDATES_ENABLED=0
 On Windows PowerShell:
 
 ```powershell
+$env:FERNWEH_BROKER_ENABLED = '1'
 $env:FERNWEH_BROKER_HOST = 'remote.example.org'
 $env:FERNWEH_BROKER_PORT = '29000'
 $env:FERNWEH_BROKER_PINS = '<your verified 64-digit SPKI SHA-256>'
@@ -56,6 +71,36 @@ by your administrator. It is not the leaf-certificate SHA used to pin a Host.
 A self-signed broker certificate is supported because trust is explicit SPKI
 pinning. WebPKI validation is not a substitute for this broker trust contract.
 Distribute a spare pin before rotating keys; never disable certificate checks.
+
+## Select an executable for your needs
+
+```sh
+# Direct access over your LAN, VPN or administrator-managed forwarding:
+export FERNWEH_BROKER_ENABLED=0
+# Build the Client for your OS with the ordinary platform script.
+
+# Optional broker account/relay support, configured later in Settings:
+export FERNWEH_BROKER_ENABLED=1
+# Or also set the endpoint/pins/RP ID above for a configured studio executable.
+```
+
+PowerShell uses `$env:FERNWEH_BROKER_ENABLED = '0'` or `'1'` with the same meaning.
+Use a distinct output directory for each distributable profile and record its
+settings. Rerun qmake/the platform builder after changing the flag. Both selected
+QML resources and native sources are regenerated; a reused Mac build also
+removes a stale broker passkey helper when switching it off.
+
+The qmake include generates the chosen QML resource under the build directory.
+Shared views keep explicitly delimited broker-only sections in source; a disabled
+build omits those sections and broker-only pages instead of registering dummy
+broker services. Editing the shared QML triggers qmake regeneration. The
+configuration test compiles both views with only the modules available in the
+selected product and checks the compiled resource URLs.
+
+Build the standalone broker and a Host only if your deployment needs them; the
+[component build matrix](build.md#choose-your-components) lists independent outputs.
+The Client flag does not change Host authentication policy or automatically
+build/deploy the broker service.
 
 ## Broker and Host runtime settings
 

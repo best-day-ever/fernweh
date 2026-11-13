@@ -20,7 +20,7 @@
       "import_commit": "1f5167e9bcfff6a726cfd1071f4ad114c93495e7",
       "upstream": "https://github.com/instinctual/plank-client",
       "comparison_merge_base": "7edb5c3b1d50765afeca2d93c9dca6293d54606c",
-      "review_commit": "f104fda954ea6b5d7a89b2e0bff87b0b4a001af1"
+      "review_commit": "19adb7e8247da99f5dbe5c2e99e4f5b3d0560bb7"
     },
     {
       "path": "apps/host/linux",
@@ -41,5 +41,6 @@
       "repository": "https://github.com/best-day-ever/plank-common-c",
       "pinned_commit": "7660c2cae7ee315b6eae47e35c93efe4d32672b9"
     }
-  ]
+  ],
+  "review_updated_on": "2026-11-14"
 }

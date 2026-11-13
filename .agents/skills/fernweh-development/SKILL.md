@@ -15,6 +15,12 @@ Use `docs/fernweh/enhancements.md` to locate ownership and open the relevant
 source and protocol. Keep one branch/worktree per component task. Commit/push
 component changes before parent gitlinks; preserve shared merge history.
 
+The Client defaults to `FERNWEH_BROKER_ENABLED=0`: it excludes broker backends,
+UI, enrollment, passkey helper and updater. Opt in with `1` only for a broker
+product. Users build their chosen Client/Host/broker components independently;
+do not make direct access depend on directory or broker services. Verify both
+feature profiles after changing their boundary.
+
 For build work, read `docs/fernweh/build.md` and only the selected platform's
 runbook. Addresses, SPKI pins, RP ID and update opt-in enter through Client
 `deployment/fernweh.pri`; service/directory networks enter through runtime TOML

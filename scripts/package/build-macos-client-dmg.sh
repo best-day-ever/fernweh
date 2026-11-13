@@ -21,7 +21,9 @@ bash "$source_root/scripts/build/build-macos-client.sh" "$source_root" "$build"
 mkdir "$output/image"
 app="$output/image/BDE fernweh.app"
 ditto "$build/app/plank-client.app" "$app"
-cp "$source_root/scripts/package/fernweh-install-update.sh" "$app/Contents/Resources/fernweh-install-update.sh"
+if [[ ${FERNWEH_BROKER_ENABLED:-0} == 1 && ${FERNWEH_UPDATES_ENABLED:-0} == 1 ]]; then
+    cp "$source_root/scripts/package/fernweh-install-update.sh" "$app/Contents/Resources/fernweh-install-update.sh"
+fi
 "$PLANK_QT_ROOT/bin/macdeployqt" "$app" \
     "-qmldir=$source_root/apps/client/app/gui" -always-overwrite -no-strip
 # macdeployqt needs the build target's original executable name. Rename only
@@ -94,8 +96,13 @@ codesign --force --options runtime --timestamp --sign "$PLANK_MACOS_SIGNING_IDEN
 codesign --verify --deep --strict "$app"
 # The Touch ID helper is signed by the loop above like every Mach-O: hardened
 # runtime, no entitlements (CryptoKit Secure Enclave keys need none).
-helper_signature=$(codesign --display --verbose=2 "$app/Contents/MacOS/plank-passkey" 2>&1)
-grep -q 'flags=.*runtime' <<<"$helper_signature"
+if [[ ${FERNWEH_BROKER_ENABLED:-0} == 1 ]]; then
+    helper_signature=$(codesign --display --verbose=2 "$app/Contents/MacOS/plank-passkey" 2>&1)
+    grep -q 'flags=.*runtime' <<<"$helper_signature"
+else
+    test ! -e "$app/Contents/MacOS/plank-passkey"
+    test ! -e "$app/Contents/Resources/fernweh-install-update.sh"
+fi
 if ! app_version=$(QT_QPA_PLATFORM=offscreen "$app/Contents/MacOS/BDE fernweh" --version); then
     echo 'Packaged Client failed offscreen launch; inspect ~/Library/Logs/PLANK/Client' >&2
     exit 1

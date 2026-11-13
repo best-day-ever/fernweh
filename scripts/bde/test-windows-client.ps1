@@ -13,6 +13,9 @@ $env:PLANK_REPO_ROOT = $SourceRoot
 # The clipboard suites use the test process's Windows clipboard, so they run
 # sequentially. Run on a builder desktop without personal clipboard contents.
 foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'sessionhotkeys', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
+    if ($env:FERNWEH_BROKER_ENABLED -ne '1' -and $suite -in @('fernwehupdater', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker')) {
+        continue
+    }
     $directory = Join-Path $BuildDir $suite
     [void](New-Item -ItemType Directory -Force -Path $directory)
     $runner = Join-Path $directory 'build.cmd'
@@ -35,5 +38,7 @@ foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'interne
     cmd /c $testRunner | Tee-Object -FilePath (Join-Path $directory 'results.log')
     if ($LASTEXITCODE) { throw "$suite tests failed" }
 }
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$SourceRoot\apps\client\tests\fernwehupdater\test-windows-updater.ps1"
-if ($LASTEXITCODE) { throw 'Windows updater tests failed' }
+if ($env:FERNWEH_BROKER_ENABLED -eq '1') {
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$SourceRoot\apps\client\tests\fernwehupdater\test-windows-updater.ps1"
+    if ($LASTEXITCODE) { throw 'Windows updater tests failed' }
+}

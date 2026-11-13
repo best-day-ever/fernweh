@@ -70,11 +70,16 @@ For a Linux Host, substitute `apps/host/linux` for `apps/client`.
 Use pinned gitlinks; `git submodule update --remote` changes the source contract.
 Continue with [platform prerequisites and commands](docs/fernweh/build.md).
 
-A default Client opens local workstation bookmarks. For a studio build, set
+A default Client opens local workstation bookmarks. For a studio build, opt in with `FERNWEH_BROKER_ENABLED=1`, then set
 `FERNWEH_BROKER_HOST`, `FERNWEH_BROKER_PINS` and (for passkeys)
 `FERNWEH_PASSKEY_RP_ID` before running the same build scripts. Addresses and public
 SPKI hashes are deployment settings; passwords, private keys and keytabs never
 belong in those settings. [Complete configuration](docs/fernweh/configuration.md).
+
+The default Client is direct-only (`FERNWEH_BROKER_ENABLED=0`). Set the flag to
+`1` to compile broker sign-in, account setup, device sessions and relay access.
+Users build only the Client/Hosts/broker executables their deployment needs;
+see [the component choices](docs/fernweh/build.md#choose-your-components).
 
 The broker is optional for ordinary direct PLANK connections. Brokered access
 requires Fernweh-compatible Client and Host admission; an unmodified upstream
