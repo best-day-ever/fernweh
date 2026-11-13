@@ -23,7 +23,7 @@ Later upstream PLANK releases may already contain an equivalent solution.
 | Display/input/session fixes | Client display planner, screen-change lifecycle, keyboard/tablet/clipboard code; Mac SDL patch; Host display preparation | Preserve selected color format and topology; test each platform combination | Small regression fixes, each with its own reproduction |
 | Managed updates | Broker `src/updates.rs`, Client `fernwehupdater*`, packaging helpers | Off in generic builds; pinned broker, bounded feed paths, size/hash and MSI identity checks; Mac signature checks | Optional updater behind configuration |
 | Diagnostics | Broker `src/diagnostics.rs`, Client beta/lifecycle diagnostics, [diagnostic guide](../bde/beta-diagnostics.md) | Explicit opt-in and bounded collection; not a prerequisite for remote access | Reusable vocabulary and redaction policy |
-| Community build configuration | Client `deployment/`, [settings](configuration.md) | No operator endpoint or trusted key in the default build | Standalone configuration improvement |
+| Community build configuration | Client `deployment/`, [settings](configuration.md) | Direct-only by default; compile broker backends/UI only with `FERNWEH_BROKER_ENABLED=1`; no operator endpoint or trusted key by default | Standalone configuration improvement |
 
 Some areas combine upstream refactors with downstream adaptations. Review the
 component diff and its tests before assigning authorship or proposing a patch.

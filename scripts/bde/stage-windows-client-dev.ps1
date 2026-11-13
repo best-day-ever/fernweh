@@ -54,13 +54,15 @@ if ($ReleaseCandidate) {
 @'
 BDE fernweh Windows x64 UNSIGNED RELEASE CANDIDATE
 
-The client includes upstream input recovery and BDE account setup. Audio, Wacom,
-colour and multiple displays still require interactive testing on this release.
+The executable contains the features chosen at build time. Direct-only builds
+connect to Host bookmarks without a broker. FERNWEH_BROKER_ENABLED=1 adds broker
+sign-in/account setup; broker updates require their separate build opt-in.
+Audio, Wacom, colour and multiple displays still need interactive qualification.
 
 This installer has no Authenticode signature and Windows may warn on install.
-Unsigned ALPHA updates are available in the app through the pinned broker feed.
-Updates verify download integrity and MSI product identity before normal Windows elevation.
-Windows Hello is deferred; sign in with password and TOTP.
+When enabled, broker updates verify download integrity and MSI product identity
+before normal Windows elevation. Broker sign-in uses password and TOTP;
+Windows Hello is deferred.
 '@ | Set-Content -LiteralPath (Join-Path $OutputDir 'README.txt') -Encoding UTF8
     Write-Host "Unsigned release candidate staged at $OutputDir"
     return
@@ -74,7 +76,9 @@ and testing on the designated Windows test machine. It is unsigned and has no in
 feed. It has not passed interactive streaming, Wacom, colour or multi-display
 acceptance. Do not distribute it as a production client.
 
-Windows Hello is intentionally deferred. Sign in with password and TOTP.
+Build features follow FERNWEH_BROKER_ENABLED (default 0). Direct-only builds use
+Host bookmarks; broker-enabled builds add password/TOTP sign-in. Windows Hello
+is deferred. This development folder does not provide an update feed.
 '@ | Set-Content -LiteralPath (Join-Path $OutputDir 'README.txt') -Encoding UTF8
 
 Write-Host "Development client staged at $OutputDir"

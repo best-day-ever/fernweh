@@ -72,8 +72,9 @@ cargo test --locked --no-default-features --manifest-path apps/broker/Cargo.toml
 ```
 
 For platform changes run [the appropriate platform build](build.md). The Mac
-builder and Windows runner include `tests/deployment`; the standalone script
-compiles both a generic and operator configuration and confirms malformed
+builder and Windows runner include `tests/deployment`; select `FERNWEH_BROKER_ENABLED=1`
+when testing broker changes, and also verify a disabled build; the standalone script
+compiles direct, broker-enabled, configured and disabled-again profiles and confirms malformed
 settings fail qmake. Keep all `FERNWEH_*` inputs consistent when rerunning a
 configured test binary. Optional deployment generation requires Python 3 in all
 normal Client builds, including Windows.

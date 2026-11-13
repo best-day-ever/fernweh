@@ -56,7 +56,9 @@ run_shared_client_test() {
     )
 }
 # These small policy/network fixtures need no application objects; fail early.
-run_shared_client_test betadiagnostics
+if [[ ${FERNWEH_BROKER_ENABLED:-0} == 1 ]]; then
+    run_shared_client_test betadiagnostics
+fi
 python3 "$client/deployment/test_configure.py"
 run_shared_client_test deployment
 run_shared_client_test plankclientpolicy
@@ -110,10 +112,19 @@ plank_macos_client_record_version "$build" "$version"
 # Touch ID sign-in helper (bde-linux docs/plank-broker.md 13.4): bundled by
 # app.pro; prove its signature format with a software key (no Touch ID).
 passkey_helper="$build/app/plank-client.app/Contents/MacOS/plank-passkey"
-test -x "$passkey_helper"
-bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
+if [[ ${FERNWEH_BROKER_ENABLED:-0} == 1 ]]; then
+    test -x "$passkey_helper"
+    bash "$client/tests/plankpasskey/test-plank-passkey.sh" "$passkey_helper"
+else
+    test ! -e "$passkey_helper"
+fi
+python3 "$source_root/scripts/test/check-client-broker-profile.py" \
+    "$build/app/plank-client.app/Contents/MacOS/plank-client" --broker "${FERNWEH_BROKER_ENABLED:-0}"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
 for suite in hostpolling clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
+    if [[ ${FERNWEH_BROKER_ENABLED:-0} != 1 ]]; then
+        case $suite in windowsdevicekey|fernwehupdater|plankbroker) continue ;; esac
+    fi
     run_shared_client_test "$suite"
 done
 # Dummy input only: no microphone permission or physical recording on builders.

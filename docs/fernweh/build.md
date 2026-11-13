@@ -5,6 +5,24 @@ maintainer credentials are required to compile. The platform scripts retain
 pinned dependency versions, patches and checksums. Do not replace them with
 whatever SDL, FFmpeg or transport library happens to be installed.
 
+## Choose your components
+
+Users build the executables their deployment needs. The Client, each Host and
+the broker have independent build entry points; building a Client does not build
+the Rust broker, provision a directory or install a Host.
+
+| Need | Build | Client choice |
+| --- | --- | --- |
+| Direct workstation access over LAN/VPN/managed forwarding | Client for your OS and a Host on the target workstation | `FERNWEH_BROKER_ENABLED=0` (default) |
+| Studio accounts, assigned Hosts and relay access | Broker-enabled Client, selected Hosts and the optional Linux broker/relay | `FERNWEH_BROKER_ENABLED=1` |
+| Add only a workstation Host | Linux or Mac Host, using its section below | No Client or broker build required |
+| Add only the broker service | `apps/broker` Rust binaries | No Client/Host compilation required |
+
+Set the flag before any platform build command below. Use separate output
+folders for different profiles. Broker-enabled Clients can have no shipped
+endpoint and let the user configure it, or receive a configured studio default.
+See [all feature and deployment settings](configuration.md).
+
 ## Clone and prepare
 
 Private review requires access to `fernweh`, `fernweh-client` and
@@ -25,8 +43,8 @@ git submodule status
 The parent gitlinks are authoritative. Keep shallow clones off when preparing
 upstream patches or auditing history. Initialize only the product you need.
 Ordinary clone URLs for nested dependencies remain their public upstreams.
-Review [configuration](configuration.md) before qmake: generic builds have no
-broker endpoint, trusted broker key, RP ID or enabled updates.
+Review [configuration](configuration.md) before qmake: generic builds are direct-only and exclude broker support. Broker-enabled builds
+without deployment settings have no endpoint, trusted key, RP ID or enabled updates.
 
 Put output and caches outside source. Choose absolute local paths for
 `PLANK_SOURCE_ROOT`, `PLANK_DEP_ROOT`, `PLANK_WORK_ROOT`, `PLANK_RUSTUP_ROOT`,
@@ -47,6 +65,7 @@ Set the runbook's `PLANK_*` paths, then:
 ```sh
 export PLANK_SOURCE_ROOT="$PWD"
 export PLANK_BUILD_BRANCH=community-review
+export FERNWEH_BROKER_ENABLED=0 # 1 includes broker sign-in/relay support
 # A working OpenSSL 3 CLI for independent passkey test verification:
 export PLANK_TEST_OPENSSL="$(command -v openssl)"
 # Set PLANK_MAC_CLIENT_DEPS, PLANK_QT_ROOT, PLANK_RUSTUP_ROOT and
@@ -54,7 +73,7 @@ export PLANK_TEST_OPENSSL="$(command -v openssl)"
 bash scripts/build/build-macos-client.sh "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/client-build"
 ```
 
-The script builds the developer app and its Qt/native regression suites,
+The script builds the selected developer app and its Qt/native regression suites,
 including deployment configuration tests. Fernweh deliberately retains its
 `bde-sdl-session` path until the newer Qt adapter meets its acceptance contracts.
 The result is a developer app linked to local dependencies. This source review
@@ -71,6 +90,7 @@ and PowerShell 5.1+. No WSL compiler or Linux Qt build substitutes for MSVC.
 Clone the pinned Client/transport dependencies, then run in PowerShell:
 
 ```powershell
+$env:FERNWEH_BROKER_ENABLED = '0' # 1 includes broker support
 $env:PLANK_QT_ROOT = 'C:\Qt\6.10.2\msvc2022_64'
 $env:PLANK_WINDOWS_BUILD_DIR = Join-Path $env:LOCALAPPDATA 'FernwehBuild\client'
 # Optional FERNWEH_* settings are inherited from this environment.
@@ -84,8 +104,8 @@ if ($LASTEXITCODE) { throw 'Client build failed' }
 
 The dependency script downloads and verifies the pinned Moonlight dependency
 archive and SDL3_ttf. The build locates MSVC with `vswhere`, builds the locked
-native Rust transport and then the shared qmake Client. The test runner includes
-broker/device key, clipboard, input, display, updater and deployment tests.
+native Rust transport and then the shared qmake Client. The test runner always includes deployment, clipboard, input and display checks;
+broker/device-key/updater suites run when broker support is selected.
 
 To assemble an optional local MSI, set `PLANK_WINDOWS_RELEASE_BUILD=1` before
 building, then use [stage/build scripts and WiX 4.0.6](../bde/windows-client-installer.md).

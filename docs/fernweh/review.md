@@ -75,3 +75,31 @@ public contribution branches separately from source ancestry.
 Hosted Actions remains disabled for private review. No upstream submission is
 made until separately authorized. This review does not change BDE's existing
 source repositories or automatically switch its build/deployment pins.
+
+## 14 November: optional broker build profiles
+
+`FERNWEH_BROKER_ENABLED=0` is now the default direct-only Client. `1` explicitly
+includes broker networking/account UI, session/device-key stores, enrollment,
+the passkey helper and optional updater. Direct Host access and shared display
+setup remain available in both builds. A disabled product ignores inherited
+broker deployment values and saved broker preferences without erasing them.
+The guides describe independent Client, Host and broker/relay executables.
+
+Both complete Mac Client developer builds pass with SDK 27/macOS 15 target:
+35 Qt runs/609 cases direct-only, and 39 runs/792 cases broker-enabled, plus
+native helper/input/audio checks. Direct build used stale broker environment
+values and a deliberately stale passkey helper; no broker backend symbols or
+helper remain. Enabled build has its backend and helper. The binary checker
+rejects either executable when asked to verify the opposite profile.
+
+13 validator cases and 4 successive configuration/resource builds (direct,
+broker without an endpoint, configured broker, direct-again) pass. They verify
+compiled resource presence, shared launcher/settings/streaming QML compilation,
+saved-preference preservation and invalid configuration rejection. Shared
+display setup remains present for direct sessions; its broker actions are
+selected separately. Root CI 120 (one platform skip), skill/privacy/whitespace
+checks and the bde-linux gate pass with existing lint advisories. Native
+Windows/Linux builds, installed sessions and signed distribution are unrun.
+No deployment, public visibility change or binary release is part of this work.
+
+Client change [PR2](https://github.com/best-day-ever/fernweh-client/pull/2) is merged with preserved history as `19adb7e8247da99f5dbe5c2e99e4f5b3d0560bb7`; the parent pins that exact commit.
