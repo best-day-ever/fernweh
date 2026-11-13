@@ -24,7 +24,7 @@ cmake --build "$host_build" --parallel "$test_build_jobs" --target test_sunshine
 (
   cd "$host_source"
   "$host_build/tests/test_sunshine" --gtest_color=no \
-    --gtest_filter='InputConfigDefaults.*:InputRetainedSessionTest.*:RawHidTablet.*:RawHidContactIo.*:NormalizedPen.*:ReliableQueue.*:CudaPrimaryContext.*:CudaStreamWork.*' \
+    --gtest_filter='InputConfigDefaults.*:InputRetainedSessionTest.*:RawHidTablet.*:RawHidContactIo.*:NormalizedPen.*:ReliableQueue.*:CudaPrimaryContext.*:CudaStreamWork.*:SessionContext.*:ConfigParserTest.*:ConfigConsistencyTest.*' \
     --gtest_repeat=25 --gtest_shuffle --gtest_random_seed=837
 )
 # The full Host tests skip kernel-UHID cases on a builder. Run the link-wrapped
