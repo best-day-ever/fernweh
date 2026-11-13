@@ -63,5 +63,8 @@ The client assembles and validates a complete generation before replacing both
 the compositor cursor image and the input-transparent Wacom cursor surface.
 Cursor construction and replacement occur on the SDL event thread. While the
 pointer belongs to the native toolbar, the toolbar uses its local arrow cursor.
-No path warps or synthesizes local pointer motion. Buttons, wheel events, and
+Cursor samples never warp or synthesize local pointer motion. The separately
+negotiated [immersive mouse protocol](immersive-mouse.md) uses its reliable
+completion acknowledgement to restore the local pointer when capture ends.
+Outside immersive capture, buttons, wheel events, and
 motion over the toolbar remain exclusively local and never reach the host.
