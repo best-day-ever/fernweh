@@ -23,6 +23,7 @@ typedef enum PlankTransportEventType {
     PLANK_TRANSPORT_EVENT_CURSOR_SHAPE = 3,
     PLANK_TRANSPORT_EVENT_CURSOR_POSITION = 4,
     PLANK_TRANSPORT_EVENT_CLIPBOARD_OFFER = 5,
+    PLANK_TRANSPORT_EVENT_POINTER_CAPTURE = 6,
 } PlankTransportEventType;
 
 typedef struct PlankTransportEventPacket {
