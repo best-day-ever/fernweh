@@ -1,11 +1,11 @@
 [submodule "host/sunshine-fork"]
 	path = apps/host/linux
-	url = https://github.com/best-day-ever/plank-host-linux.git
-	branch = bde/main
+	url = https://github.com/best-day-ever/fernweh-host-linux.git
+	branch = main
 [submodule "client/moonlight-qt-fork"]
 	path = apps/client
-	url = https://github.com/best-day-ever/plank-client.git
-	branch = bde/main
+	url = https://github.com/best-day-ever/fernweh-client.git
+	branch = main
 [submodule "third_party/kyber-kymux"]
 	path = third_party/kyber-kymux
 	url = https://github.com/instinctual/plank-kymux.git

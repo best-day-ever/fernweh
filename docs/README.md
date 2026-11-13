@@ -1,5 +1,10 @@
 # Documentation
 
+Start with the [Fernweh guide](fernweh/README.md) for this fork's enhancements,
+portable configuration, Windows support, broker integration and build instructions.
+The PLANK documents below are retained upstream references; where they describe
+upstream-only scope, the Fernweh platform matrix takes precedence for this fork.
+
 - [User documentation](user/): bookmark behavior and product configuration.
   [Ubuntu Client displays](user/client-displays.md) covers per-bookmark fullscreen
   monitor selection and spanning.

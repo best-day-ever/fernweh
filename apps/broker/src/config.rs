@@ -176,7 +176,7 @@ impl RoutingConfig {
 #[serde(deny_unknown_fields)]
 pub struct PasskeyConfig {
     /// Relying party id sent to clients (the IPA domain the KDC verifies against).
-    /// Default: the realm in lower case (`IPA.BDE.RUN` → `ipa.bde.run`).
+    /// Default: the realm in lower case (`IPA.EXAMPLE.ORG` → `ipa.example.org`).
     #[serde(default)]
     pub rp_id: Option<String>,
     /// Passkey conversations waiting for the client's assertion (each holds a KDC

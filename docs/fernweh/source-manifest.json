@@ -1,0 +1,45 @@
+{
+  "format_version": 1,
+  "prepared_on": "2026-11-13",
+  "status": "private-source-review",
+  "source_fork_note": "Preserved Git ancestry; independent private repositories, not GitHub public-fork network members.",
+  "components": [
+    {
+      "path": ".",
+      "repository": "https://github.com/best-day-ever/fernweh",
+      "imported_from": "https://github.com/best-day-ever/plank",
+      "import_commit": "4d07c92327f4c23dbc66a050ed6d914b012c2d8a",
+      "upstream": "https://github.com/instinctual/plank",
+      "comparison_merge_base": "b3d3235c78e513c3202b9524f1fea8ae420787bd",
+      "observed_upstream_main": "2712269c3459790cb71d3fdf7626c5c502ec3ebd"
+    },
+    {
+      "path": "apps/client",
+      "repository": "https://github.com/best-day-ever/fernweh-client",
+      "imported_from": "https://github.com/best-day-ever/plank-client",
+      "import_commit": "1f5167e9bcfff6a726cfd1071f4ad114c93495e7",
+      "upstream": "https://github.com/instinctual/plank-client",
+      "comparison_merge_base": "7edb5c3b1d50765afeca2d93c9dca6293d54606c",
+      "review_commit": "f104fda954ea6b5d7a89b2e0bff87b0b4a001af1"
+    },
+    {
+      "path": "apps/host/linux",
+      "repository": "https://github.com/best-day-ever/fernweh-host-linux",
+      "imported_from": "https://github.com/best-day-ever/plank-host-linux",
+      "import_commit": "fb3a689618093e345908945a90cf226d93cc67d7",
+      "upstream": "https://github.com/instinctual/plank-host-linux",
+      "comparison_merge_base": "65dc0f1be60fe78d0457364f83813118c70bc8a8",
+      "review_commit": "cc51fa3e965706cef016d2498d16649fe9c5ee96"
+    },
+    {
+      "path": "third_party/kyber-kymux",
+      "repository": "https://github.com/instinctual/plank-kymux",
+      "pinned_commit": "3f7a9d8618978287186e5d6ce0eaa067743cb06c"
+    },
+    {
+      "path": "apps/client/moonlight-common-c/moonlight-common-c",
+      "repository": "https://github.com/best-day-ever/plank-common-c",
+      "pinned_commit": "7660c2cae7ee315b6eae47e35c93efe4d32672b9"
+    }
+  ]
+}

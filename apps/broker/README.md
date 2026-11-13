@@ -6,10 +6,11 @@ them, and gets a short-lived, source-address-pinned port that the kernel
 forwards to the chosen host. TLS and QUIC run end to end between client and
 host; the broker never decrypts the stream.
 
-Design and binding contracts (API, brokered connect, host GSSAPI admission,
-internals) live in the bestdayever `bde-linux` repository,
-`docs/plank-broker.md` §10 (passkeys: §13, first sign-in and enrolment: §16). This README covers the API as built,
-the build and the deploy layout.
+Start with the self-contained [Fernweh broker integration guide](../../docs/fernweh/broker.md)
+and [configuration guide](../../docs/fernweh/configuration.md). This README covers
+the API, build and service layout. Historical section numbers refer to the
+original BDE design; that private infrastructure repository is not a build or
+integration dependency. Current wire contracts also live under `protocol/`.
 
 ## Components
 
@@ -67,7 +68,7 @@ conversation only accepts the kind it was started for. Anything else is `denied`
 and counts as a failed attempt.
 
 `rp_id` comes from `passkey.rp_id` (default: the realm in lower case, e.g.
-`ipa.bde.run`), not from the KDC. When the KDC offers no passkey challenge
+`ipa.example.org`), not from the KDC. When the KDC offers no passkey challenge
 (unknown user, OTP user, invalid name, KDC down or slower than
 `passkey.challenge_timeout_secs`) the broker answers with a **synthetic
 challenge of the same shape** (one random 32-byte credential id, random 32-byte

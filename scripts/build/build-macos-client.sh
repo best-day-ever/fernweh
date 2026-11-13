@@ -57,6 +57,8 @@ run_shared_client_test() {
 }
 # These small policy/network fixtures need no application objects; fail early.
 run_shared_client_test betadiagnostics
+python3 "$client/deployment/test_configure.py"
+run_shared_client_test deployment
 run_shared_client_test plankclientpolicy
 run_shared_client_test internetconnectivity
 run_shared_client_test macqtsession

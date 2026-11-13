@@ -1,158 +1,108 @@
-# PLANK
+# BDE Fernweh
 
-PLANK (Playa Connekt) is an open-source, low-latency remote-workstation system
-for Linux and macOS. It is built for color-sensitive creative work and everyday
-desktop access, including physical workstations used both locally and remotely.
+**Fernweh is BDE's enhanced fork of [PLANK](https://github.com/instinctual/plank)**,
+with an optional self-hosted access broker, studio sign-in, Windows client work,
+and collaborative workstation workflows. PLANK supplies the core remote desktop,
+media, input and encrypted transport. We retain its history and attribution and
+intend to contribute suitable improvements upstream.
 
-Install a **Host** on the workstation and a **Client** on the computer you use
-to access it. This repository brings together both products, their shared
-transport, packaging, documentation and qualification tests.
+**ALPHA · private review · source only.** This repository and its maintained
+Client/Linux Host components stay private until Finn approves publication.
+No binaries are supplied by this preparation. A build passing its tests does
+not establish hardware or installed-session qualification.
 
-[Downloads](https://github.com/instinctual/plank/releases) ·
-[Documentation](docs/README.md) ·
-[Build from source](docs/development/build/from-source.md) ·
-[Contribute](CONTRIBUTING.md)
+[Enhancements over PLANK](docs/fernweh/enhancements.md) ·
+[Build each platform](docs/fernweh/build.md) ·
+[Configure your deployment](docs/fernweh/configuration.md) ·
+[Connect the broker and hosts](docs/fernweh/broker.md) ·
+[Contribute upstream](docs/fernweh/upstreaming.md)
 
-## Platforms
+## What Fernweh adds
 
-| Product | Platform | Package |
-| --- | --- | --- |
-| Linux Host | Rocky Linux 9.7 / RHEL 9 family, x86-64, NVIDIA graphics and X11 | RPM |
-| Linux Client | Ubuntu 26.04, x86-64; Wayland is the qualified desktop path | DEB |
-| macOS Host | macOS 26.7 or newer, Apple Silicon | One signed, notarized PKG |
-| macOS Client | macOS 15 or newer, Apple Silicon | Signed, notarized PKG |
+- **Brokered remote access:** one TLS API, FreeIPA password + OTP or passkeys,
+  an HBAC-authorized workstation list, direct office connections and leased
+  TCP/UDP relays for outside clients. Media remains encrypted to the Host.
+- **Device sessions and onboarding:** device-bound request proofs, renewable
+  sign-in sessions, first-login password/OTP setup and native passkey helpers.
+- **Workstation lifecycle and collaboration:** Linux account handoff/recovery,
+  opt-in shared desktops, presence and control-sharing contracts, plus bounded
+  clipboard file transfer where the platform combination supports it.
+- **Client enhancements:** the Windows x64 ALPHA build and MSI tooling,
+  Fernweh sign-in and session UI, update validation, optional diagnostics,
+  and display/input/lifecycle fixes. See the feature map for source ownership
+  and limitations rather than assuming parity on every operating system.
+- **Portable deployment:** no BDE broker, TLS pin or identity domain is compiled
+  into a default build. Operators supply build settings and runtime service
+  configuration. Building requires neither BDE's private infrastructure repo
+  nor its signing identities or memory services.
 
-Rocky Linux 9.7 is the Linux Host build and qualification baseline. The Mac
-Client uses one package for macOS 15 and newer, built with SDK 27 or newer;
-the Host uses one package with a 26.7 minimum and the same SDK27 requirement.
-Windows and other platforms are not
-currently qualified PLANK products.
+## Components and platforms
 
-From 1.2.00, the Ubuntu Client uses Qt-owned streaming windows and direct
-PipeWire playback. It replaces the ordinary `plank-client` package, retaining
-bookmarks, settings and trusted Hosts. The macOS Client implementation is unchanged.
+| Component | Build target | Status in this fork | Instructions |
+| --- | --- | --- | --- |
+| Client | macOS 15+, Apple Silicon; SDK 27+ builder | Fernweh SDL session path; signing needed for distribution | [Mac Client](docs/fernweh/build.md#macos-client) |
+| Client | Windows x64; MSVC 2022, Qt 6.10.2 | ALPHA; native build/MSI scripts; no signed Windows release claimed | [Windows](docs/fernweh/build.md#windows-client) |
+| Client | Ubuntu 26.04 x86-64, Qt/Wayland | Inherited PLANK build path; this new fork needs native acceptance | [Linux Client](docs/fernweh/build.md#linux-client) |
+| Linux Host | Rocky 9.7 x86-64, NVIDIA/X11 | Fernweh GSSAPI, session and sharing changes | [Linux Host](docs/fernweh/build.md#linux-host) |
+| macOS Host | macOS 26.7+, Apple Silicon; SDK 27+ builder | Native PLANK Host with optional broker admission/shared desktop | [Mac Host](docs/fernweh/build.md#macos-host) |
+| Broker/relay | Rocky 9.7 x86-64 | Optional Rust API + isolated nftables helper; FreeIPA integration | [Broker](docs/fernweh/broker.md) |
 
-PLANK is in late integration and production hardening. Use the
-[release notes](https://github.com/instinctual/plank/releases) for the version
-you install. Supported targets do not imply that every GPU, tablet, display
-arrangement or OS update has passed qualification. See the
-[platform boundaries](docs/development/platforms.md) and
-[acceptance criteria](docs/development/acceptance-criteria.md).
+There is no Windows Host or mobile product in this review. macOS Client and Host
+have different minimum OS versions. Exact-format color, Wacom, audio, capture,
+clipboard and multi-display support depend on the Client/Host combination;
+consult the [PLANK platform reference](docs/development/platforms.md) and the
+[Fernweh enhancement map](docs/fernweh/enhancements.md).
 
-## What PLANK provides
+## Start from source
 
-- **Video quality:** selectable H.264 and HEVC profiles, including 8/10-bit and
-  4:4:4 workflows. Linux RGB-identity profiles preserve component mapping;
-  available profiles and capture precision depend on the Host.
-- **Workstation access:** operating-system account authentication, existing
-  desktop access, session takeover and recovery across login/logout.
-- **Display choices:** physical and virtual/headless layouts, Client display
-  matching, and native-pixel or scaled presentation within each Host's limits.
-- **Input and audio:** keyboard, mouse, Wacom/pen input, desktop audio and text
-  clipboard synchronization. Tablet behavior is platform-specific; Linux
-  raw-HID forwarding and macOS pen-pressure injection are different paths.
-- **Connection controls:** per-bookmark capture, encoding and bitrate settings,
-  plus an in-session toolbar with live statistics and session controls.
-- **Native transport:** encrypted QUIC using Kyber/Kymux and Quinn, with RaptorQ
-  forward error correction for media.
+Private review access is needed for all three maintained repositories. Set up
+GitHub authentication outside clone URLs, then clone the parent and initialize
+only the product you need:
 
-[Microphone forwarding](docs/user/microphone.md) is available from Linux and
-macOS Clients to a compatible macOS Host, not to Linux Hosts. Optional media
-features require their supported Client/Host combination and OS permissions.
-
-Ten-bit encoding does not guarantee ten-bit capture: the Linux NvFBC path has
-an 8-bit source even when encoded as 10-bit. Native X11/XShm capture is the
-experimental Linux 10-bit source path. Decoder selection preserves the requested
-format: exact-format hardware decoding is preferred, with software fallback
-where necessary. A GPU's generic HEVC support is not proof of 10-bit 4:4:4 support.
-
-PLANK is not a drop-in GameStream, Sunshine or Moonlight replacement on the wire.
-Use PLANK Hosts and Clients with compatible release versions. Gamepads, generic
-touchscreen forwarding, HDR and automatic UPnP port mapping are not current
-product features.
-
-## Install and connect
-
-Download packages from [PLANK releases](https://github.com/instinctual/plank/releases).
-Follow that release's upgrade notes; some transport changes require upgrading
-Host and Client together. Candidate builds are not releases.
-
-On Linux, install the downloaded package with the package manager. Replace
-`VERSION` and `RELEASE` below with the actual filename:
-
-```bash
-# Rocky Linux Host
-sudo dnf install ./plank-host-VERSION-RELEASE.el9.x86_64.rpm
-
-# Ubuntu Client
-sudo apt install ./plank-client_VERSION_amd64.deb
+```sh
+gh auth setup-git
+git clone --recurse-submodules=no https://github.com/best-day-ever/fernweh.git
+cd fernweh
+git submodule update --init --recursive apps/client third_party/kyber-kymux
 ```
 
-On macOS, open the appropriate Host or Client PKG and complete the setup window.
-macOS controls privacy approvals; installation does not silently grant them.
-See [permission setup](docs/user/permissions.md). The macOS Host installer
-requires FileVault to be disabled; remote FileVault preboot unlock is not
-supported.
+For a Linux Host, substitute `apps/host/linux` for `apps/client`.
+Use pinned gitlinks; `git submodule update --remote` changes the source contract.
+Continue with [platform prerequisites and commands](docs/fernweh/build.md).
 
-Open PLANK Client, add a bookmark with the Host address and a nickname, and
-choose the display layout and encoding profile. Bookmarks can be created while
-a Host is offline. Reachable Hosts advertise their available options; check
-manual selections when configuring an offline Host.
+A default Client opens local workstation bookmarks. For a studio build, set
+`FERNWEH_BROKER_HOST`, `FERNWEH_BROKER_PINS` and (for passkeys)
+`FERNWEH_PASSKEY_RP_ID` before running the same build scripts. Addresses and public
+SPKI hashes are deployment settings; passwords, private keys and keytabs never
+belong in those settings. [Complete configuration](docs/fernweh/configuration.md).
 
-The default Host port is **28989 on TCP and UDP**. Provide a reachable path
-through your LAN, VPN or administrator-managed forwarding/firewall rules.
-PLANK does not supply a connection broker or configure your router.
-Host identity uses [trust on first use](docs/security/host-identity-trust.md);
-encryption does not independently verify an unknown Host on its first connection.
+The broker is optional for ordinary direct PLANK connections. Brokered access
+requires Fernweh-compatible Client and Host admission; an unmodified upstream
+Host must not be assumed compatible with those additions.
 
-## Configuration and removal
+## Develop and give back
 
-Administrator policy lives in `/etc/plank/host.conf` and
-`/etc/plank/client.conf` on both operating systems. Use the template for your
-platform; Linux and macOS Host options are not interchangeable:
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) and the
+[development guide](docs/fernweh/development.md). Claude Code and Codex share a
+[repository development skill](.agents/skills/fernweh-development/SKILL.md).
+The [upstreaming guide](docs/fernweh/upstreaming.md) explains component PRs,
+protocol compatibility, patch extraction and independent validation against
+upstream PLANK. Nothing is submitted upstream by this preparation.
 
-- [Linux Host configuration](packaging/host/linux/config/plank-host.conf).
-- [macOS Host configuration](packaging/host/macos/config/plank-host.conf).
-- [Client configuration](packaging/client/config/plank-client.conf).
+[Review status](docs/fernweh/review.md) records what this preparation verified
+and what remains before publication. Older PLANK/BDE release notes describe
+their original source and packages; they are not releases of this new repository.
 
-Bookmarks and ordinary Client preferences are per-user. On the Linux Host,
-`[display] startup_layout = physical` preserves a physical-first boot workflow;
-`virtual` selects headless startup. Session display choices belong to bookmarks.
+## Credits and licenses
 
-Remove Linux packages with `sudo dnf remove plank-host` or
-`sudo apt remove plank-client`. On macOS, use the installed Host or Client
-uninstall script described in [macOS configuration and removal](docs/user/macos-configuration.md).
-Ordinary macOS uninstall retains configuration and user data; it is not a purge.
-
-## Source and development
-
-| Location | Role |
-| --- | --- |
-| [Linux Host](https://github.com/instinctual/plank-host-linux) at `apps/host/linux/` | Maintained Sunshine-derived Host submodule |
-| [Client](https://github.com/instinctual/plank-client) at `apps/client/` | Shared Ubuntu/macOS Client submodule, derived from Moonlight Qt |
-| [macOS Host](apps/host/macos/) | Native Host source in this repository, not a separate fork |
-| [Transport](protocol/plank-transport/) and [protocols](protocol/) | Shared transport, schemas and negotiation |
-| [Packaging](packaging/) and [scripts](scripts/) | Platform installers, reproducible builds and validation |
-| [Tests](tests/), [probes](probes/) and [documentation](docs/README.md) | Automated checks, hardware qualification and product contracts |
-
-Start with [Building from source](docs/development/build/from-source.md), then
-the appropriate platform runbook. Build from the parent repository's pinned
-submodule revisions and required dependency patches, not independent upstream
-checkouts or arbitrary system libraries. Hosted CI and documented local builders
-use the same platform contracts. Root CMake builds qualification tools and tests,
-not all product packages.
-
-See [contributing](CONTRIBUTING.md) for component changes and coordinated parent
-pin updates. [HANDOFF.md](HANDOFF.md) records development state and outstanding
-tests; it is not a release announcement. Locally retained packages follow the
-[artifact catalog layout](artifacts/README.md).
-
-## Credits and licensing
-
-PLANK builds on [Sunshine](https://github.com/LizardByte/Sunshine),
+Credit belongs to the PLANK contributors and the underlying
+[Sunshine](https://github.com/LizardByte/Sunshine),
 [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt),
-[Kyber](https://gitlab.com/kyber), and other open-source projects.
-Their histories, copyright notices and component licenses are retained.
+Kyber/Kymux, Quinn, Qt, SDL, FFmpeg and other dependency communities.
+Fernweh is an independent downstream project, not an official PLANK release.
 
-PLANK contains multiple licenses; consult the license files in each component
-and dependency. The PLANK transport boundary is AGPL-3.0-or-later.
+Component licenses and copyright notices remain in place. Client and Linux Host
+retain their GPLv3 license texts; the broker and shared transport declare
+AGPL-3.0-or-later in their Cargo manifests. Dependencies carry their own terms.
+See [licensing and provenance](docs/fernweh/provenance.md); this repository does
+not replace those component licenses with a blanket new license.

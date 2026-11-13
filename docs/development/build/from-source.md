@@ -1,5 +1,10 @@
 # Building a fork from source
 
+**Fernweh:** use [the fork build guide](../../fernweh/build.md) first. It adds
+private-review cloning, operator build settings, the Windows client and broker
+to these inherited PLANK procedures. "Windows is not supported" below describes
+upstream PLANK's qualification scope, not the Fernweh Windows ALPHA client.
+
 PLANK's build inputs must be reproducible without a maintainer's prepared
 dependency directories or signing keys. A product rebuild and a dependency
 bootstrap are different checks: bootstrap starts with empty dependency,

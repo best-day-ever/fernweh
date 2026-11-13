@@ -52,8 +52,8 @@ class DependencyPolicyTests(unittest.TestCase):
         modules.read(ROOT / '.gitmodules')
         self.assertEqual({modules[s]['path'] for s in modules.sections()},
                          {'apps/host/linux', 'apps/client', 'third_party/kyber-kymux'})
-        # BDE forks track bde/main: their main mirrors upstream without the BDE commits.
-        expected = {'apps/host/linux': 'bde/main', 'apps/client': 'bde/main',
+        # The private Fernweh copies use main as their integration branch.
+        expected = {'apps/host/linux': 'main', 'apps/client': 'main',
                     'third_party/kyber-kymux': 'main'}
         for section in modules.sections():
             self.assertEqual(modules[section]['branch'], expected[modules[section]['path']])

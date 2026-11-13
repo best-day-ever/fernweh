@@ -1,4 +1,11 @@
-# Contributing to PLANK
+# Contributing to Fernweh and PLANK
+
+Fernweh is a downstream ALPHA fork. Start with [the development guide](docs/fernweh/development.md),
+[platform build instructions](docs/fernweh/build.md) and [the upstream contribution workflow](docs/fernweh/upstreaming.md).
+The latter covers preparing small PLANK contributions without requiring our broker
+or infrastructure. Keep these review repositories private until publication is authorized.
+The inherited contribution principles below still apply; references to Windows as
+a future upstream product do not describe Fernweh's existing Windows ALPHA client.
 
 Start with [AGENTS.md](AGENTS.md), the [platform matrix](docs/development/platforms.md)
 and the [build runbooks](docs/development/build/). Current work and outstanding
@@ -10,7 +17,7 @@ macOS distribution signing. No maintainer signing key is needed to compile.
 
 ## Where changes belong
 
-- Product code: `apps/`. The Client is one shared cross-platform tree, not a
+- Product code and optional broker: `apps/`. The Client is one shared cross-platform tree, not a
   separate copy for each operating system.
 - Shared protocol and negotiation: `protocol/`. Keep Host and Client changes
   synchronized and add matching test vectors.

@@ -74,7 +74,7 @@ device_proof_skew_secs = 60
 # max_pending = 32                  # waiting passkey conversations; beyond this auth/start answers 429
 # challenge_timeout_secs = 10       # wait for the KDC challenge, then answer with a synthetic one
 
-# First sign-in and 2FA enrolment in the client (/v1/enroll/*, docs/plank-broker.md §16).
+# First sign-in and 2FA enrolment: /v1/enroll/*; docs/fernweh/broker.md.
 # The broker only READS the gates as its own principal; the password change, the TOTP
 # token and a passkey mapping are written as the user (self-service ACIs). Defaults shown.
 # [enrol]
@@ -90,3 +90,16 @@ device_proof_skew_secs = 60
 # max_password_attempts = 5
 # fallback_min_length = 8                # policy shown when cn=global_policy is not readable
 # fallback_min_classes = 0
+
+# Optional update feeds. Leave absent for source-only deployments. Enabling the
+# Client's FERNWEH_UPDATES_ENABLED also requires this explicitly managed service.
+# [client_updates]
+# directory = "/var/lib/plank-broker/client-updates/macos-arm64"
+# windows_directory = "/var/lib/plank-broker/client-updates/windows-x64"
+
+# Shared Mac admission is separately opt-in; see protocol/macos-broker-admission.md.
+# [mac_admission]
+# signing_key_file = "/etc/plank-broker/mac-admission-key.der"
+# ttl_secs = 30
+# [mac_admission.hosts]
+# "mac.example.org" = "artist"

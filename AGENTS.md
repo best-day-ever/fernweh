@@ -1,8 +1,14 @@
 # Repository Guidelines
 
-> **BDE fork:** this checkout is best-day-ever/plank. Before working here also read
-> `docs/bde/agents.md`: fork branches and PR flow, local builds, client/broker/host contracts, the code graph
-> (`scripts/agent/graph`) and the shared agent memory.
+> **Fernweh fork:** this checkout is best-day-ever/fernweh, an ALPHA source fork of
+> instinctual/PLANK. Read `docs/fernweh/development.md` for current repositories,
+> configuration and verification, and `docs/fernweh/upstreaming.md` when preparing
+> a contribution. The inherited guidance below defines media/security contracts;
+> `HANDOFF.md` describes upstream history, not this private review's release status.
+> No BDE infrastructure, memory server, signing account or credentials are required
+> for source development. Repository skills live in `.agents/skills/` (Codex) and
+> `.claude/skills/` (Claude Code). Keep the review repositories private until Finn
+> explicitly authorizes publication. Creating this fork does not authorize deployment.
 
 ## Mac Client compatibility scope
 
@@ -43,7 +49,7 @@ and next test. The layout is:
 
 Keep host/client protocol changes synchronized. Preserve the upstream history and license notices of both forks.
 
-Only Host and Client products belong here. Do not add private infrastructure
+Host, Client and the optional broker belong here. Do not add private infrastructure
 repositories as submodules or require their code or credentials to build.
 Optional wake requests default off and require administrator policy. Do not
 add a user preference or restore Client-side magic packets or MAC storage.
