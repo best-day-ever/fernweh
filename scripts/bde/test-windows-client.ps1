@@ -24,7 +24,15 @@ foreach ($suite in @('clientinstances', 'outputtopology', 'internetconnectivity'
     [IO.File]::WriteAllText($runner, $command, [Text.Encoding]::ASCII)
     cmd /c $runner
     if ($LASTEXITCODE) { Get-Content (Join-Path $directory 'build.log') -Tail 30; throw "$suite build failed" }
-    & (Join-Path $directory "release\$suite.exe") | Tee-Object -FilePath (Join-Path $directory 'results.log')
+    # Merge native stderr in cmd, before PowerShell can turn benign Qt/SDL
+    # diagnostics into NativeCommandError under ErrorActionPreference=Stop.
+    # The cmd exit code remains the test executable's real exit code.
+    $testRunner = Join-Path $directory 'test.cmd'
+    $testCommand = '@echo off' + "`r`n" +
+        '"' + (Join-Path $directory "release\$suite.exe") + '" 2>&1' + "`r`n" +
+        'exit /b %ERRORLEVEL%' + "`r`n"
+    [IO.File]::WriteAllText($testRunner, $testCommand, [Text.Encoding]::ASCII)
+    cmd /c $testRunner | Tee-Object -FilePath (Join-Path $directory 'results.log')
     if ($LASTEXITCODE) { throw "$suite tests failed" }
 }
 & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$SourceRoot\apps\client\tests\fernwehupdater\test-windows-updater.ps1"
