@@ -1,6 +1,6 @@
 # Beta client diagnostics
 
-Merged source; not released or enabled on any deployed broker.
+The startup/termination extension requires updated broker and Client builds.
 
 Fernweh can automatically send a separate, structured diagnostic log to the
 configured remote-access broker. Ordinary text logs stay local. The feature is
@@ -32,6 +32,45 @@ The schema has no raw log message, URL, credential, file-path, clipboard,
 screenshot, audio or video field. It does not yet include GPU model/driver version,
 a detailed decoder trace or a process minidump. Raw logs remain available for
 explicit troubleshooting.
+
+## Startup and termination evidence
+
+New collectors include an optional `lifecycle` object alongside the existing
+schema1 report. It contains the last startup `phase`, the first initiating
+`termination_reason`, signed numeric `error_code`, and booleans `window_created`,
+`decoder_ready`, `video_received` and `renderer_progress`.
+
+Phases distinguish initialization, negotiation, transport readiness, window
+creation and decoder creation/readiness. Termination reasons distinguish an SDL
+quit event, a window close, reserved disconnect hotkey, toolbar action, explicit
+cancel, application exit, worker interruption, transport termination, session
+takeover, decoder/window/display failure, negotiated-frame-format change,
+reconnect failure/timeout and destruction before normal completion. The complete
+vocabulary is tested against the shared Client fixture
+`apps/client/tests/betadiagnostics/lifecycle-vocabulary.json`.
+
+The initiating cause is immutable: normal transport shutdown, cancellation or
+object destruction during cleanup cannot overwrite it. A final atomic snapshot
+is delivered before report finalization, including early exits and a prepared
+Session destroyed before execution. Intermediate phase snapshots update the
+existing bounded asynchronous checkpoint queue. A process killed before another
+checkpoint still has only its last recorded state, with unknown termination.
+
+`connected` means transport setup succeeded. `window_created` proves native
+window allocation, not that the window was visible. `decoder_ready` proves
+successful decoder selection, not presentation. `video_received` records an
+encoded frame reaching the client. `renderer_progress` records positive renderer
+statistics observed by the session or collector; it does not prove physical
+monitor scanout. False means no such observation was retained. These distinctions
+remain meaningful even if a session closes before the first five-second sample.
+`completed` continues to describe orderly cleanup; inspect lifecycle to assess
+startup success. Explicit startup/decoder failures mark the outcome failed.
+
+Older clients omit lifecycle; absence means unavailable evidence. Update the
+broker before distributing the new client: an older strict broker rejects the
+new optional field. This is source integration, not a claim that already
+installed clients produce the new fields. Raw text logs stay local and cannot
+be reconstructed from old reports.
 
 ## Resource budget and interrupted sessions
 

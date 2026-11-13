@@ -1914,6 +1914,8 @@ async fn diagnostics_authentication_schema_retention_limits_and_idempotency() {
     // Typical bounded reports exceed the normal 8 KiB auth body limit.
     let mut full = diagnostic_report(1);
     full["samples"] = serde_json::Value::Array(vec![full["samples"][0].clone(); 120]);
+    full["lifecycle"] = serde_json::json!({"phase":"creating_window","termination_reason":"window_creation_failed",
+        "error_code":-7,"window_created":false,"decoder_ready":false,"video_received":true,"renderer_progress":false});
     assert!(full.to_string().len() > 8192);
     assert_eq!(app.clone().oneshot(request(&token, full)).await.unwrap().status(), StatusCode::ACCEPTED);
     assert_eq!(

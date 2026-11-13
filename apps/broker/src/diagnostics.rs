@@ -30,6 +30,8 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct Report {
     pub schema: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<Lifecycle>,
     pub stream: Option<StreamParameters>,
     pub report_id: String,
     pub version: String,
@@ -42,6 +44,33 @@ pub struct Report {
     pub displays_end: Vec<Display>,
     pub samples: Vec<Sample>,
     pub events: Vec<Event>,
+}
+/// Fixed vocabulary only. A missing lifecycle means an older collector, not
+/// successful presentation. No free-form library error text is accepted.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lifecycle {
+    pub phase: StartupPhase,
+    pub termination_reason: TerminationReason,
+    pub error_code: i32,
+    pub window_created: bool,
+    pub decoder_ready: bool,
+    pub video_received: bool,
+    pub renderer_progress: bool,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupPhase {
+    Prepared, Initializing, Negotiating, TransportReady, CreatingWindow,
+    WindowCreated, CreatingDecoder, DecoderReady,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminationReason {
+    Unknown, InitializationFailed, StartupFailed, Cancelled, WindowCreationFailed,
+    DecoderFailed, DisplayFailed, QuitEvent, WindowClose, Hotkey, Toolbar,
+    ApplicationExit, ThreadInterrupted, ConnectionTerminated, SessionTakenOver,
+    ReconnectFailed, ReconnectTimeout, SessionDestroyed, FrameFormatChanged,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -251,6 +280,46 @@ fn store(cfg: &Config, username: &str, report: &Report, now: u64) -> Result<(), 
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn lifecycle_is_optional_strict_and_survives_private_storage() {
+        let old = crate::tests::diagnostic_report(1);
+        let legacy: Report = serde_json::from_value(old.clone()).unwrap();
+        assert!(legacy.validate());
+        assert!(legacy.lifecycle.is_none());
+        let mut body = old;
+        body["lifecycle"] = serde_json::json!({
+            "phase":"creating_window", "termination_reason":"window_creation_failed", "error_code":-7,
+            "window_created":false, "decoder_ready":false, "video_received":true, "renderer_progress":false
+        });
+        let report: Report = serde_json::from_value(body.clone()).unwrap();
+        assert!(report.validate());
+        let vocabulary:serde_json::Value=serde_json::from_str(include_str!("../../../protocol/fixtures/client-lifecycle-vocabulary.json")).unwrap();
+        for phase in vocabulary["phases"].as_array().unwrap() {
+            for reason in vocabulary["termination_reasons"].as_array().unwrap() {
+                let mut candidate=body.clone();
+                candidate["lifecycle"]["phase"]=phase.clone();
+                candidate["lifecycle"]["termination_reason"]=reason.clone();
+                let decoded:Report=serde_json::from_value(candidate.clone()).unwrap();
+                assert!(decoded.validate());
+                assert_eq!(serde_json::to_value(decoded).unwrap()["lifecycle"],candidate["lifecycle"]);
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("plank-lifecycle-{}",rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir,std::fs::Permissions::from_mode(0o700)).unwrap();
+        let cfg=Config{directory:dir.clone(),enabled_until_unix:u64::MAX};
+        store(&cfg,"anna",&report,1).unwrap();
+        let path=std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+        let saved:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved["report"]["lifecycle"],body["lifecycle"]);
+        for (key,value) in [("phase","arbitrary-local-path"),("termination_reason","arbitrary-error-text"),("message","raw-log")] {
+            let mut invalid=body.clone(); invalid["lifecycle"][key]=serde_json::json!(value);
+            assert!(serde_json::from_value::<Report>(invalid).is_err());
+        }
+        let mut invalid=body; invalid["lifecycle"]["error_code"]=serde_json::json!(i64::MAX);
+        assert!(serde_json::from_value::<Report>(invalid).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn disk_storage_prunes_expired_reports_and_rejects_symlinks_and_public_directories() {
         let dir = std::env::temp_dir().join(format!("plank-diagnostic-storage-{}", rand::random::<u64>()));
