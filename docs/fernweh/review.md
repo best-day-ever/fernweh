@@ -49,8 +49,13 @@ allowed (squash/rebase disabled). Final component review commits:
 - Client: `f104fda954ea6b5d7a89b2e0bff87b0b4a001af1`.
 - Linux Host: `cc51fa3e965706cef016d2498d16649fe9c5ee96`.
 
-The final parent Git tree pins those exact component commits. A fresh-clone
-verification receipt is recorded after pushing the parent.
+The final parent Git tree pins those exact component commits. A separate authenticated GitHub clone of implementation commit `6bbef3f5`
+checked out those exact private Client/Host pins, the shared transport, and both
+recursive Client dependencies. All initialized repositories were clean; imported
+source commits remain ancestors. The deployment validator also passes from that
+fresh clone. Linux Host's additional build dependencies were deliberately not
+recursively downloaded during this source-only verification. This final receipt
+changes documentation only.
 
 Cross-platform product builds, signed installers and live streaming are not
 implied by source/configuration tests. Existing BDE release notes retain their
