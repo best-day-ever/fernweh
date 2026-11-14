@@ -1,9 +1,9 @@
 # Building a fork from source
 
 **Fernweh:** use [the fork build guide](../../fernweh/build.md) first. It adds
-private-review cloning, operator build settings, the Windows client and broker
-to these inherited PLANK procedures. "Windows is not supported" below describes
-upstream PLANK's qualification scope, not the Fernweh Windows ALPHA client.
+public source cloning, deployment build settings, the Windows Client port and
+optional broker to these inherited PLANK procedures. Platform scope in this
+fork includes the implemented Windows ALPHA Client.
 
 PLANK's build inputs must be reproducible without a maintainer's prepared
 dependency directories or signing keys. A product rebuild and a dependency
@@ -18,13 +18,15 @@ by PLANK. macOS Qt is downloaded from its pinned official release archives.
 | --- | --- | --- |
 | Linux Host | Rocky/RHEL 9.7, x86-64; GCC Toolset 14, CUDA 13 | [Linux bootstrap](builder-vm-bootstrap.md) |
 | Linux Client | Ubuntu 26.04, x86-64; Qt 6.10.2 | [Linux bootstrap](builder-vm-bootstrap.md) |
+| Windows Client | Windows x64, MSVC2022, Qt6.10.2, native Rust transport | [Fernweh Windows guide](../../fernweh/build.md#windows-client) |
 | macOS Host / Client | Apple Silicon builder, macOS 27, Xcode/SDK 27; Host minimum26.7, Client minimum15 | [Host](macos-build-runbook.md), [Client dependencies](macos-client-build-runbook.md) |
 
 The named internal builders in the operational runbooks identify where project
 releases are qualified. They are not required computer names for a contributor.
 Choose your own absolute paths for the documented `PLANK_*` variables. Do not
 copy a maintainer's `paths.env`, certificates, Cargo cache or prepared FFmpeg.
-Windows is not yet a supported build target.
+The Windows Client has its own native build and MSI gates; a Linux/WSL build
+does not establish Windows acceptance. A Windows Host is not provided.
 
 The macOS Host uses Apple's system capture/encoding frameworks and the Rust
 transport. The private Qt/SDL/FFmpeg dependency stack is needed for the macOS

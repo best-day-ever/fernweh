@@ -1,7 +1,8 @@
 # Fernweh changes: implementation map
 
 This document describes downstream behavior at the component pins in
-[source-manifest.json](source-manifest.json). The [merged-history index](merged-history.md)
+[source-manifest.json](source-manifest.json). The [detailed change catalogue](change-catalogue.md) separates individual fixes
+and implementation commits. The [merged-history index](merged-history.md)
 contains the individual reviews, source commits, upstream imports and follow-up
 fixes. It is deliberately broader than the README's feature summary.
 
@@ -16,6 +17,24 @@ account authentication, display selection and tablet forwarding. Changes to
 those systems are credited as extensions or repairs. The later PLANK integration
 is tracked in the [current ledger](upstream-integration-2026-11-14.md), separately
 from the [earlier comparison](upstream-review-2026-11-14.md).
+
+## Windows Client port
+
+Fernweh brought up a Windows x64 Client for the PLANK stack, building on the
+Windows foundation inherited from Moonlight Qt. Client
+[`57932ae7`](https://github.com/best-day-ever/fernweh-client/commit/57932ae7f4b2e84a75adb601a338547d6ffdda33)
+integrates the MSVC native transport, required header/library checks, Win32
+link/build changes, DPAPI broker session storage and graphics/display adaptation.
+Parent [`97ff1875`](https://github.com/best-day-ever/fernweh/commit/97ff1875)
+adds the native build, dependency setup and staging scripts;
+[`6471486a`](https://github.com/best-day-ever/fernweh/commit/6471486a)
+adds WiX MSI packaging. These correspond to original Client34/35 and parent49/50.
+
+This is larger than the later clipboard/tablet adapters or updater repairs.
+The [Windows catalogue](change-catalogue.md#windows-client-port-and-native-integration)
+tracks the port and follow-up work individually. Current Windows remains an
+ALPHA Client product; SDK/signing and each candidate's physical acceptance stay
+explicit. Fernweh does not claim to have originated Moonlight's Windows code.
 
 ## Shared desktops and knocking
 

@@ -27,7 +27,12 @@ focused branches rooted at current upstream. Do not push to instinctual as part
 of routine downstream development.
 
 Use [the enhancement map](enhancements.md) to find ownership, then inspect live
-source. `scripts/agent/graph` is optional local code navigation; it and BDE's
+source. The [change catalogue](change-catalogue.md) records individual additions
+and repairs; the [review index](merged-history.md) records original PRs. When
+maintaining these, inspect implementation commits inside each PR and current
+platform scope. Credit a completed port as a product addition while retaining
+credit for its inherited foundation; do not copy stale upstream future-product
+wording or equate commit/PR counts with feature counts. `scripts/agent/graph` is optional local code navigation; it and BDE's
 memory service are not build dependencies. Public examples use reserved DNS/IP
 values. Store machine inventories and credentials outside Git. The original
 BDE repositories remain separate and keep their own deployment workflow.

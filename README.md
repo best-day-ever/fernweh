@@ -5,7 +5,7 @@
 <h1 align="center">BDE Fernweh</h1>
 
 <p align="center">
-  A source fork of <a href="https://github.com/instinctual/plank">PLANK</a> with desktop collaboration,
+  A source fork of <a href="https://github.com/instinctual/plank">PLANK</a> with a Windows Client port, desktop collaboration,
   display profiles, file transfer and an optional access broker.
 </p>
 
@@ -13,6 +13,7 @@
   <a href="#changes-from-plank">Changes</a> ·
   <a href="#display-configuration">Screenshots</a> ·
   <a href="docs/fernweh/build.md">Build</a> ·
+  <a href="docs/fernweh/change-catalogue.md">Change catalogue</a> ·
   <a href="docs/fernweh/enhancements.md">Implementation map</a> ·
   <a href="docs/fernweh/merged-history.md">Merged history</a> ·
   <a href="docs/fernweh/upstreaming.md">Contribute upstream</a>
@@ -31,12 +32,60 @@ OS account authentication, basic display selection, text clipboard and tablet
 forwarding. The changes below are downstream additions or repairs to those
 systems. This is an independent project, without an upstream endorsement.
 
-The [implementation map](docs/fernweh/enhancements.md) documents behavior,
+The [change catalogue](docs/fernweh/change-catalogue.md) breaks the work down into
+individual additions, fixes, build changes and upstream ports, with implementation
+commits. The [implementation map](docs/fernweh/enhancements.md) documents behavior,
 protocols, source files, original reviews and platform limits. The
 [merged-history index](docs/fernweh/merged-history.md) covers the smaller fixes,
 follow-up regressions, build changes and upstream imports as well as major features.
 
 ## Changes from PLANK
+
+### Windows Client port
+
+**Fernweh brought up the Windows x64 Client for the PLANK stack.** The port
+builds on Moonlight Qt's Windows foundation and wires in PLANK's native Rust
+transport and Fernweh's client behavior. It is an implemented ALPHA product,
+with native MSVC build/staging scripts and WiX MSI packaging.
+
+The initial port added native-transport linking and fail-fast library checks,
+Windows graphics/build compatibility, display discovery and DPAPI-protected
+broker session storage. Later work added:
+
+- Broker password/OTP sign-in, persisted nonexportable device keys and signed
+  remembered-session requests, with authentication-generation isolation.
+- Unicode text clipboard, Explorer file/folder transfer, Windows Wacom raw HID
+  and Windows Ink pen fallback.
+- Stable monitor selection across Qt/SDL scaling, and native Internet/ICMP
+  reachability checks.
+- Independent Windows update feeds, MSI identity/integrity validation, native
+  installer-path normalization, SYSTEM access and standard-user/UAC repairs.
+- Lost-keyframe recovery, nonblocking DXGI presentation, frame-pacer lifetime
+  fixes and accepted-presentation clock/latency accounting.
+
+The [Windows implementation history](docs/fernweh/change-catalogue.md#windows-client-port-and-native-integration)
+starts with the original Client port and packaging commits, rather than treating
+Windows as an installer adaptation. Current source builds and installed package
+acceptance remain separate; the retained Windows MSI tooling is ALPHA/unsigned.
+
+### Other downstream areas
+
+| Area | Added or extended in Fernweh |
+| --- | --- |
+| Access and identity | Optional FreeIPA broker, HBAC discovery, OTP/passkey sign-in, device-bound sessions, enrollment and reasoned authentication failures |
+| Shared desktops | Owner-consent knocking, view/control roles, permission suspension/revocation, optional support policies and per-participant input ownership |
+| Client sessions | Independent workstation windows, connected-person presence, explicit local controls and updater/session coordination |
+| Files and clipboard | Bidirectional files/folders, Mac file picker, Windows native adapters, separate account grants and transfer/ownership recovery |
+| Displays | Saved monitor sets, per-workstation profiles, physical/virtual backing, packed capture, primary selection, Retina/notch geometry and Apply/Keep lifecycle |
+| Input | Mac immersive keyboard, negotiated immersive mouse, first-click/coordinate repairs, Wacom startup and Windows tablet adapters |
+| Shared Mac Hosts | Signed broker admission, concurrent desktop streams/audio taps, stable Host TLS identity and broker-aware display matching |
+| Capture and transport | NVENC bandwidth profiles, CUDA/NVENC lifetime fixes, idle capture suppression, bounded pacing and shared-listener isolation |
+| Recovery | Greeter/VT handoff, retained display snapshots, first-login modesets, stale callback/lease races and Windows video recovery |
+| Packaging and diagnostics | Mac distribution integration, native Windows/MSI gates, optional managed updates and bounded startup/termination diagnostics |
+
+These areas contain many separate fixes. The [detailed catalogue](docs/fernweh/change-catalogue.md)
+keeps those implementation records visible; the [review index](docs/fernweh/merged-history.md)
+also includes release coordination, tests and upstream imports.
 
 ### Desktop sharing and join requests (knocking)
 
@@ -235,6 +284,7 @@ No upstream PR or acceptance is implied by publishing this source fork.
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Scope and review expectations |
 | [Development guide](docs/fernweh/development.md) | Component ownership and verification |
 | [Codex skill](.agents/skills/fernweh-development/SKILL.md) / [Claude Code skill](.claude/skills/fernweh-development/SKILL.md) | Shared repository workflow |
+| [Change catalogue](docs/fernweh/change-catalogue.md) | Individual additions, fixes and implementation evidence |
 | [Implementation map](docs/fernweh/enhancements.md) | Feature behavior, source and original PRs |
 | [Merged history](docs/fernweh/merged-history.md) | Detailed review/commit index |
 

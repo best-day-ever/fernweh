@@ -40,7 +40,7 @@ and next test. The layout is:
 
 - `apps/host/linux/` — RHEL/Rocky host, capture, encoding, authentication, and input helpers.
 - `apps/host/macos/` — native macOS Host and platform integration.
-- `apps/client/` — shared Linux/macOS client, decoding, presentation, and login UI.
+- `apps/client/` — shared Linux/macOS/Windows client, decoding, presentation, and login UI.
 - `protocol/` — shared schemas, feature negotiation, and test vectors.
 - `packaging/<product>/<os>/` — platform installation metadata and integration.
 - `tests/` — authentication, color, network, Wacom, and end-to-end suites.

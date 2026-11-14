@@ -5,8 +5,8 @@ Fernweh is a downstream ALPHA fork. Start with [the development guide](docs/fern
 The latter covers preparing small PLANK contributions without requiring our broker
 or infrastructure. Source audit and visibility are recorded in
 [the publication receipt](docs/fernweh/review.md).
-The inherited contribution principles below still apply; references to Windows as
-a future upstream product do not describe Fernweh's existing Windows ALPHA client.
+The inherited contribution principles below apply alongside Fernweh's
+implemented Windows x64 ALPHA Client and optional broker scope.
 
 Start with [AGENTS.md](AGENTS.md), the [platform matrix](docs/development/platforms.md)
 and the [build runbooks](docs/development/build/). Current work and outstanding
@@ -35,8 +35,10 @@ history, copyright and license notices. Follow each subtree's existing style.
 
 Use existing platform boundaries before creating an abstraction. Share protocol
 and product policy; keep capture, input, presentation and service integration
-platform-specific where necessary. Windows is a future contribution target,
-not an existing qualified build. A directory or compiling stub is not support.
+platform-specific where necessary. Windows Client changes use the native MSVC,
+transport, Qt and MSI gates in the [Windows guide](docs/fernweh/build.md#windows-client).
+The port is implemented; a newly built candidate still needs its own platform
+and installed-session acceptance. Windows Host/mobile are outside current scope.
 
 Keep PRs focused. Describe behavior, security implications, tests, target OS
 and hardware, limitations and any incomplete acceptance gates. UI changes need

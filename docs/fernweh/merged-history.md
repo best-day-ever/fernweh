@@ -1,6 +1,7 @@
 # Merged source history
 
-This index expands the thematic [implementation map](enhancements.md). It
+This index complements the [individual change catalogue](change-catalogue.md)
+and thematic [implementation map](enhancements.md). It
 records original BDE reviews whose merge commit or source head is reachable from
 the reviewed Fernweh component `main`. It includes release records, tests, build
 repairs and upstream imports; **PR counts are not counts of distinct features**.
