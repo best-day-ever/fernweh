@@ -25,10 +25,10 @@ No release number, installer feed, fleet pin or deployed service changes here.
 | --- | --- | --- |
 |1.4.12 | Shared Qt frontend, native CoreAudio, independent bookmark/polling changes and expanded display-policy UI | The wholesale merge needs explicit parity for Fernweh display profiles, shared-session views, file clipboard, screen-change Apply/Keep and the Windows frontend. A compiling Mac candidate does not prove these flows. |
 |1.4.12–1.4.14 | Native10 buffer reuse and transport/dependency refresh (Kymux `9e1a7e30`, Quinn 0.11.19, Rust 1.99.1) | Keep Fernweh's bounded pacing patch and exact-format NVENC 4:2:0 profiles. Require the coordinated native build, source-first FEC and unchanged loss/performance gates before advancing these pins. |
-|1.4.12 +1.4.15 | Optional Telegraf/Grafana metrics and tolerant optional-settings startup validation | Off by default upstream; full configuration, startup and frontend wiring must be checked together. The private integration candidate still needs that reconciliation. |
+|1.4.12 +1.4.15 | Optional Telegraf/Grafana metrics and tolerant optional-settings startup validation | Off by default upstream; full configuration, startup and frontend wiring must be checked together. The draft integration candidate still needs that reconciliation. |
 |1.4.16 | Narrow root:admin 0775 Application Support installer exception | Review with the native macOS Host installer filesystem suite; do not weaken protected leaf or ancestor checks. |
 
-The broader integration is preserved on private `integrate/plank-1-4-18`
+The broader integration is preserved on draft `integrate/plank-1-4-18`
 branches. It is an unfinished candidate, and must not be merged wholesale until
 these regressions and platform gates are resolved. The earlier
 [source comparison](upstream-review-2026-11-14.md) is a historical baseline;
@@ -47,6 +47,7 @@ The parent was refreshed to pin the actual merged component versions.
 Generic common-C `atomics` and virtual-input `master` dependency proposals were
 rejected because they drop PLANK-specific functionality. The proposed GoogleTest
 update was a verified downgrade from 1.17.0 to 1.14.0 and was rejected. Kymux belongs
-to the coordinated upgrade above. Hosted Actions remain disabled in the private
-review repositories; validation is local/native. All review repositories remain
-private. No binaries are published.
+to the coordinated upgrade above. Hosted Actions remain disabled; validation is local/native. The four Fernweh
+repositories are now public after the authorized history audit recorded in
+[the publication receipt](review.md). The integration branches remain unfinished.
+No binaries are published.

@@ -229,3 +229,30 @@ not change runtime trust, claim new hardware qualification or certify a new
 binary release. Private reports, source excerpts and credentials are not
 published. Visibility changes and final anonymous-access verification are
 recorded below after execution.
+
+
+### Publication completed
+
+On 14 November 2026 all four repositories were changed to public:
+[Fernweh](https://github.com/best-day-ever/fernweh),
+[Client](https://github.com/best-day-ever/fernweh-client),
+[Linux Host](https://github.com/best-day-ever/fernweh-host-linux), and
+[native input](https://github.com/best-day-ever/fernweh-common-c).
+Fresh unauthenticated API reads confirmed each public repository and exact
+reviewed commit. Actions remain disabled; merge commits remain enabled and
+squash/rebase disabled. No original BDE repository was republished or rewritten.
+
+Client [PR6](https://github.com/best-day-ever/fernweh-client/pull/6) and Host
+[PR8](https://github.com/best-day-ever/fernweh-host-linux/pull/8) update their
+public-status README/agent text only. Parent gitlinks advance to those merges,
+`98378b99` and `663cc6ae`; product source is unchanged. Their changed-content,
+commit privacy and whitespace checks pass. The complete-history snapshot above
+precedes these documentation-only commits; subsequent additions pass the
+same privacy checks.
+
+The actual GitHub-rendered README passes 1440px/390px, light/dark checks: three
+images load, local jump links resolve and article content does not overflow.
+Desktop/mobile renders were visually reviewed. Local documentation checks pass
+137 links/anchors; all232 original review source commits are verified ancestors
+of the recorded component source. The bde-linux repository gate passes with its
+existing lint advisories. Product builds were not repeated for documentation.
