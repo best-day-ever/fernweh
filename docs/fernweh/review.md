@@ -253,6 +253,17 @@ same privacy checks.
 The actual GitHub-rendered README passes 1440px/390px, light/dark checks: three
 images load, local jump links resolve and article content does not overflow.
 Desktop/mobile renders were visually reviewed. Local documentation checks pass
-139 links/anchors; all232 original review source commits are verified ancestors
+139 links/anchors; all 232 original review source commits are verified ancestors
 of the recorded component source. The bde-linux repository gate passes with its
 existing lint advisories. Product builds were not repeated for documentation.
+
+### Historical automation records
+
+Disabled Actions does not imply an empty run history. A final inventory found
+12 archived **Dependabot update** runs: six parent, three Client and three Linux
+Host; native input has none. All 12 run/job records and downloadable log archives
+were reviewed with Gitleaks 8.30.1 (archive traversal enabled), with zero findings.
+A separate deployment-identifier check of the archived logs also has zero
+matches. These are dependency-update records, not product build qualification.
+There are still no Actions artifacts, and Actions remain disabled. Private
+copies of the raw records/logs stay with the external publication audit.
