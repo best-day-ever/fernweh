@@ -1,6 +1,5 @@
 #!/bin/bash
-# Build the existing transport unchanged on the dedicated development Mac.
-# This is a qualification library, not an installable Host package.
+# Build and qualify the shared transport on the authorized macOS builder.
 set -euo pipefail
 if [[ $# != 2 || $1 != /* || $2 != /* ]]; then
     echo "Usage: $0 /absolute/source-worktree /absolute/build-directory" >&2
@@ -12,15 +11,15 @@ plank_macos_host_target
 transport_build=$2
 if [[ $(uname -s) != Darwin || $(uname -m) != arm64 ||
       $(xcrun --sdk macosx --show-sdk-version | cut -d . -f 1) -lt 27 ]]; then
-    echo "Requires the authorized Apple Silicon development Mac and SDK27+." >&2
+    echo "Requires an authorized Apple Silicon builder and SDK27+." >&2
     exit 2
 fi
-: "${PLANK_CARGO_ROOT:?Set the dedicated Mac Cargo cache path}"
-: "${PLANK_RUSTUP_ROOT:?Set the dedicated Mac Rustup path}"
+: "${PLANK_CARGO_ROOT:?Set the Mac builder Cargo cache path}"
+: "${PLANK_RUSTUP_ROOT:?Set the Mac builder Rustup path}"
 export CARGO_HOME="$PLANK_CARGO_ROOT" RUSTUP_HOME="$PLANK_RUSTUP_ROOT"
 export PATH="$CARGO_HOME/bin:$PATH"
 # Rust's debug stripping can misalign proc-macro LINKEDIT on macOS 27.
-# Keep compiler inputs intact for both Host targets; do not change Rust.
+# Retain this workaround until removal is qualified on both supported Host targets.
 # See https://github.com/rust-lang/rust/issues/157750.
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C strip=none"
 source "$source_root/scripts/build/build-paths.sh"
@@ -33,10 +32,10 @@ SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
 shared_target_dir="${HOME:?}/.cargo/shared-target"
 mkdir -p "$transport_build/release"
 cd "$source_root"
-test "$(rustc +1.89.0 --version | awk '{print $2}')" = 1.89.0
+test "$(rustc +1.99.1 --version | awk '{print $2}')" = 1.99.1
 test -f protocol/plank-transport/Cargo.lock
 test -f third_party/kyber-kymux/kyproto/Cargo.toml
-test -f third_party/quinn-proto-0.11.17/PLANK-PATCH.md
+test -f third_party/quinn-proto-0.11.19/PLANK-PATCH.md
 git rev-parse HEAD
 expected_kymux=$(git rev-parse HEAD:third_party/kyber-kymux)
 test "$(git -C third_party/kyber-kymux rev-parse HEAD)" = "$expected_kymux"
@@ -47,18 +46,13 @@ if [[ ${PLANK_MACOS_SENDER_TIMING:-0} == 1 ]]; then
 elif [[ ${PLANK_MACOS_SENDER_TIMING:-0} != 0 ]]; then
     echo 'PLANK_MACOS_SENDER_TIMING must be 0 or 1' >&2; exit 2
 fi
-if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
-    features=(--features macos-source-first)
-elif [[ ${PLANK_MACOS_SOURCE_FIRST:-0} != 0 ]]; then
-    echo 'PLANK_MACOS_SOURCE_FIRST must be 0 or 1' >&2; exit 2
-fi
 # macOS ships Bash3.2, where an empty array is unbound under nounset.
-cargo +1.89.0 build --target-dir "$shared_target_dir" --locked --release --message-format=json ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml > "$transport_build/cargo-build.jsonl"
-cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
-cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --offline --release \
-    --manifest-path third_party/quinn-proto-0.11.17/Cargo.toml --lib connection::pacing
-cargo +1.89.0 test --target-dir "$shared_target_dir" --locked --offline --release \
-    --manifest-path third_party/quinn-proto-0.11.17/Cargo.toml \
+cargo +1.99.1 build --target-dir "$shared_target_dir" --locked --release --message-format=json ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml > "$transport_build/cargo-build.jsonl"
+cargo +1.99.1 test --target-dir "$shared_target_dir" --locked --release ${features[@]+"${features[@]}"} --manifest-path protocol/plank-transport/Cargo.toml
+cargo +1.99.1 test --target-dir "$shared_target_dir" --locked --offline --release \
+    --manifest-path third_party/quinn-proto-0.11.19/Cargo.toml --lib connection::pacing
+cargo +1.99.1 test --target-dir "$shared_target_dir" --locked --offline --release \
+    --manifest-path third_party/quinn-proto-0.11.19/Cargo.toml \
     --lib tests::plank_pacing_cap_bounds_encrypted_datagram_bursts -- --exact
 if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
     # Dependency unit tests are not run by the root Cargo test command.
@@ -81,12 +75,18 @@ print(matches[0])
 PY
 )
     test -f "$fec_rlib"
-    rustc +1.89.0 --edition=2024 --test -O tests/protocol/source-first-fec.rs \
+    rustc +1.99.1 --edition=2024 --test -O tests/protocol/source-first-fec.rs \
         -L "dependency=$shared_target_dir/release/deps" --extern "raptorq=$fec_rlib" \
         -o "$transport_build/source-first-test"
     "$transport_build/source-first-test" --nocapture --test-threads=1
 fi
 install -m 0644 "$shared_target_dir/release/libplank_transport.a" "$transport_build/release/libplank_transport.a"
+# Keep deterministic parser/state, source/repair and reliable-lane checks on
+# the hosted builder. The unchanged strict loss/performance matrix is separately
+# qualified on the authorized development Mac; hosted scheduling also fails it
+# with the previously accepted sender. See the release build runbook.
+PLANK_TRANSPORT_CARGO_FEATURES=${features[1]:-} \
+    bash scripts/test/run-plank-transport-native-loopback.sh --functional-only
 shasum -a 256 "$transport_build/release/libplank_transport.a"
 
 # Exercise the same real C ABI as Linux, with Apple platform link libraries.

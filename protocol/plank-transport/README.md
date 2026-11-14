@@ -68,22 +68,50 @@ There is no application-level datagram pacer, optional pacer object, timer wait,
 or paced-baseline build. KyProto submits each prepared datagram to Quinn;
 Quinn's own congestion window, packet scheduling and bounded queue remain.
 The Host's shared rate policy uses a 1 Gbps budget floor on every platform,
-retains the existing RTT/window bounds and permits larger derived budgets.
-This is transport headroom, not an encoder bitrate or guaranteed link speed.
+retains the existing RTT-derived upper bounds and permits larger derived budgets.
+Its minimum in-flight window is 2MiB so a low LAN RTT does not reduce allowance
+to approximately one frame and make brief acknowledgment delays overflow the
+outgoing queue. Both native QUIC endpoints use one shared **4MiB** outgoing
+datagram queue policy. This accommodates a measured 1.6 MB keyframe plus its
+repair burst without relying on the network worker draining the 1MiB upstream
+default fast enough. Quinn still submits immediately and evicts old unsent
+datagrams at capacity; no wait-for-space policy or application pacer is added.
+The larger capacity is used on demand, not a playback buffering target. A
+sustained stall can still fill it; the stall gate checks bounded memory and
+prompt recovery without a lasting backlog. This is transport headroom, not an encoder bitrate
+or guaranteed link speed. Quinn derives packet pacing from its window and RTT;
+the reported budget is not an independent hard wire-rate limiter. A larger
+minimum window can therefore also allow larger/faster transmission bursts.
 The Client's existing default Quinn controller is unchanged.
 
-Linux Host packaging selects `quinn-telemetry`. The macOS Host can additionally
-select `macos-source-first` for its existing FEC submission order/diagnostics;
-neither that feature nor default features change the sender policy. Removed
+The [sender-window investigation](../../docs/development/investigations/sender-window-recovery.md)
+records measured comparisons, the bounded-stall regression and live-test limits.
+
+Every video sender uses source-first FEC: submit all original symbols, then
+calculate and submit RaptorQ repair symbols. Linux and macOS share this one
+implementation, including the reverse camera video lane. Source symbols are
+generated lazily without a padded frame copy or a frame-sized packet list.
+The first datagram does not wait for repair-matrix construction; repairs are
+still completed before the next video object. The wire format, symbol IDs,
+repair budget, receivers, and audio FEC path are unchanged. Existing matching
+`plank-native/2` Clients do not require an update for a Host using this order.
+
+Linux Host packaging selects `quinn-telemetry`; macOS enables `sender-timing`
+for its existing bounded opt-in diagnostics. Neither feature changes FEC or
+the sender policy. The platform-specific `macos-source-first`/`source-first-fec`
+features and `PLANK_MACOS_SOURCE_FIRST` build switch are removed. Removed
 `linux-fast-send`, `macos-fast-send` and `PLANK_MACOS_FAST_SEND` switches must
 not be restored for comparisons. Sender traces report FEC and Quinn work, not
-the deleted pacer/sleep counters. Both sender variants require the same loss
-and delivery-performance gates.
+the deleted pacer/sleep counters. Both Host builds run shared source/repair
+equivalence and functional transport gates. Linux also runs the strict loss/
+performance matrices on its hosted builder; Mac performance uses the exact
+hosted test executable on the authorized development Mac, with unchanged limits.
+See the release runbook for provenance and execution requirements.
 
 ## Native wire generation and RaptorQ
 
 The native QUIC ALPN is **`plank-native/2`**. This generation pins RaptorQ
-**2.0.1** in both the production library and standalone probe lockfiles. Its
+**2.0.1** in the production library's lockfile, also used by the native probes. Its
 RFC 6330 repair-symbol numbering is incompatible with the RaptorQ 1.x builds
 that used the `kymux` ALPN. Source symbols still have ESIs `0..K`; repairs
 start at `K`, not the extended internal block size `K'`. The library handles
@@ -99,8 +127,8 @@ an older Client retains its existing TLS error reporting. Other certificate/TLS
 failures are not relabeled as version errors. The C ABI and setup-envelope
 version are unchanged; neither is the native FEC compatibility gate.
 
-`native_version_tests.rs` exercises rejection in both directions, for setup
-and direct-media entry points, plus unknown/missing ALPN rejection. The native
+`native_version_tests.rs` exercises rejection in both directions before launch
+or media registration, plus unknown/missing ALPN rejection. The native
 loopback runner requires these checks, matching-peer media byte equality and
 three controlled-loss matrices. KyProto's FEC tests include fixed repair-byte
 vectors, small-object repair-only recovery and multi-block/sub-block recovery.
@@ -110,11 +138,11 @@ No legacy RaptorQ crate is added to the product to perform compatibility tests.
 
 Native endpoint stop/destroy cancels the entire asynchronous lifecycle, not
 just active streaming: listener accept, QUIC/TLS handshake, KyProto
-authentication, endpoint-ready waits, certificate approval, pre-session setup,
-and setup-to-stream promotion all observe the same durable stop predicate.
+authentication, endpoint-ready waits and certificate approval all observe the
+same durable stop predicate.
 Stop issued before a phase begins is retained; unrelated notifications do not
 cancel a live endpoint. A recorded failure also cancels pending work while
-preserving its original error. Completed setup cannot revive a stopping,
+preserving its original error. Completed connection establishment cannot revive a stopping,
 stopped or failed endpoint.
 
 Cancellation drops the pending lifecycle future instead of waiting for its
@@ -162,7 +190,26 @@ their charge; consuming or retiring them releases it. These are conservative
 admission budgets, **not measured RSS caps**: RaptorQ solver scratch is bounded
 separately by the symbol/block limits, and channel, output and Quinn buffers
 remain separately bounded. A budget violation fails explicitly rather than
-silently dropping arbitrary media.
+silently dropping arbitrary media, except for the bounded video retirement
+described below.
+
+When pending video reaches its object or byte budget, admission can retire
+the oldest media whose sequence is lowest and which has already waited at
+least the existing 50 ms reorder window. This permits recovery when a reliable
+configuration packet is delayed while its video datagrams continue arriving.
+Retirement frees only the space needed for the next object; it does not enlarge
+the budgets or add a playback delay. Configuration packets are never evicted,
+and a burst of fresh media alone exceeding the budget still fails explicitly.
+Group identity is resolved after eviction, since retirement may remove groups
+and change their vector indices. Late symbols cannot recreate retired frames.
+
+Retired objects contribute their FEC source/missing/unrecovered counts exactly
+once with the next delivered packet. A reconstructed but undelivered frame
+has zero after-FEC packet loss; its missing frame is accounted separately by
+the existing sequence-gap counter. Delayed configs still precede their media,
+and completed packets drain without waiting for another network arrival.
+The regression suite covers delayed-config stalls and bursts, object/byte
+limits, fresh-media rejection, group identity and exact loss accounting.
 
 Parser and processor failures propagate through the public receive result and
 cancel companion readers, rather than panicking or merely logging an error
@@ -211,23 +258,28 @@ between records, not inside a length prefix or payload.
 
 The PLANK reliable-data send and receive queues each retain at most 64 records
 and 8 MiB of payload, whichever limit is reached first. Both limits apply to
-setup/authentication and active sessions on both Host and Client platforms.
+launch negotiation and active sessions on both Host and Client platforms.
 At most one additional record (1 MiB) per direction is being read/written by
 the serial data task. These are application-payload bounds, not a claim about
 total RSS or Quinn's separately bounded stream/socket buffers.
 
 Send pressure returns the existing retryable `TIMEOUT` before making a copy.
-Incoming overflow terminates the connection with a size-limit error: reliable
-records are never silently evicted. Successful dequeue releases its byte
-charge; a short output buffer leaves the record and charge intact. FIFO copy
-and removal share one lock, including concurrent C ABI readers. Video/audio
-datagrams, RaptorQ, Wacom input and the 512 KiB clipboard limit are unchanged.
+Receive pressure pauses the serial reliable-data reader until the consumer
+frees space, propagating backpressure through QUIC without ending the session.
+The wait is cancellable and retains only the one additional bounded record;
+reliable records are never silently evicted. Invalid sizes still fail before
+allocation. Successful dequeue releases its byte charge and wakes the reader;
+a short output buffer leaves the record and charge intact. FIFO copy and
+removal share one lock, including concurrent C ABI readers. The other media
+lanes remain independent. Video/audio datagrams, RaptorQ, Wacom input and the
+512 KiB clipboard limit are unchanged.
 
 `tests/reliable-data.rs` runs the maintained parser regression tests through
 the product lockfile. Native queue tests cover byte/count limits, retry and
-variable-size accounting. The native loopback runner also floods the actual
-encrypted reliable-data receiver in both directions and requires a bounded,
-explicit failure with the already queued records preserved.
+variable-size accounting, spurious wakes and cancellation while full. The
+native loopback runner also bursts data through the actual encrypted receiver
+in both directions, pauses consumption beyond two seconds, then requires FIFO
+recovery with every record intact under both the packet and byte limits.
 
 Run the Rust and real C ABI checks with the pinned toolchain and offline Cargo
 cache:
@@ -238,14 +290,25 @@ cargo test --locked --offline \
 cargo clippy --locked --offline \
   --manifest-path protocol/plank-transport/Cargo.toml \
   --all-targets -- -D warnings
-scripts/test/run-plank-transport-ffi-loopback.sh
 scripts/test/run-plank-transport-native-loopback.sh
 scripts/test/run-plank-transport-native-ffi-loopback.sh
 ```
 
 The native C loopback verifies exact-fingerprint and certificate-profile trust,
-pre-session data with media/input blocked, explicit same-connection promotion,
-a 192-KiB key frame and metadata, raw Opus, Wacom-like input, and reliable data
-in both directions through real encrypted KyProto endpoints. The standalone saturation probe remains useful historical
-evidence for the tunneled implementation, but its split-connection and BBR
-results are not assumed for the new one-connection native baseline.
+active endpoint registration, large key frames and metadata, raw Opus,
+Wacom-like input, and reliable data
+in both directions through real encrypted KyProto endpoints. The retired
+two-connection transport and its historical probes are no longer build inputs.
+
+
+Video submissions assemble the 16-byte PLANK metadata prefix and encoded bytes
+once. The queue and KyProto sender move that same immutable allocation. The
+caller still owns its C input; one initial copy remains necessary. This does
+not change wire bytes, frame ordering, RaptorQ or codec/profile negotiation.
+Video send/receive queues retain at most 4/16 records respectively and at most
+64 MiB plus 16 bytes each. A maximum-sized valid frame still fits. Overflow
+evicts oldest records and counts every eviction, including multiple records
+removed for one larger frame. Frame-number gaps preserve decoder recovery.
+Validation and dequeue remain atomic; an undersized destination does not release
+a byte charge. Decoder/FEC work in flight and other lane/QUIC buffers are separate
+from these queue limits.

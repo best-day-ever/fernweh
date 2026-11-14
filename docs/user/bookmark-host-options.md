@@ -1,5 +1,19 @@
 # Host-aware bookmark options and Mac display matching
 
+## Multiple bookmarks for one Host
+
+In Clients built with the independent-bookmark change, open **Add workstation
+bookmark** again with the same Host address and a different nickname, such as "Workstation —
+single display" and "Workstation — dual displays". Each bookmark retains its own
+display layout, scaling, Client display selection, capture source, encoding
+profile and profile bitrates. Existing saved bookmarks remain intact.
+
+Edit changes only the selected bookmark; Delete removes only that bookmark.
+Host certificate trust remains shared by endpoint. Adding or deleting a
+bookmark does not reset trust or bypass the existing active-session rules.
+
+## Original Host-options qualification
+
 Branch: `bookmark-host-options`, based on accepted main `d6c4598`.
 Accepted and merged September 8: Client main `a803e0dc`, root acceptance tip
 `cef37c8`, both published. Later root closeout changes are documentation only.
@@ -24,9 +38,9 @@ policy change is required.
   Existing fixed bookmarks remain fixed. Filtering does not rewrite bookmarks
   until the operator saves them.
 - At authentication, Qt screen geometry and device pixel ratio resolve the
-  native-pixel request without initializing SDL/window surfaces. The existing
+  native-pixel request before creating session windows. The existing
   authenticated display schema 2 requests that size and the selected profile.
-  Before launch, SDL's actual display modes must agree; a topology change fails
+  The session uses the selected Qt screens; a topology change fails
   clearly instead of launching mis-scaled video/input.
 - One or two horizontally arranged client monitors map to one Mac virtual
   canvas. The existing qualified resolutions and 5120x2160 maximum apply.

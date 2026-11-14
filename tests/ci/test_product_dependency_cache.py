@@ -15,6 +15,18 @@ spec.loader.exec_module(cache)
 
 
 class ProductDependencyCacheTests(unittest.TestCase):
+    def test_host_source_preparation_keeps_exact_pins_without_full_history(self):
+        root = Path('/source-fixture')
+        with patch.object(cache.subprocess, 'run') as run:
+            cache.prepare_sources(root, 'linux-host')
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands, [
+            ['git', '-C', str(root), 'submodule', 'update', '--init', '--depth', '1', 'apps/host/linux'],
+            ['git', '-C', str(root / cache.HOST_DEPS.removesuffix('/third-party/build-deps')),
+             'submodule', 'update', '--init', '--recursive', '--depth', '1', 'third-party/build-deps'],
+        ])
+        self.assertTrue(all(call.kwargs['check'] for call in run.call_args_list))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -25,14 +37,12 @@ class ProductDependencyCacheTests(unittest.TestCase):
         inputs = (
             'scripts/ci/cache-dependencies.py', 'rust-toolchain.toml',
             'protocol/plank-transport/Cargo.toml', 'protocol/plank-transport/Cargo.lock',
-            'third_party/quinn-proto-0.11.17/Cargo.toml',
-            'third_party/quinn-proto-0.11.17/Cargo.lock',
+            'third_party/quinn-proto-0.11.19/Cargo.toml',
+            'third_party/quinn-proto-0.11.19/Cargo.lock',
             'scripts/build/build-paths.sh', 'scripts/build/build-client-ffmpeg.sh',
             'scripts/build/bootstrap-macos-client-deps.sh', 'scripts/build/macos-client-target.sh',
             'scripts/build/relocate-openssl-pc.py', 'scripts/build/sanitize-ffmpeg-build-info.py',
             'scripts/build/verify-host-dependency-patches.sh', cache.IDENTITY_PATCH,
-            'scripts/build/build-client-sdl.sh', 'scripts/build/client-sdl.sh',
-            'tests/input/test-sdl-cursor-retirement.py', 'scripts/test/check-client-sdl.py', cache.SDL_PATCH,
         )
         for name in (*inputs, *(str(p.relative_to(ROOT)) for p in
                                 (ROOT / cache.RECIPES).glob('*.sh'))):
@@ -66,9 +76,33 @@ class ProductDependencyCacheTests(unittest.TestCase):
         keys = self.keys()
         for name in ('packaging/VERSION', 'apps/host/macos/example.m',
                      'apps/client/app/example.cpp', 'scripts/ci/bootstrap.sh',
-                     'scripts/ci/build.sh', '.github/workflows/build.yml'):
+                     'scripts/ci/build.sh', '.github/workflows/build.yml', 'scripts/ci/cache-dependencies.py'):
             self.write(self.root / name, 'application or orchestration change')
             self.assertEqual(keys, self.keys())
+
+    def test_host_dependency_documentation_commit_preserves_libraries(self):
+        before = self.keys()
+        self.write(self.host_deps / 'README.md', 'documentation only')
+        subprocess.run(['git', '-C', str(self.host_deps), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.host_deps), '-c', 'user.name=CI fixture',
+                        '-c', 'user.email=ci@example.org', 'commit', '-qm', 'Document build'], check=True)
+        self.assertEqual(before, self.keys())
+
+    def test_rocky_ignores_utilities_but_keeps_headers_and_runtime_libraries(self):
+        packages = ['gcc-toolset-14-gcc=14', 'openssl-libs=3', 'libX11-devel=1',
+                    'cuda-toolkit=13', 'pulseaudio-libs=16', 'git=2', 'vim-minimal=9']
+        selected = cache.rocky_build_packages(packages)
+        self.assertEqual(selected, sorted(packages[:5]))
+        self.assertEqual(selected, cache.rocky_build_packages(packages[:5] + ['git=3', 'vim-minimal=10']))
+        self.assertNotEqual(selected, cache.rocky_build_packages(['openssl-libs=4'] + packages[:1]))
+
+    def test_mac_image_rollout_does_not_invalidate_downloaded_inputs(self):
+        with patch.object(cache.platform, 'system', return_value='Darwin'), \
+             patch.object(cache.platform, 'machine', return_value='arm64'):
+            with patch.dict(cache.os.environ, {'ImageVersion': 'first'}):
+                before = cache.toolchain_inputs('macos-host')
+            with patch.dict(cache.os.environ, {'ImageVersion': 'second'}):
+                self.assertEqual(before, cache.toolchain_inputs('macos-host'))
 
     def test_transport_lock_and_manifest_only_invalidate_cargo(self):
         expected = {(product, 'cargo') for product in cache.PRODUCTS}
@@ -77,7 +111,7 @@ class ProductDependencyCacheTests(unittest.TestCase):
 
     def test_vendor_test_inputs_only_invalidate_host_cargo(self):
         for name in ('Cargo.lock', 'Cargo.toml'):
-            self.assert_changes_only('third_party/quinn-proto-0.11.17/' + name,
+            self.assert_changes_only('third_party/quinn-proto-0.11.19/' + name,
                                      {('linux-host', 'cargo')})
 
     def test_rust_toolchain_invalidates_rust_and_cargo_not_libraries(self):
@@ -91,7 +125,6 @@ class ProductDependencyCacheTests(unittest.TestCase):
             ('boost.sh', ('linux-host', 'boost')),
             ('host-ffmpeg.sh', ('linux-host', 'ffmpeg')),
             ('client-ffmpeg.sh', ('linux-client', 'ffmpeg')),
-            ('client-sdl.sh', ('linux-client', 'native')),
             ('macos-libraries.sh', ('macos-client', 'native')),
             ('qt.sh', ('macos-client', 'qt')),
         ):
@@ -107,15 +140,11 @@ class ProductDependencyCacheTests(unittest.TestCase):
         self.assert_changes_only('scripts/build/bootstrap-macos-client-deps.sh', expected)
         self.assert_changes_only('scripts/build/relocate-openssl-pc.py', expected)
         self.assert_changes_only('scripts/build/build-paths.sh',
-                                 expected | {('linux-client', 'ffmpeg'), ('linux-client', 'native')})
+                                 expected | {('linux-client', 'ffmpeg')})
 
-    def test_sdl_repair_only_invalidates_ubuntu_sdl(self):
-        self.assert_changes_only(cache.SDL_PATCH, {('linux-client', 'native')})
-        self.assert_changes_only('scripts/build/client-sdl.sh', {('linux-client', 'native')})
-        (self.root / cache.SDL_PATCH).unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.key('linux-client', 'native')
-        self.key('macos-client', 'native')
+    def test_ubuntu_has_no_sdl_cache(self):
+        self.assertNotIn('native', cache.COMPONENTS['linux-client'])
+        self.assertFalse((ROOT / 'scripts/ci/dependencies/client-sdl.sh').exists())
 
     def test_host_codec_tree_changes_only_invalidate_host_ffmpeg(self):
         self.assert_changes_only(cache.HOST_DEPS + '/CMakeLists.txt', {('linux-host', 'ffmpeg')})
@@ -132,7 +161,7 @@ class ProductDependencyCacheTests(unittest.TestCase):
         after = self.keys()
         self.assertEqual({pair for pair in before if before[pair] != after[pair]},
                          {('linux-host', 'ffmpeg'), ('linux-client', 'ffmpeg'),
-                          ('macos-client', 'native'), ('linux-client', 'native')})
+                          ('macos-client', 'native')})
 
     def ubuntu_tools(self, packages, image='first', description='Ubuntu'):
         def command(args):
@@ -162,7 +191,7 @@ class ProductDependencyCacheTests(unittest.TestCase):
                         'libwayland-bin=5', 'new-optional-codec-dev=1'):
             name = changed.split('=', 1)[0]
             newer = self.ubuntu_tools([p for p in packages if not p.startswith(name + '=')] + [changed])
-            for component in ('ffmpeg', 'native'):
+            for component in ('ffmpeg',):
                 self.assertNotEqual(self.key('linux-client', component, tools),
                                     self.key('linux-client', component, newer))
             for component in ('rust', 'cargo'):
@@ -200,7 +229,8 @@ class ProductDependencyCacheTests(unittest.TestCase):
         self.assertEqual(len(set(keys.values())), len(keys))
         for (product, component), key in keys.items():
             self.assertTrue(cache.key_valid(key, product, component))
-            self.assertNotEqual(key, cache.fingerprint(
+            compare = self.assertNotEqual if component in ('ffmpeg', 'native', 'qt') else self.assertEqual
+            compare(key, cache.fingerprint(
                 self.root, self.deps / 'other', product, component, self.tools))
             self.assertNotEqual(key, self.key(product, component,
                 dict(self.tools, platform={'architecture': 'other'})))
@@ -244,7 +274,7 @@ class ProductDependencyCacheTests(unittest.TestCase):
             self.assertNotIn(cache.hits_path(self.deps, product), paths)
         self.assertEqual(cache.cache_paths(self.root, self.deps, 'linux-client', 'rust')[:-1],
                          [self.deps / 'rustup', self.deps / 'cargo/bin'])
-        self.assertIn(self.deps / 'client-ffmpeg/ffmpeg-9.0.1.tar.xz',
+        self.assertIn(self.deps / 'client-ffmpeg/ffmpeg-9.0.2.tar.xz',
                       cache.cache_paths(self.root, self.deps, 'linux-client', 'ffmpeg'))
 
     def test_receipts_reject_wrong_component_key_schema_or_missing_file(self):
@@ -281,12 +311,12 @@ class ProductDependencyCacheTests(unittest.TestCase):
     def test_prepared_source_patch_checks_remain_mandatory(self):
         for product, component, names in (
             ('linux-host', 'ffmpeg', ['host-ffmpeg/lib/libavcodec.a', 'host-ffmpeg/lib/libavutil.a']),
-            ('linux-client', 'ffmpeg', ['client-ffmpeg/ffmpeg-9.0.1.tar.xz'] +
+            ('linux-client', 'ffmpeg', ['client-ffmpeg/ffmpeg-9.0.2.tar.xz'] +
              ['client-ffmpeg/install/lib/' + name + '.so' for name in
               ('libavcodec', 'libavutil', 'libswscale', 'libswresample')]),
             ('macos-client', 'native', ['macos-client/install/lib/' + name + '.dylib' for name in
              ('libavcodec', 'libavutil', 'libswscale', 'libswresample', 'libssl', 'libcrypto',
-              'libSDL3', 'libSDL3_ttf', 'libopus', 'libfreetype')]),
+              'libopus')]),
         ):
             with self.assertRaises(ValueError):
                 cache.check_prepared(self.root, self.deps, product, component)
@@ -328,8 +358,7 @@ class ProductDependencyCacheTests(unittest.TestCase):
         self.assertIn('rust-hit=false', output_path.read_text())
         self.assertIn('ffmpeg-hit=false', output_path.read_text())
         for name in ('cargo/bin/rustup', 'rustup/settings.toml',
-                     'client-sdl/prepared.sha256', 'client-sdl/install/lib/libSDL3.so.0',
-                     'client-ffmpeg/ffmpeg-9.0.1.tar.xz',
+                     'client-ffmpeg/ffmpeg-9.0.2.tar.xz',
                      *(f'client-ffmpeg/install/lib/{name}.so' for name in
                        ('libavcodec', 'libavutil', 'libswscale', 'libswresample'))):
             self.write(self.deps / name, 'fixture')

@@ -28,9 +28,15 @@ The initial supported deployment is:
 - Rocky Linux 9.7 Host with a qualified NVIDIA GPU, proprietary NVIDIA Xorg
   stack, CUDA/NvFBC, and an active local `seat0` X11 session or GDM greeter;
 - Ubuntu 26.04 Client on qualified Intel NUC-class hardware using the native
-  Wayland, SDL3, Vulkan, PipeWire, and packaged FFmpeg path;
+  Wayland, Qt, VA-API/EGL or software-decode/Vulkan, PipeWire, and packaged FFmpeg path;
 - one controlling remote client, with explicit same-account transfer to a
-  replacement client; and
+  replacement client.
+
+Intel NUC Gen11 (Tiger Lake) is not qualified Client hardware and cannot be
+used for release acceptance. Repeated full-session GPU hangs remain unresolved
+despite passing isolated decode/sampling tests. See the
+[Intel NUC qualification record](../hardware/intel-nuc-client-qualification.md).
+Qualification of another model does not automatically qualify every generation.
 
 There are no deployed legacy PLANK versions. A candidate must not add silent
 Sunshine/Moonlight compatibility paths or restore removed product features.
@@ -128,9 +134,10 @@ sampling, range, and color transform defined in
 
 The qualified default is H.264 High 10 4:4:4 full-range identity GBR. Decoder
 selection is internal and profile-specific: the Client validates a real
-exact-format hardware test frame first, then uses the exact software decoder
-for the same profile. If neither path preserves the requested tuple, the
-connection fails clearly.
+exact-format hardware test frame first. H.264 may use the exact software decoder
+for the same profile; HEVC requires hardware decoding. If the permitted paths
+cannot preserve the requested tuple, the connection fails clearly. Apply this
+by codec, including NVENC H.264 and Apple HEVC, not by the Host encoder name.
 
 Every supported profile must pass:
 

@@ -7,10 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       product:
-        description: Product to rebuild (all on ordinary push/PR)
+        description: Product to rebuild (affected products on push/PR)
         type: choice
         default: all
-        options: [all, linux-host, linux-client, macos-host, macos-client, macos-fullscreen-probe]
+        options: [all, linux-host, linux-native10-tests, linux-client, linux-client-vaapi-probe, macos-host, macos-client, macos-fullscreen-probe, dependency-tests]
+      dependency_scope:
+        description: Dependency tests to run (product=dependency-tests only)
+        type: choice
+        default: all
+        options: [all, transport, vulkan]
       source_sha:
         description: Expected commit (optional in UI; required by the dispatch helper)
         type: string
@@ -27,6 +32,9 @@ on:
         description: Bypass dependency cache restore and save
         type: boolean
         default: false
+      diagnostic_ffmpeg_cache:
+        description: Exact retained FFmpeg cache key (VA-API diagnostic only)
+        type: string
 
 permissions:
   contents: read
@@ -43,13 +51,27 @@ env:
   REQUESTED_MACOS_HOST_MIN_OS: ${{ inputs.macos_host_min_os || '26.7' }}
 
 jobs:
+  dependency-tests:
+    if: ${{ inputs.product == 'dependency-tests' }}
+    needs: policy
+    uses: ./.github/workflows/dependency-qualification.yml
+    with:
+      scope: ${{ inputs.dependency_scope || 'all' }}
+
   policy:
+    outputs:
+      products: ${{ steps.affected.outputs.products }}
+      macos: ${{ steps.affected.outputs.macos }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Select affected products
+        id: affected
+        run: python3 scripts/ci/affected-products.py
       - name: Install source-gate test dependency
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - run: python3 -m unittest discover -s tests/ci -v
@@ -59,7 +81,7 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
 
   linux-host:
-    if: ${{ !inputs.product || inputs.product == 'all' || inputs.product == 'linux-host' }}
+    if: ${{ (!inputs.product && contains(fromJSON(needs.policy.outputs.products), 'linux-host')) || inputs.product == 'all' || inputs.product == 'linux-host' }}
     needs: policy
     runs-on: ubuntu-24.04
     container: rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0
@@ -97,8 +119,38 @@ jobs:
         with:
           operation: save
           product: linux-host
+      - name: Install pinned Host compiler cache
+        if: ${{ !inputs.clean_bootstrap }}
+        run: python3 scripts/ci/host-object-cache.py install
+      - name: Select Host compiler cache
+        if: ${{ !inputs.clean_bootstrap }}
+        id: host-compiler-cache
+        run: python3 scripts/ci/host-object-cache.py prepare
+      - name: Restore Host compiler outputs
+        if: ${{ !inputs.clean_bootstrap }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0, Node24
+        with:
+          key: ${{ steps.host-compiler-cache.outputs.key }}
+          restore-keys: ${{ steps.host-compiler-cache.outputs.prefix }}
+          path: ${{ steps.host-compiler-cache.outputs.path }}
+      - name: Enable Host compiler cache
+        if: ${{ !inputs.clean_bootstrap }}
+        id: host-compiler-setup
+        run: python3 scripts/ci/host-object-cache.py enable
+      - name: Verify Host compiler cache wiring
+        if: ${{ !inputs.clean_bootstrap }}
+        run: python3 scripts/ci/host-object-cache.py verify
       - run: bash scripts/ci/build.sh linux-host
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Report Host compiler reuse
+        if: ${{ always() && steps.host-compiler-setup.outcome == 'success' }}
+        run: python3 scripts/ci/host-object-cache.py report
+      - name: Save verified Host compiler outputs
+        if: ${{ !inputs.clean_bootstrap && github.event_name != 'pull_request' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0, Node24
+        with:
+          key: ${{ steps.host-compiler-cache.outputs.key }}
+          path: ${{ steps.host-compiler-cache.outputs.path }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-host-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PLANK_ARTIFACT_ROOT }}/
@@ -108,8 +160,85 @@ jobs:
         if: always()
         run: df -h
 
+  linux-native10-tests:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.product == 'linux-native10-tests' }}
+    needs: policy
+    runs-on: ubuntu-24.04
+    container: rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install minimal Native10 test tools
+        run: |
+          dnf --disablerepo='*' \
+            --repofrompath=ci-baseos,https://dl.rockylinux.org/vault/rocky/9.7/BaseOS/x86_64/os/ \
+            --repofrompath=ci-appstream,https://dl.rockylinux.org/vault/rocky/9.7/AppStream/x86_64/os/ \
+            --repofrompath=ci-crb,https://dl.rockylinux.org/vault/rocky/9.7/CRB/x86_64/os/ \
+            --enablerepo=ci-baseos --enablerepo=ci-appstream --enablerepo=ci-crb \
+            install -y --setopt=install_weak_deps=False \
+            git tar gzip python3 cmake gcc-toolset-14-gcc-c++ \
+            gcc-toolset-14-libasan-devel gcc-toolset-14-libubsan-devel libxcb-devel
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 scripts/ci/context.py
+      - run: bash scripts/ci/native10-fast.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native10-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PLANK_ARTIFACT_ROOT }}/qualification/native10/
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-client-vaapi-probe:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.product == 'linux-client-vaapi-probe' }}
+    needs: policy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 scripts/ci/context.py
+      - name: Require retained dependency inputs
+        env:
+          CLEAN_BOOTSTRAP: ${{ inputs.clean_bootstrap }}
+          REQUIRED_FFMPEG_CACHE: ${{ inputs.diagnostic_ffmpeg_cache }}
+        run: |
+          test "$CLEAN_BOOTSTRAP" != true
+          [[ "$REQUIRED_FFMPEG_CACHE" =~ ^plank-linux-client-ffmpeg-v3-[0-9a-f]{64}$ ]]
+      - run: bash scripts/ci/install-linux-deps.sh client
+      - name: Match the Client dependency fingerprint
+        run: sudo apt-get install -y --no-install-recommends libvulkan-dev
+      - name: Select existing dependency cache
+        id: dependencies
+        run: python3 scripts/ci/cache-dependencies.py prepare --product linux-client
+      - name: Restore exact Client FFmpeg
+        id: ffmpeg
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0, Node24
+        with:
+          key: ${{ inputs.diagnostic_ffmpeg_cache }}
+          path: ${{ steps.dependencies.outputs.ffmpeg-paths }}
+      - name: Require and verify the existing Client libraries
+        env:
+          CACHE_MATCHED_FFMPEG: ${{ steps.ffmpeg.outputs.cache-matched-key }}
+          REQUIRED_FFMPEG_CACHE: ${{ inputs.diagnostic_ffmpeg_cache }}
+        run: |
+          python3 scripts/ci/verify-vaapi-probe-cache.py
+      - run: bash "$PLANK_SOURCE_ROOT/scripts/build/build-vaapi-decode-probe.sh"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-client-vaapi-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PLANK_WORK_ROOT }}/vaapi-decode-probe/
+          if-no-files-found: error
+          retention-days: 7
+
   linux-client:
-    if: ${{ !inputs.product || inputs.product == 'all' || inputs.product == 'linux-client' }}
+    if: ${{ (!inputs.product && contains(fromJSON(needs.policy.outputs.products), 'linux-client')) || inputs.product == 'all' || inputs.product == 'linux-client' }}
     needs: policy
     runs-on: ubuntu-26.04
     timeout-minutes: 120
@@ -170,7 +299,7 @@ jobs:
         with:
           key: ${{ steps.compiler-cache.outputs.key }}
           path: ${{ steps.compiler-cache.outputs.path }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-client-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PLANK_ARTIFACT_ROOT }}/
@@ -181,7 +310,7 @@ jobs:
         run: df -h
       - name: Retain Qt qualification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qt-session-tests-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PLANK_WORK_ROOT }}/qt-session-reports/
@@ -189,14 +318,14 @@ jobs:
           retention-days: 7
 
   macos:
-    if: ${{ !inputs.signed && (!inputs.product || inputs.product == 'all' || inputs.product == 'macos-host' || inputs.product == 'macos-client') }}
+    if: ${{ !inputs.signed && ((!inputs.product && needs.policy.outputs.macos != '[]') || inputs.product == 'all' || inputs.product == 'macos-host' || inputs.product == 'macos-client') }}
     needs: policy
     runs-on: xcode-27
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        product: ${{ fromJSON(inputs.product == 'macos-host' && '["host"]' || inputs.product == 'macos-client' && '["client"]' || '["host", "client"]') }}
+        product: ${{ fromJSON(inputs.product == 'macos-host' && '["host"]' || inputs.product == 'macos-client' && '["client"]' || (inputs.product == 'all' && '["host", "client"]') || needs.policy.outputs.macos) }}
     env:
       PLANK_BUILD_JOBS: '3'
     steps:
@@ -282,7 +411,7 @@ jobs:
       - name: Remove temporary signing material
         if: always()
         run: python3 scripts/ci/sign-macos.py --cleanup
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-${{ inputs.product }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PLANK_ARTIFACT_ROOT }}/

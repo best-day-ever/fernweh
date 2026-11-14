@@ -26,7 +26,7 @@ plank_load_package_version "$source_root"
 version=$PLANK_PACKAGE_VERSION
 client="$source_root/apps/client"
 test "$(qmake -query QT_VERSION)" = 6.10.2
-test "$(rustc --version | awk '{print $2}')" = 1.89.0
+test "$(rustc --version | awk '{print $2}')" = 1.99.1
 # A restored dependency cache may predate the posted-pointer fix. Rebuild SDL
 # alone when its patch, target or installed binary no longer matches the stamp.
 bash "$source_root/scripts/build/ensure-macos-client-sdl.sh" "$source_root"
@@ -65,6 +65,7 @@ run_shared_client_test deployment
 run_shared_client_test plankclientpolicy
 run_shared_client_test internetconnectivity
 run_shared_client_test macqtsession
+run_shared_client_test macnativeaudio
 run_shared_client_test qtinputruntime pointerDragHasOrderedDeltasAndAuthoritativeEnd \
     pointerEndDefersInputWithoutLosingNextClick pointerFocusCancellationReleasesAndIgnoresLateAck \
     pointerMultipleButtonsShareOneCaptureAndWheelRemainsOrdered immersiveModeCanRestartWhileEndAckIsDelayed \
@@ -94,10 +95,45 @@ xcrun clang++ -std=c++17 -fobjc-arc -mmacosx-version-min="$MACOSX_DEPLOYMENT_TAR
     -framework Foundation -framework AppKit -framework AVFoundation \
     -o "$build/tests/microphone-permission-test"
 "$build/tests/microphone-permission-test"
+xcrun clang++ -std=c++17 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -Wall -Wextra -Werror -I"$client/app/streaming" \
+    "$source_root/tests/auth/client-reconnect-policy.cpp" -o "$build/tests/client-reconnect-policy"
+"$build/tests/client-reconnect-policy"
+# Exercise the shared send/drain controller with actual pinned software decoders.
+xcrun clang++ -std=c++17 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -Wall -Wextra -Werror -DPLANK_TEST_REAL_FFMPEG \
+    -I"$client/app/streaming" "$source_root/tests/session/decode-pump.cpp" \
+    $(pkg-config --cflags --libs libavcodec libavutil) -o "$build/tests/decode-pump"
+DYLD_LIBRARY_PATH="$PLANK_MAC_CLIENT_DEPS/install/lib" "$build/tests/decode-pump"
+xcrun clang++ -std=c++17 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -Wall -Wextra -Werror -I"$client/app/streaming" \
+    -I"$client/moonlight-common-c/moonlight-common-c/src" \
+    "$source_root/tests/session/decode-packet.cpp" \
+    $(pkg-config --cflags --libs libavcodec libavutil) -o "$build/tests/decode-packet"
+DYLD_LIBRARY_PATH="$PLANK_MAC_CLIENT_DEPS/install/lib" "$build/tests/decode-packet"
 patch_file="$client/app/deploy/linux/ffmpeg-patches/0001-hevc-enable-hwaccel-for-identity-gbr.patch"
-printf '%s  %s\n' 059cc9c0d585d71e292cd7421a43f239b1e7ce94e8598d0a7427dfe48e55847e "$patch_file" | shasum -a 256 -c -
-patch --batch --reverse --dry-run -d "$PLANK_MAC_CLIENT_DEPS/src/ffmpeg-9.0.1" -p1 < "$patch_file"
-pkg-config --modversion sdl3 sdl3-ttf openssl opus libavcodec libavutil
+printf '%s  %s\n' eb6ef0c1076f54559b85a6bc4cc89f1c46a980da7b0f1f857258e638475085bb "$patch_file" | shasum -a 256 -c -
+patch --batch --fuzz=0 --reverse --dry-run -d "$PLANK_MAC_CLIENT_DEPS/src/ffmpeg-9.0.2" -p1 < "$patch_file"
+python3 "$source_root/scripts/test/check-client-ffmpeg-identity.py" \
+    "$PLANK_MAC_CLIENT_DEPS/src/ffmpeg-9.0.2/libavcodec/hevc/hevcdec.c"
+python3 "$source_root/tests/packaging/test-client-ffmpeg-identity.py"
+hardware_patch="$client/app/deploy/linux/ffmpeg-patches/0002-videotoolbox-require-hevc-hardware.patch"
+printf '%s  %s\n' e6c0680ef435d6f9a474473e2630e708d7e2aec520b4e35254fb817f1fa8d775 "$hardware_patch" | shasum -a 256 -c -
+patch --batch --fuzz=0 --reverse --dry-run -d "$PLANK_MAC_CLIENT_DEPS/src/ffmpeg-9.0.2" -p1 < "$hardware_patch"
+printf '%s  %s\n' f88b544a21f20447e41f236da464035dbb20953b05a528b399c81b798c906d4c \
+    "$PLANK_MAC_CLIENT_DEPS/src/ffmpeg-9.0.2/libavcodec/videotoolbox.c" | shasum -a 256 -c -
+xcrun clang++ -std=c++17 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -Wall -Wextra -Werror -I"$client/app/streaming" \
+    "$source_root/tests/video/client-hardware-formats.cpp" \
+    $(pkg-config --cflags --libs libavcodec libavutil) -o "$build/tests/client-hardware-formats"
+DYLD_LIBRARY_PATH="$PLANK_MAC_CLIENT_DEPS/install/lib" "$build/tests/client-hardware-formats"
+xcrun clang++ -std=c++17 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+    -Wall -Wextra -Werror -I"$client/app/streaming" \
+    -I"$client/moonlight-common-c/moonlight-common-c/src" \
+    -I"$source_root/protocol/plank-transport/include" \
+    "$source_root/tests/video/decoder-policy.cpp" -o "$build/tests/decoder-policy"
+"$build/tests/decoder-policy"
+pkg-config --modversion openssl opus libavcodec libavutil
 mkdir -p "$build"
 python3 "$source_root/scripts/test/check-macos-client-target.py" \
     "$PLANK_MAC_CLIENT_DEPS/install/lib" --target "$PLANK_MAC_CLIENT_MIN_MACOS" \
@@ -109,7 +145,7 @@ rm -f "$build/app/plank-client.app/Contents/Info.plist"
 # Recursive generation is mandatory when retaining a build: otherwise existing
 # subproject Makefiles may silently retain the previous source/version/flags.
 qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
-    CONFIG+=plank-transport CONFIG+=bde-sdl-session CONFIG+=disable-libplacebo CONFIG+=disable-wayland \
+    CONFIG+=plank-transport CONFIG+=disable-libplacebo CONFIG+=disable-wayland \
     CONFIG+=disable-x11 CONFIG+=disable-libva CONFIG+=disable-libdrm \
     QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \
     PLANK_VERSION="$version" PLANK_MAC_CLIENT_MIN_MACOS="$PLANK_MAC_CLIENT_MIN_MACOS" PLANK_MACOS_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
@@ -137,15 +173,18 @@ for suite in hostpolling clientinstances windowsdevicekey fernwehupdater outputt
     run_shared_client_test "$suite"
 done
 # Dummy input only: no microphone permission or physical recording on builders.
-mkdir -p "$build/tests/client-microphone"
+for timed in 0 1; do
+mkdir -p "$build/tests/client-microphone-$timed"
 (
-    cd "$build/tests/client-microphone"
+    cd "$build/tests/client-microphone-$timed"
     qmake "$source_root/tests/audio/client-microphone.pro" "PLANK_CLIENT_SOURCE=$client" \
+        "PLANK_TIMED_CAPTURE_TEST=$timed" \
         "QMAKE_CXXFLAGS+=-include arm_acle.h" \
         CONFIG+=release QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64
     make -j2
-    ./client-microphone
+    DYLD_LIBRARY_PATH="$PLANK_MAC_CLIENT_DEPS/install/lib" ./client-microphone
 )
+done
 # Exercise the actual input worker with a queued drag, without a host or UI.
 cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -DNDEBUG \
     -arch arm64 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
@@ -163,6 +202,16 @@ cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -DNDEBUG \
     "$build/moonlight-common-c/libmoonlight-common-c.a" \
     -o "$build/tests/native-input-bounds"
 "$build/tests/native-input-bounds"
+for fixture in native-input-wire queue-ownership; do
+    xcrun clang -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -DNDEBUG \
+        -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+        -I"$client/moonlight-common-c/moonlight-common-c/src" \
+        -I"$source_root/protocol/plank-transport/include" \
+        "$client/moonlight-common-c/moonlight-common-c/tests/$fixture.c" \
+        "$build/moonlight-common-c/libmoonlight-common-c.a" \
+        -lpthread -lm -o "$build/tests/common-$fixture"
+    "$build/tests/common-$fixture"
+done
 bash "$source_root/scripts/test/test-audio-timestamps.sh" "$client" \
     "$build/tests/audio-timestamps" "$build/moonlight-common-c/libmoonlight-common-c.a"
 plist="$build/app/plank-client.app/Contents/Info.plist"

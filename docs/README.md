@@ -6,6 +6,8 @@ The PLANK documents below are retained upstream references; where they describe
 upstream-only scope, the Fernweh platform matrix takes precedence for this fork.
 
 - [User documentation](user/): bookmark behavior and product configuration.
+  [Host bookmark options](user/bookmark-host-options.md) covers independent
+  configurations for the same Host and Host-specific display/profile choices.
   [Ubuntu Client displays](user/client-displays.md) covers per-bookmark fullscreen
   monitor selection and spanning.
   [macOS configuration](user/macos-configuration.md) covers Host/Client INI files,
@@ -36,6 +38,8 @@ upstream-only scope, the Fernweh platform matrix takes precedence for this fork.
   investigates preserving webcam and microphone device payloads through transport.
   [Installed media reader](development/investigations/installed-media-reader.md)
   describes bounded application checks for the production camera and microphone.
+  [Sender-window recovery](development/investigations/sender-window-recovery.md)
+  records delayed-acknowledgment comparisons and remaining live-session gates.
 - [Security](security/): threat models and security-focused contracts.
   [Private information policy](security/private-information.md) defines the
   boundary between public development material and private operational notes.

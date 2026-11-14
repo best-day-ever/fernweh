@@ -5,7 +5,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-
 root = Path(sys.argv.pop(1)).resolve()
 client = root / 'apps/client'
 

@@ -22,10 +22,10 @@ case "$role:$ID:$VERSION_ID" in
     fi
     dnf install -y --setopt=install_weak_deps=False \
       autoconf automake clang cmake curl-minimal git libtool make nasm ninja-build patch \
-      pkgconf-pkg-config ripgrep rpm-build cpio wget xz tar gzip python3 python3-jinja2 \
+      pkgconf-pkg-config ripgrep rpm-build cpio wget xz tar gzip python3 \
       gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
       "${PLANK_HOST_CUDA_PACKAGES[@]}" \
-      glib2-devel libcap-devel libdrm-devel libevdev-devel libva-devel \
+      glib2-devel libcap-devel libdrm-devel libevdev-devel \
       libX11-devel libxcb-devel libXcomposite-devel libXcursor-devel libXfixes-devel \
       libXi-devel libXinerama-devel libXrandr-devel libXtst-devel libxkbcommon-devel \
       mesa-libgbm-devel mesa-libGL-devel numactl-devel openssl-devel opus-devel \
@@ -33,7 +33,6 @@ case "$role:$ID:$VERSION_ID" in
       vulkan-loader-devel wayland-devel wayland-protocols-devel
     plank_verify_host_cuda
     /usr/local/cuda/bin/nvcc --version
-    python3 -c 'import jinja2' # Fail before the long FFmpeg bootstrap.
     rpm -qa | sort
     ;;
   client:ubuntu:26.04)
@@ -42,7 +41,7 @@ case "$role:$ID:$VERSION_ID" in
       build-essential cmake curl git make nasm ninja-build openssl patch \
       pkg-config python3 python3-venv ripgrep xz-utils dpkg-dev sccache iputils-ping \
       qt6-base-dev qt6-base-private-dev qt6-declarative-dev qt6-svg-dev qt6-svg-plugins qt6-wayland qt6-wayland-dev \
-      libsdl3-dev libsdl3-ttf-dev libpipewire-0.3-dev libdecor-0-dev libdrm-dev libinput-dev \
+      libpipewire-0.3-dev libdbus-1-dev libdrm-dev libinput-dev \
       libasound2-dev libpulse-dev libegl-dev libgles-dev libxkbcommon-dev libfontconfig1-dev \
       libxcursor-dev libxrandr-dev libxfixes-dev libxi-dev wayland-protocols \
       libopus-dev libplacebo-dev libssl-dev libudev-dev libva-dev libvdpau-dev \

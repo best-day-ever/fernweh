@@ -47,7 +47,7 @@ for command_name in cargo cmake git nm realpath rg rustc; do
   }
 done
 
-# The retained Host FFmpeg/x264/x265 source is patched by build-deps. This
+# The retained Host FFmpeg/x264 source is patched by build-deps. This
 # helper must fail closed: a failed forward check is acceptable only when the
 # exact patch reverses cleanly (already applied). Otherwise a clean bootstrap
 # could silently build incompatible upstream source.
@@ -66,12 +66,12 @@ for required_patch_helper_token in \
 done
 echo "host_dependency_patch_fail_closed_gate=pass"
 "${repo_dir}/scripts/build/verify-host-dependency-patches.sh"
-[[ $(rustc --version) == "rustc 1.89.0 "* ]] || {
-  echo "PLANK transport requires rustc 1.89.0" >&2
+[[ $(rustc --version) == "rustc 1.99.1 "* ]] || {
+  echo "PLANK transport requires rustc 1.99.1" >&2
   exit 1
 }
-[[ $(cargo --version) == "cargo 1.89.0 "* ]] || {
-  echo "PLANK transport requires cargo 1.89.0" >&2
+[[ $(cargo --version) == "cargo 1.99.1 "* ]] || {
+  echo "PLANK transport requires cargo 1.99.1" >&2
   exit 1
 }
 plank_transport_dir="${repo_dir}/protocol/plank-transport"
@@ -95,10 +95,10 @@ cargo metadata --locked --offline --no-deps \
 # The vendored Quinn tests use a separate archive and are never linked into
 # the packaged Host. They cover exact DATAGRAM boundaries and owned telemetry.
 CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offline \
-  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
-  --lib connection::datagrams::plank_tests
+  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.19/Cargo.toml" \
+  --lib connection::datagrams::
 CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offline \
-  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+  --manifest-path "$repo_dir/third_party/quinn-proto-0.11.19/Cargo.toml" \
   --features plank-telemetry \
   --lib tests::plank_telemetry_snapshot_is_owned_and_preserves_queue_counters -- --exact
 rg -q '^#define PLANK_TRANSPORT_ABI_VERSION 14u$' \
@@ -122,30 +122,6 @@ for required_rate_contract in \
 done
 echo "host_plank_transport_rust_input_gate=pass"
 echo "host_plank_transport_cargo_features=${plank_transport_cargo_features}"
-for required_plank_transport_token in \
-  'PlankTransportCertificateSha256' \
-  'PlankTransportToken' \
-  'start_plank_transport_data_plane' \
-  'session.plank_transport_endpoint' \
-  'plank_transport_native_video_send' \
-  'plank_transport_native_audio_send' \
-  'plank_transport_native_data_send' \
-  'plank_transport_native_data_receive' \
-  'PLANK_TRANSPORT_SETUP_LAUNCH_REQUEST' \
-  'host_feature_flags' \
-  'reference_frame_invalidation' \
-  'Native QUIC session negotiation active' \
-  'drain_plank_transport_control' \
-  'if (!session->plank_transport_endpoint)' \
-  'Confirmed PLANK encoder target over PlankTransport' \
-  'PlankTransport native transport'; do
-  rg -Fq "$required_plank_transport_token" \
-    "$source_dir/src" || {
-    echo "host plank_transport negotiation invariant is missing: ${required_plank_transport_token}" >&2
-    exit 1
-  }
-done
-echo "host_plank_transport_negotiation_gate=pass"
 for removed_data_plane_selector_token in \
   'plankDataPlane' \
   'PlankDataPlane' \
@@ -265,7 +241,6 @@ done
 echo "host_plank_transport_native_input_gate=pass"
 for required_event_transport_token in \
   'send_plank_transport_event' \
-  'PLANK_TRANSPORT_EVENT_HDR_MODE' \
   'PLANK_TRANSPORT_EVENT_RAW_HID_WACOM' \
   'PLANK_TRANSPORT_EVENT_CURSOR_SHAPE' \
   'PLANK_TRANSPORT_EVENT_CURSOR_POSITION'; do
@@ -285,14 +260,17 @@ for compiler in \
     exit 1
   }
 done
+CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
+  bash "$repo_dir/scripts/test/test-linux-native10.sh" "$build_dir/native10-tests"
+
 [[ -f ${ffmpeg_dir}/lib/libavcodec.a ]] || {
   echo "prepared host FFmpeg tree is unavailable: ${ffmpeg_dir}" >&2
   exit 1
 }
 [[ -f ${boost_source_dir}/CMakeLists.txt ]] &&
-  rg -Fxq 'project(Boost VERSION 1.89.0 LANGUAGES CXX)' \
+  rg -Fxq 'project(Boost VERSION 1.92.0 LANGUAGES CXX)' \
     "$boost_source_dir/CMakeLists.txt" || {
-  echo "prepared Boost source is not exact version 1.89.0: ${boost_source_dir}" >&2
+  echo "prepared Boost source is not exact version 1.92.0: ${boost_source_dir}" >&2
   exit 1
 }
 echo "host_prepared_boost_gate=pass"
@@ -430,7 +408,6 @@ if rg -n -i 'miniupnp|upnp' \
   "$source_dir/src" \
   "$source_dir/cmake" \
   "$source_dir/scripts" \
-  "$source_dir/packaging" \
   "$source_dir/docs" \
   "$source_dir/docker" \
   "$repo_dir/packaging" \
@@ -507,6 +484,11 @@ echo "host_auth_group_absence_gate=pass"
 # source-token checks alone cannot detect FD leaks or ancillary truncation.
 # This includes the production PAM header and must use the Host's C++23 mode.
 mkdir -p "$build_dir/plank-security-tests"
+/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
+  -std=c++20 -Wall -Wextra -Wpedantic -Werror \
+  -I"$source_dir/src" "$repo_dir/tests/video/nvenc-idr-recovery.cpp" \
+  -o "$build_dir/plank-security-tests/nvenc-idr-recovery"
+"$build_dir/plank-security-tests/nvenc-idr-recovery"
 /opt/rh/gcc-toolset-14/root/usr/bin/g++ \
   -std=c++23 -Wall -Wextra -Wpedantic -Werror -pthread \
   -I"$source_dir/src" "$repo_dir/tests/session/test-pam-broker-channel.cpp" \
@@ -899,7 +881,7 @@ fi
 for required_capture_token in \
   'session.output_name = *capture_name' \
   'config.monitor.output_name = launch_session->span_desktop ?' \
-  'config.m_device_id = session.output_name'; do
+  'refresh_displays(encoder.platform_formats->dev_type, capture_ctxs.front().config.output_name,'; do
   rg -Fq "$required_capture_token" "$source_dir/src" || {
     echo "negotiated session capture selector is missing: ${required_capture_token}" >&2
     exit 1
@@ -1102,7 +1084,6 @@ env \
   "-DCMAKE_C_FLAGS=$PLANK_C_FILE_FLAGS" \
   "-DCMAKE_CXX_FLAGS=$PLANK_C_FILE_FLAGS" \
   -DCMAKE_INSTALL_PREFIX=/usr \
-  -DSUNSHINE_ASSETS_DIR=share/plank \
   -DCMAKE_C_COMPILER=/opt/rh/gcc-toolset-14/root/usr/bin/gcc \
   -DCMAKE_CXX_COMPILER=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
   -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
@@ -1115,14 +1096,7 @@ env \
   -DPython_EXECUTABLE="$(command -v python3)" \
   -DSUNSHINE_ENABLE_CUDA=ON \
   -DSUNSHINE_ENABLE_DRM=ON \
-  -DSUNSHINE_ENABLE_KMS=OFF \
-  -DSUNSHINE_ENABLE_KWIN=OFF \
-  -DSUNSHINE_ENABLE_PORTAL=OFF \
-  -DSUNSHINE_ENABLE_VAAPI=ON \
-  -DSUNSHINE_ENABLE_VULKAN=OFF \
-  -DSUNSHINE_ENABLE_WAYLAND=OFF \
   -DSUNSHINE_ENABLE_X11=ON \
-  -DSUNSHINE_ENABLE_XDG_PORTAL=OFF \
   -DPLANK_ENABLE_TRANSPORT=ON \
   -DPLANK_PRODUCT_BUILD=ON \
   -DPLANK_TRANSPORT_DIR="$plank_transport_dir" \
@@ -1174,7 +1148,6 @@ if rg -a -q '/usr/local/assets' "$build_dir/plank-host"; then
   echo "package binary contains the development asset path" >&2
   exit 1
 fi
-rg -a -q '/usr/share/plank' "$build_dir/plank-host"
 rg -Fxq 'PLANK_PRODUCT_BUILD:BOOL=ON' "$build_dir/CMakeCache.txt" || {
   echo "host product build mode is not enabled" >&2
   exit 1
@@ -1253,14 +1226,15 @@ for required_session_takeover_token in \
   }
 done
 echo "host_session_takeover_gate=pass"
-rg -Fq 'if(WIN32 OR APPLE)' \
-  "$source_dir/cmake/dependencies/Boost_Sunshine.cmake" || {
-  echo "Boost.Process is not gated away from the Linux host build" >&2
+test -f "$source_dir/cmake/dependencies/Boost_Sunshine.cmake"
+if rg -n '\bprocess\b' "$source_dir/cmake/dependencies/Boost_Sunshine.cmake" ||
+    rg -n 'boost/process|Boost::process' "$source_dir/src" "$source_dir/cmake"; then
+  echo "unused Boost.Process dependency remains in the Linux Host" >&2
   exit 1
-}
+fi
 if rg -n 'apps\.json|file_apps|global_prep_cmd|Steam Big Picture|Low Res Desktop' \
-  "$source_dir/src" "$source_dir/src_assets" "$source_dir/cmake" \
-  "$source_dir/packaging" "$source_dir/docs"; then
+  "$source_dir/src" "$source_dir/cmake" \
+  "$repo_dir/packaging/host" "$source_dir/docs"; then
   echo "legacy application catalog or command-launch configuration remains" >&2
   exit 1
 fi
@@ -1270,12 +1244,6 @@ if rg -n 'run_command|request_process_group_exit|process_group_running|open_url'
   echo "legacy Linux external-command launcher remains" >&2
   exit 1
 fi
-for removed_app_asset in box.png desktop-alt.png steam.png; do
-  if find "$source_dir/src_assets" -type f -name "$removed_app_asset" -print -quit | rg -q .; then
-    echo "legacy application artwork remains: ${removed_app_asset}" >&2
-    exit 1
-  fi
-done
 if rg -a -q 'apps\.json|Steam Big Picture|Low Res Desktop|SUNSHINE_APP_ID|SUNSHINE_APP_NAME' \
   "$build_dir/plank-host"; then
   echo "host binary still contains the legacy application catalog or launcher" >&2

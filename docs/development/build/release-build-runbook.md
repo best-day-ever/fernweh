@@ -1,8 +1,8 @@
 # PLANK Release Build Runbook
 
 For disposable GitHub-hosted workers, see [GitHub-hosted builds](github-builds.md).
-Hosted jobs reuse exact-input dependencies; Ubuntu also uses a separately
-validated compiler-output cache. Never reuse build trees, packages or signing
+Hosted jobs reuse exact-input dependencies; Linux Host and Ubuntu Client also
+use separately validated compiler-output caches. Never reuse build trees, packages or signing
 state. Use the dispatch helper's `--clean-bootstrap` third argument to bypass
 all cache restore and save when qualifying a fresh bootstrap.
 Those workflows establish the same OS, dependency, clean-source and package
@@ -12,13 +12,41 @@ A full application rebuild still permits reuse of verified, exact-input
 dependencies. Reserve `--clean-bootstrap` for an explicit dependency-bootstrap
 qualification, not ordinary rebuilds after a merge. All four hosted products
 have exact-input dependency caches. Linux Host retains prepared FFmpeg and
-Boost sources, Ubuntu Client retains patched FFmpeg and SDL, and macOS Client retains
+Boost sources, Ubuntu Client retains patched FFmpeg, and macOS Client retains
 prepared libraries and Qt. The other three products also retain the pinned
 Rust toolchain and downloaded Cargo inputs; macOS Host uses native Apple media
-frameworks, so has no separate FFmpeg/Qt dependency build to cache. Ubuntu may
-reuse compiler results, but tests, linking and packaging always run afresh.
-The other products still compile their application/transport objects fresh. See
+frameworks, so has no separate FFmpeg/Qt dependency build to cache. The two Linux
+products may reuse compiler results, but tests, linking and packaging always
+run afresh. The Mac products still compile their application/transport objects fresh. See
 `github-builds.md` for cache boundaries and cold/warm qualification status.
+
+For Native10 optimization experiments, first dispatch
+`bash scripts/ci/dispatch.sh linux-native10-tests false`. This small Rocky job
+runs normal/sanitized production-header and version-policy fixtures and exports
+hardware probes without preparing full Host dependencies or making an RPM.
+Use `linux-host` when the change is ready for complete candidate qualification.
+The component job does not replace full package, transport or installed-session gates.
+
+Cache schema3 uses actual dependency recipes, patches, source content and
+compiler/SDK/library identities. Documentation commits, unrelated installed
+utilities and runner-image rollout dates are excluded. Download-only Rust/Cargo/
+Boost inputs are relocatable; compiled libraries retain exact build paths and
+OS/deployment contracts. Changes to cache eligibility require an explicit schema
+revision; ordinary orchestration fixes must not invalidate all dependencies.
+The schema transition requires one initial population of the new keys.
+
+Before opening a new build branch, check cache visibility as well as dependency
+inputs. A manually dispatched Actions run can restore from its own branch or
+the default branch, not another feature branch even when it is an ancestor and
+has identical dependency keys. `gh cache list --ref refs/heads/<branch>` lists
+that branch's entries. Do not promise reuse merely because a previous feature
+branch built successfully. Keep approved dependency updates and their populated
+caches on `main` so subsequent branches can inherit them. Do not merge
+unaccepted product changes solely to warm a cache. If isolated work needs an
+unmerged dependency baseline, account for this one-time cold build; subsequent
+dispatches on that branch reuse its verified caches. Do not request
+`--clean-bootstrap` for a bookmark/UI change or restart a running bootstrap
+without a failure that justifies it.
 
 This is the canonical, repeatable procedure for producing PLANK host
 and client candidate packages. Read it before changing or running a release
@@ -34,14 +62,17 @@ configuration. Export `PLANK_SOURCE_ROOT`, `PLANK_CANONICAL_ROOT`, `PLANK_WORK_R
 
 ## Package catalog and source layout
 
-Ubuntu Client builds now require `PLANK_CLIENT_SDL_WORK` from the builder's
-path manifest, prepared by `scripts/build/build-client-sdl.sh`. Hosted builds
-prepare and cache it independently from FFmpeg. The DEB carries the patched
-SDL privately in `/usr/lib/plank`; it never replaces the OS SDL. Package gates
-must resolve `libSDL3.so.0` there with `LD_LIBRARY_PATH` unset, and record the
-SDL source/patch hashes in BUILD-INFO. Do not bypass a missing/stale SDL input
-by linking the distribution library, which still contains the tablet cursor
-retirement defect. Mac Client and Host dependencies are unchanged.
+Desktop Clients use Qt session controls with Linux PipeWire or macOS Core Audio.
+SDL/SDL_ttf are no longer build inputs. Source and package gates reject their
+APIs/linkage. The Linux private runtime contains the qualified FFmpeg libraries;
+Mac packages retain Qt, FFmpeg, OpenSSL and Opus. Never reuse an old prepared
+Mac dependency prefix after this removal: rebuild it through the pinned bootstrap.
+Desktop Clients link libavcodec, libavutil and libswresample, with no libswscale
+application dependency. The retired SDL software renderer was its last consumer;
+do not force unused libswscale linkage or shipping to satisfy an old gate. Qt
+scales decoded planes on the GPU and has separate importer/color qualification
+gates. Prepared FFmpeg trees still include libswscale for their own command-line
+tools and filters; those development files are not Client runtime requirements.
 
 Products live under `apps/`; packaging templates under `packaging/<product>/<os>`.
 Git submodule section names remain `host/sunshine-fork` and
@@ -84,6 +115,18 @@ identity-GBR patch. Its actual install prefix and pkg-config metadata remain the
 prepared dependency directory. Rebuild old prepared Client libraries with the
 current bootstrap scripts; stripping or relabeling an old library is not enough.
 
+HEVC identity-GBR aliases must be inside FFmpeg's `get_format()` hardware
+selection function. FFmpeg 9 also has an alpha-format switch with similar
+context: a patch applying cleanly there does not enable hardware decoding.
+Bootstrap and preflight check the actual function. Both Client build gates
+also decode the real 8/10-bit identity fixtures and require the platform
+hardware format to be offered before selecting software for the test. These
+GPU-free checks catch a broken patch or mismatched library; they do not replace
+installed exact-profile hardware decoding, color or sustained playback tests.
+The Mac bootstrap also applies the pinned VideoToolbox HEVC hardware-required
+patch: a CVPixelBuffer alone is not proof of a hardware decoder. Preflight checks
+that patch and its resulting source before building/signing the Client.
+
 macOS OpenSSL is configured for a neutral product prefix and staged with
 `DESTDIR`. Only development pkg-config/link metadata is relocated into the
 prepared tree. Its runtime configuration default is `/etc/plank/openssl`,
@@ -111,19 +154,17 @@ edit its runtime strings solely to remove public upstream diagnostics.
 
 ## Classify failures correctly
 
-The macOS Host requires FileVault off for access after restart. A native Installer
-Requirements page runs a bounded read-only check and presents the reason and
-Settings location before installation begins. A failed check is reported
-separately. Continue requires a confirmed off result; Check Again repeats the
-check. The preinstall guard remains for CLI installs and changed state,
-before any service shutdown or state initialization. Earlier packages checked
-only in preinstall, so Installer could show a generic failure; inspect Installer
-Log for the FileVault message rather than treating it as a signing/build defect.
-Do not disable encryption automatically to work around this requirement.
-The 1.2.06 candidate's deprecated external-JavaScript hook was replaced by this
-temporary signed Installer pane. It is never installed as a service or helper.
-Verify actual Installer loading as described in the macOS build runbook; a
-bundle-load fixture alone does not cover Apple's Installer extraction path.
+The macOS Host requires FileVault off for access after restart. Introduction
+explains this requirement. After installation is authorized, the preinstall
+guard requires a successful read-only query confirming FileVault off before
+any service shutdown or state initialization. This also protects CLI installs.
+Installer may show a generic failure when blocked; inspect Installer Log for
+the FileVault explanation rather than treating it as a signing/build defect.
+Do not disable encryption automatically. There is no custom Requirements page
+or early external-script hook: either would add an executable-preflight consent
+prompt. Finished-PKG gates reject Installer plug-ins and verify the retained
+preinstall safeguard. Confirm actual wizard presentation separately as described
+in the macOS build runbook.
 
 macOS Finder's prohibited icon / "damaged or incomplete" can be inaccessible
 bundle metadata, not a corrupt binary or rejected notarization. Host 1.0.103
@@ -149,6 +190,16 @@ failure. A later ad hoc inspection command is a validation-command failure and
 does not invalidate an already successful build unless it exposes a package
 defect.
 
+A visible Client launcher is not proof that its bookmark page loaded. A nested
+QML error can leave an empty page, hide Add and break Back while the application
+continues discovery and reports its outer window ready. In particular,
+`QQmlComponent: Component is not ready`, `QML StackView: initialItem/pop:` and
+`Property value set multiple times` are failures, not harmless UI warnings.
+The hosted full-launcher gate must require both outer-window readiness and
+`PLANK bookmark page ready`, and reject these errors before packaging. Preserve
+existing settings when diagnosing this symptom; an empty UI does not establish
+that saved bookmarks were deleted.
+
 The Qt client initializes a GUI platform before handling `--version`. Over a
 headless SSH connection, invoking it without a platform override aborts with
 `could not connect to display`. Always run a package-tree version check as:
@@ -173,11 +224,34 @@ the builder to work around it. Verify RPM version, the production compile's
 Distinguish `/usr/bin/plank-host` (launcher script) from
 `/usr/libexec/plank/plank-host` (media ELF) when recording payload hashes.
 
+## Focused Linux Host regression builds
+
+After the production RPM is built, `test-linux-host-input.sh` builds component
+fixtures from the same pinned Host source. It runs the existing input, raw-HID,
+normalized pen, retained-session and reliable-queue tests against the fake UHID
+backend, plus production crypto and UTF-8 logging checks. Each suite is repeated
+25 times. Product input defaults are shared with the fixture, not copied.
+The job no longer recompiles the full media/CUDA Host with coverage merely to
+run input/crypto filters. Full Host tests remain available through BUILD_TESTS;
+RPM binaries are still built with BUILD_TESTS=OFF.
+
 ## Native transport lifecycle qualification
+
+After transport changes, check both default and diagnostic features before
+dispatching packages. Video FEC is source-first on every platform, with no
+selection flag or alternate sender. A default build alone does not compile
+feature-only diagnostic fields. With the pinned dependencies prepared, run:
+
+```bash
+cargo clippy --locked --offline --manifest-path protocol/plank-transport/Cargo.toml \
+  --all-targets -- -D warnings
+cargo clippy --locked --offline --manifest-path protocol/plank-transport/Cargo.toml \
+  --all-targets --features quinn-telemetry,sender-timing -- -D warnings
+```
 
 The Linux Host build runs the vendored Quinn DATAGRAM boundary/accounting tests
 before compilation. Prepare its test-only dependencies with
-`cargo fetch --locked --target x86_64-unknown-linux-gnu --manifest-path third_party/quinn-proto-0.11.17/Cargo.toml`
+`cargo fetch --locked --target x86_64-unknown-linux-gnu --manifest-path third_party/quinn-proto-0.11.19/Cargo.toml`
 alongside the production transport fetch. Hosted bootstrap does this
 automatically. These use the vendor's separate lockfile and test archive, never
 the production link inputs.
@@ -206,6 +280,26 @@ payload rates exclude FEC, QUIC and IP overhead. Deterministic unit tests prove
 that slow senders, catch-up stalls and delayed phases fail even when all frames
 eventually arrive. The matrix's fixed-size frames and evenly spaced proxy drops
 do not replace hardware, variable-keyframe, burst-loss or WAN soak testing.
+
+For macOS, the operator assigned this strict performance gate to the authorized
+development Mac. Hosted workers failed it with both unchanged main and the
+candidate; the same candidate executable passed on the development Mac. Keep
+the numerical requirements unchanged. Hosted Mac builds run parser/state,
+source/repair equivalence, reliable recovery and C ABI checks with
+`run-plank-transport-native-loopback.sh --functional-only`. The Linux builder
+continues to run the full suite, including performance.
+
+The credential-free `dependency-tests / transport-macos` job exports
+`macos-transport-qualification-<run-id>`. Verify its source commit, Kymux pin,
+SHA-256 and `sender-timing` feature selection against the Mac Host candidate.
+Copy only that prebuilt test executable, `probes/macos/loopback-cert.cnf` and
+`scripts/test/run-prebuilt-native-loss.sh` to a private scratch directory on the
+authorized Mac. Invoke the script with absolute paths to the executable and
+certificate configuration; it creates/removes ephemeral loopback credentials
+and requires all three 900-frame matrices. Do not compile or install there.
+Preserve Terminal and active Host sessions, retain the report, and remove the
+temporary files. Package signing does not establish this performance gate or
+installed streaming acceptance; record both separately.
 
 Its dedicated test-only proxy reports
 the effective socket receive buffer and Linux per-socket kernel drops separately
@@ -364,8 +458,8 @@ PipeWire/WirePlumber for a private null-sink test daemon, not on the retained VM
 or any user's desktop. It runs PCM/clock/drift tests and real stream lifecycle
 tests normally and under sanitizers. The Ubuntu build must contain
 `app/release/pipewire.o`, not
-`app/release/sdlaud.o`. Preserve the
-shared private SDL dependency for the remaining non-playback uses. Neither
+`app/release/sdlaud.o`. No SDL library may appear in the executable's dependency
+closure. Neither
 daemon tests nor simulated clock drift qualify audible playback/A/V sync:
 require the operator's real-output listening test and long soak afterward.
 
@@ -416,7 +510,7 @@ Existing AVFrame presentation timestamps have millisecond precision, so render
 joins use that precision and flag duplicate receive timestamps as ambiguous.
 
 Canonical build machine: `linux-client-builder` (`192.0.2.42`). Its qualified
-toolchain is Qt 6.10.2 and the prepared private FFmpeg 9.0.1 work directory at
+toolchain is Qt 6.10.2 and the prepared private FFmpeg 9.0.2 work directory at
 `$PLANK_CLIENT_FFMPEG_WORK`. `client-test-machine` is the separate
 install/functional-test target; never compile a release candidate there.
 The prepared FFmpeg source must contain the tracked identity-GBR hardware
@@ -426,7 +520,7 @@ preflight verifies the patch and fails before qmake if it is missing. Do not
 recreate the prepared FFmpeg tree from the upstream archive without running
 `scripts/build/build-client-ffmpeg.sh` to apply that product patch.
 
-The PLANK native transport additionally requires exact Rust 1.89.0 and the
+The PLANK native transport additionally requires exact Rust 1.99.1 and the
 retained Cargo source cache. That cache includes the exact `kywasmtime` Git
 database/checkout and every registry crate resolved by the pinned KyProto
 lockfile. Export these paths before qmake or either package script; do not let
@@ -436,8 +530,8 @@ a clean worktree download a toolchain or crate:
 export RUSTUP_HOME="$PLANK_RUSTUP_ROOT"
 export CARGO_HOME="$PLANK_CARGO_ROOT"
 export PATH="$CARGO_HOME/bin:$PATH"
-test "$(rustc --version)" = "rustc 1.89.0 (29483883e 2025-08-04)"
-test "$(cargo --version)" = "cargo 1.89.0 (c24e10642 2025-06-23)"
+test "$(rustc --version)" = "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+test "$(cargo --version)" = "cargo 1.99.1 (5f94df478 2026-08-27)"
 ```
 
 Before the first qmake invocation in a clean candidate, prove the retained
@@ -459,9 +553,11 @@ real PipeWire renderer against an isolated null sink, along with clock/drift
 and sanitizer fixtures. Live validation must still use the actual output
 device, audible playback and an extended A/V synchronization soak.
 
-Retain the prepared, patched SDL3 dependency for remaining non-playback
-consumers and SDL3_ttf. Do not restore libsoundio, `sdl2-compat`, or qualify
-the Ubuntu playback path with the retired SDL audio probe.
+Mac playback and microphone use native Core Audio. Both platforms retain the
+shared A/V clock/resampling policy. Do not restore libsoundio, SDL audio, or
+qualify playback with the retired SDL probe. Native callback fixtures and
+synthetic microphone input exercise lifecycle and bounded buffering without
+opening hardware on a hosted worker.
 
 For a non-interactive diagnostic screenshot of the Client hardware-test target
 under GNOME Wayland, do not retry `gnome-screenshot` over SSH: GNOME rejects
@@ -494,7 +590,7 @@ The bootstrap may retain the checksum-verified release archive under the
 dependency root. Do not redownload FFmpeg during an ordinary candidate build.
 Packaging checks
 the prepared source's `VERSION` and `RELEASE` identity and requires exactly
-9.0.1 before reusing its installed libraries.
+9.0.2 before reusing its installed libraries.
 
 The prepared tree's pkg-config metadata must name its current PLANK path. A
 directory rename does not relocate the absolute prefix embedded by FFmpeg's
@@ -518,7 +614,8 @@ The PLANK encoding profile is selected per bookmark. Decoder choice
 is not configurable: the client first performs a real test decode through each
 available exact-format hardware path, validates the decoded surface's bit
 depth and chroma geometry (plus full-range identity metadata for identity GBR),
-and then falls back to exact-format FFmpeg software decoding. The package gate
+and permits exact-format FFmpeg software decoding only for H.264. HEVC must
+pass hardware decoding and presentation or fail clearly. The package gate
 rejects a restored global decoder preference or CLI override and requires the
 test-frame validation path. A generic codec-family capability claim is not an
 acceptance result, and the client must never change the bookmark profile to
@@ -543,7 +640,7 @@ separate new path.
 
 Initialize every current client submodule before invoking the build. The
 current Linux client has two top-level submodules: qmdnsengine and common-c;
-common-c has no recursive Linux dependencies. h264bitstream is vendored source,
+common-c has no recursive Linux dependencies. The unused h264bitstream/SPS rewriter is removed;
 libsoundio has been removed, and the Windows/macOS prebuilts repository is not
 a Linux candidate input. Do not restore the old submodule list from a previous
 Moonlight base. `linux-client-builder` retains canonical local repositories for
@@ -763,7 +860,12 @@ checks. A failure in the shipping policy stops packaging. No retired pacer
 implementation or comparison selection remains.
 Standalone loopback runners also accept `PLANK_TRANSPORT_CARGO_FEATURES`; an
 unset value exercises default Cargo features with the same sender policy,
-without the optional telemetry/source-first instrumentation.
+without the optional telemetry/timing instrumentation. Source-first FEC is
+always used. Both Host builders run the same functional loopback checks; Mac
+performance uses the prebuilt executable on authorized hardware as specified
+above. The source iterator is compared with the pinned RaptorQ library, including
+symbol boundaries, multi-block/sub-block padding, reordered/lost originals
+and repairs. Preparation timings are CPU-only measurements, not WAN latency.
 The loss fixture uses controlled receiver-side omissions, not a real WAN.
 Do not report its results as ten-minute or interactive hardware qualification.
 
@@ -792,7 +894,7 @@ qualification uses eight. Keep the complete CUDA architecture set; do not
 trade future hardware coverage for a shorter candidate build.
 
 Reuse the prepared, Git-ignored Sunshine FFmpeg tree and the persistent,
-root-owned local Boost 1.89.0 source at `$PLANK_HOST_BOOST_ROOT`. Both are
+root-owned local Boost 1.92.0 source at `$PLANK_HOST_BOOST_ROOT`. Both are
 recreated once by `docs/development/build/builder-vm-bootstrap.md` and verified before reuse; do
 not copy them from an old builder, compile from NFS, or make an ordinary clean
 candidate download them again. A build spending many minutes with compiler
@@ -802,7 +904,7 @@ build-deps patch against the generated source at `$PLANK_HOST_FFMPEG_BUILD`.
 Missing, partly applied, or source-incompatible patches are package-stopping
 errors; installed static libraries alone are not sufficient provenance.
 
-The PLANK native transport also uses the builder-retained Rust 1.89.0
+The PLANK native transport also uses the builder-retained Rust 1.99.1
 toolchain and Cargo cache. Export them before configuration so CMake records a
 stable Cargo path rather than a disposable `/tmp` shim:
 
@@ -810,8 +912,8 @@ stable Cargo path rather than a disposable `/tmp` shim:
 export RUSTUP_HOME="$PLANK_RUSTUP_ROOT"
 export CARGO_HOME="$PLANK_CARGO_ROOT"
 export PATH="$CARGO_HOME/bin:$PATH"
-test "$(rustc --version)" = "rustc 1.89.0 (29483883e 2025-08-04)"
-test "$(cargo --version)" = "cargo 1.89.0 (c24e10642 2025-06-23)"
+test "$(rustc --version)" = "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+test "$(cargo --version)" = "cargo 1.99.1 (5f94df478 2026-08-27)"
 ```
 
 The host package script pins both `CMAKE_CXX_COMPILER` and
@@ -964,7 +1066,7 @@ boost_source="$PLANK_HOST_BOOST_ROOT"
 
 test -z "$(git -C "$root_worktree" status --porcelain)"
 test -f "$boost_source/CMakeLists.txt"
-rg -Fxq 'project(Boost VERSION 1.89.0 LANGUAGES CXX)' \
+rg -Fxq 'project(Boost VERSION 1.92.0 LANGUAGES CXX)' \
   "$boost_source/CMakeLists.txt"
 mkdir -p "$host_tmp"
 TMPDIR="$host_tmp" \
@@ -1085,7 +1187,7 @@ those sources and declarations to remain absent. Do not confuse this cleanup
 with removal of the active `Limelight.h` protocol types.
 
 `host_protocol_headers_only_gate=pass` additionally requires that the Host's
-common-C dependency contain only `Input.h`, `Limelight.h` and `plank.h` under
+common-C dependency contain only `Limelight.h` and `plank.h` under
 `src/`, with a header-only CMake target. It has no recursive dependencies,
 compiled library, ENet or nanors. Initialize this exact Host header branch,
 not the Client implementation branch or an old upstream library checkout.

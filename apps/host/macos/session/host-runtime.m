@@ -17,7 +17,8 @@
     id<PLANKMacPreviewCapture> (^_capture)(void);
     id<PLANKMacInputDevice> (^_input)(void);
     NSString *_address, *_certificate, *_privateKey;
-    BOOL _started, _displayPrepared;
+    BOOL _started, _displayPrepared, _displayRestorationFailed;
+    dispatch_group_t _displayOperation;
     uint64_t _displayGeneration;
     atomic_bool _stopping;
     NSString *_takeoverToken;
@@ -66,7 +67,10 @@
     };
     _server.negotiateMedia = ^NSDictionary *(NSDictionary *request, unsigned *status) {
         typeof(self) owner = weakSelf;
-        if (!owner || atomic_load(&owner->_stopping) || !owner->_started) { *status = 503; return nil; }
+        if (!owner) { *status = 503; return nil; }
+        @synchronized(owner) {
+            if (atomic_load(&owner->_stopping) || !owner->_started) { *status = 503; return nil; }
+        }
         return PLANKMacNegotiateMedia(request, status);
     };
     _server.prepareDisplay = ^NSDictionary *(NSDictionary *request, NSString *token, NSData *peer,
@@ -116,22 +120,50 @@
 }
 - (NSDictionary *)prepareDisplayRequest:(NSDictionary *)request token:(NSString *)token
                                   peer:(NSData *)peer valid:(BOOL (^)(void))requestValid status:(unsigned *)status {
-    @synchronized(self) {
-        if (!self.prepareDisplay || atomic_load(&_stopping) || !_started) {
-            NSLog(@"PLANK desktop preparation unavailable: provider=%d stopping=%d started=%d",
-                self.prepareDisplay != nil, atomic_load(&_stopping), _started);
-            *status = 503; return nil;
-        }
-        id takeover = request[@"takeover_session_id"];
-        if ((request.count != 5 && request.count != 6) ||
-                (request.count == 6 && (![takeover isKindOfClass:NSString.class] ||
-                 ![[[NSUUID alloc] initWithUUIDString:takeover].UUIDString.lowercaseString isEqual:takeover])) ||
-                !PLANKMacEncodingProfile(request[@"encoding_mode"])) { *status = 400; return nil; }
-        for (NSString *key in @[@"schema_version", @"width", @"height", @"scale"]) {
-            id number = request[key];
-            if (![number isKindOfClass:NSNumber.class] ||
+    if (!self.prepareDisplay) { *status = 503; return nil; }
+    id takeover = request[@"takeover_session_id"];
+    if ((request.count != 5 && request.count != 6) ||
+            (request.count == 6 && (![takeover isKindOfClass:NSString.class] ||
+             ![[[NSUUID alloc] initWithUUIDString:takeover].UUIDString.lowercaseString isEqual:takeover])) ||
+            !PLANKMacEncodingProfile(request[@"encoding_mode"])) { *status = 400; return nil; }
+    for (NSString *key in @[@"schema_version", @"width", @"height", @"scale"]) {
+        id number = request[key];
+        if (![number isKindOfClass:NSNumber.class] ||
                 CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID() ||
                 [number doubleValue] != [number unsignedIntValue]) { *status = 400; return nil; }
+    }
+    unsigned width = [request[@"width"] unsignedIntValue], height = [request[@"height"] unsignedIntValue];
+    unsigned scale = [request[@"scale"] unsignedIntValue];
+    if ([request[@"schema_version"] unsignedIntValue] != 3 || (scale != 1 && scale != 2) ||
+        width < 2 || height < 2 || width > 8192 || height > 8192 || width % 2 || height % 2) { *status = 400; return nil; }
+    PLANKMacGraphicalIdentity scope = _snapshot();
+    BOOL (^valid)(void) = ^BOOL {
+        PLANKMacAccountIdentity account = {0};
+        return requestValid() && !atomic_load(&self->_stopping) &&
+            plank_macos_same_graphical_scope(scope, self->_snapshot()) &&
+            [self->_sessions authorizeToken:token peer:peer identity:&account];
+    };
+    if (!valid()) { *status = 401; return nil; }
+    NSDictionary *permissionError = [self permissionError:status];
+    if (permissionError) return permissionError;
+    dispatch_group_t operation = [self reserveDisplayOperation];
+    if (!operation) { *status = 503; return nil; }
+    @try {
+        PLANKMacPreviewSession *stream;
+        BOOL needsTakeover;
+        @synchronized(self) {
+            stream = _stream;
+            if (takeover && ![takeover isEqual:stream.sessionID]) {
+                *status = 409; return @{@"state": @"denied", @"error": @"session_changed"};
+            }
+            if ([self takeoverReservedForAnotherToken:token peer:peer] ||
+                    (stream && stream.state != PLANKMacPreviewStopped && ![takeover isEqual:stream.sessionID])) {
+                *status = 409;
+                NSMutableDictionary *conflict = [@{@"state": @"conflict", @"error": @"session_active"} mutableCopy];
+                if (stream.sessionID) conflict[@"session_id"] = stream.sessionID;
+                return conflict;
+            }
+            needsTakeover = stream && stream.state != PLANKMacPreviewStopped && !_takeoverToken;
         }
         unsigned width = [request[@"width"] unsignedIntValue], height = [request[@"height"] unsignedIntValue];
         unsigned scale = [request[@"scale"] unsignedIntValue];
@@ -175,26 +207,27 @@
                 if (![_stream reserveTakeoverWithToken:token peer:peer]) { *status = 403; return nil; }
                 _takeoverToken = [token copy]; _takeoverPeer = [peer copy];
                 _takeoverDeadline = clock_gettime_nsec_np(CLOCK_MONOTONIC) + 15*NSEC_PER_SEC;
-                __block BOOL accepted = NO;
-                dispatch_semaphore_t drained = dispatch_semaphore_create(0);
-                [_stream takeOverWithToken:token peer:peer valid:valid completion:^(BOOL ok) {
-                    accepted = ok; dispatch_semaphore_signal(drained);
-                }];
-                if (dispatch_semaphore_wait(drained, dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC)) != 0) {
-                    *status = 503; return nil;
-                }
-                if (!accepted || !valid()) {
-                    _takeoverToken = nil; _takeoverPeer = nil;
-                    *status = 403; return nil;
-                }
-                NSLog(@"PLANK authenticated session transfer drained; preparing replacement display");
             }
-            if (_stream.state != PLANKMacPreviewStopped) { *status = 503; return nil; }
+            // The request lane may wait for bounded teardown. The runtime lock
+            // stays available to shutdown, launch rejection and drain callbacks.
+            __block BOOL accepted = NO;
+            dispatch_semaphore_t drained = dispatch_semaphore_create(0);
+            [stream takeOverWithToken:token peer:peer valid:valid completion:^(BOOL ok) {
+                accepted = ok; dispatch_semaphore_signal(drained);
+            }];
+            if (dispatch_semaphore_wait(drained, dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC)) != 0) {
+                *status = 503; return nil;
+            }
+            if (!accepted || !valid()) {
+                @synchronized(self) { _takeoverToken = nil; _takeoverPeer = nil; }
+                *status = 403; return nil;
+            }
+            NSLog(@"PLANK authenticated session transfer drained; preparing replacement display");
         }
         if (![self releasePreparedDisplay]) { *status = 503; return nil; }
         _displayPrepared = self.releaseDisplay != nil || self.sharedDesktop;
         if (!self.prepareDisplay(width, height, scale, request[@"encoding_mode"], valid) || !valid()) {
-            [self releasePreparedDisplay];
+            [self restoreReservedDisplay];
             NSLog(@"PLANK desktop preparation failed: %ux%u", width, height);
             *status = 503; return nil;
         }
@@ -204,13 +237,13 @@
             [topology[@"capture"][@"logical_bounds"][@"width"] doubleValue] != width / scale ||
             [topology[@"capture"][@"logical_bounds"][@"height"] doubleValue] != height / scale ||
             ![topology[@"capture"][@"encoding_profile"] isEqual:PLANKMacEncodingProfile(request[@"encoding_mode"])] || !valid()) {
-            [self releasePreparedDisplay]; *status = 503; return nil;
+            [self restoreReservedDisplay]; *status = 503; return nil;
         }
-        if (_displayPrepared) {
-            uint64_t generation = _displayGeneration;
+        uint64_t generation;
+        BOOL prepared;
+        @synchronized(self) { generation = _displayGeneration; prepared = _displayPrepared; }
+        if (prepared) {
             __weak typeof(self) weakSelf = self;
-            // /display may succeed without a subsequent /launch. Never leave
-            // a disconnected user's physical screens consolidated indefinitely.
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60*NSEC_PER_SEC),
                 dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                     typeof(self) owner = weakSelf; if (!owner) return;
@@ -222,7 +255,7 @@
                 });
         }
         *status = 200; return topology;
-    }
+    } @finally { [self finishDisplayOperation:operation]; }
 }
 - (BOOL)takeoverReservedForAnotherToken:(NSString *)token peer:(NSData *)peer {
     PLANKMacAccountIdentity account = {0};
@@ -254,7 +287,8 @@
     // Serialize endpoint construction with shutdown's stream snapshot, NOT
     // account verification or capture/encoding. Shutdown never waits on the UI.
     @synchronized(self) {
-        if (atomic_load(&_stopping) || !_started || !plank_macos_graphical_identity_valid(_snapshot())) {
+        if (atomic_load(&_stopping) || !_started || _displayOperation || _displayRestorationFailed ||
+                !plank_macos_graphical_identity_valid(_snapshot())) {
             *status = 503; return nil;
         }
         NSDictionary *selected = _topology();
@@ -352,8 +386,9 @@
         // this bounded drain HTTP can still answer, but launch is already closed.
         void (^finish)(void) = ^{
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                @synchronized(self) { [self releasePreparedDisplay]; }
-                [self->_server stopWithCompletion:completion];
+                [self releaseDisplayGeneration:UINT64_MAX completion:^{
+                    [self->_server stopWithCompletion:completion];
+                }];
             });
         };
         dispatch_group_t draining = dispatch_group_create();

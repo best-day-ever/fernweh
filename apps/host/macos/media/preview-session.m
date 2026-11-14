@@ -6,10 +6,12 @@
 #import "microphone-session.h"
 #import "camera-session.h"
 #import "media-features.h"
+#import "display-power.h"
 #include "stream-diagnostics.h"
 #include "plank_transport_control.h"
 #include "plank_transport_input.h"
 #include "plank_transport_event.h"
+#include "plank_metrics.h"
 #include <unistd.h>
 #include <math.h>
 #include <time.h>
@@ -25,7 +27,7 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
     request = PLANKMacNormalizeMediaLaunch(request);
     if (![request isKindOfClass:NSDictionary.class] || request.count != 12 ||
         ![topology isKindOfClass:NSDictionary.class] ||
-        !integerInRange(request[@"schema_version"], 6, 6) ||
+        !integerInRange(request[@"schema_version"], 7, 7) ||
         ![request[@"clipboard"] isKindOfClass:NSNumber.class] ||
         CFGetTypeID((__bridge CFTypeRef)request[@"clipboard"]) != CFBooleanGetTypeID() ||
         ![request[@"microphone"] isKindOfClass:NSNumber.class] ||
@@ -69,6 +71,7 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
     PLANKMacStreamLease *_lease;
     NSDictionary *(^_topology)(void);
     NSDictionary *_selected;
+    NSString *_metricsEncodingProfile;
     id<PLANKMacPreviewCapture> _capture;
     PLANKMacNativeVideo *_video;
     PLANKMacNativeAudio *_audio;
@@ -91,6 +94,7 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
     BOOL _changingBitrate;
     uint64_t _bitrateDue, _bitrateFirstRequest, _bitrateDeadline;
     BOOL _captureStarted;
+    IOPMAssertionID _displaySleepAssertion;
     uint64_t _captureDeadline;
     NSMutableArray *_stopCallbacks;
     PLANKMacInputTiming _inputWaitTiming, _inputDeliveryTiming;
@@ -134,14 +138,14 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
              microphoneGeneration:(uint64_t)microphoneGeneration {
     if (!sessions || !topology || !capture || !input || !config ||
         config->struct_size != sizeof(*config) || config->abi_version != PLANK_TRANSPORT_ABI_VERSION ||
-        config->mode != PLANK_TRANSPORT_MODE_SERVER || config->session_mode != PLANK_TRANSPORT_SESSION_ACTIVE)
+        config->mode != PLANK_TRANSPORT_MODE_SERVER)
         return nil;
     PLANKMacAccountIdentity account = {0};
     if (![sessions authorizeToken:token peer:peer identity:&account]) return nil;
     unsigned microphoneSchema = PLANKMacMicrophoneSchema(request);
-    request = PLANKMacNormalizeMediaLaunch(request);
     NSDictionary *selected = topology();
     if (!PLANKMacPreviewRequestMatchesTopology(request, selected)) return nil;
+    request = PLANKMacNormalizeMediaLaunch(request);
     self = [super init];
     if (!self) return nil;
     _sessionID = NSUUID.UUID.UUIDString.lowercaseString;
@@ -149,6 +153,7 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
     _sessions = sessions;
     _selected = [selected copy]; _topology = [topology copy]; _capture = capture;
     _bitrate = [request[@"bitrate_kbps"] unsignedIntValue];
+    _metricsEncodingProfile = [request[@"encoding_mode"] copy];
     _queue = dispatch_queue_create("la.instinctual.PLANK.Host.preview", DISPATCH_QUEUE_SERIAL);
     _stopCallbacks = [NSMutableArray array];
     _inputDevice = input; _inputGroup = dispatch_group_create();
@@ -176,10 +181,37 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
 }
 - (NSString *)transportToken { return _lease.transportToken; }
 
+- (void)configureMetrics:(NSDictionary *)configuration {
+    if (![configuration[@"Enabled"] boolValue] || self.state != PLANKMacPreviewPrepared) return;
+    PlankMetricsConfig metrics = {0};
+    metrics.struct_size = sizeof(metrics);
+    metrics.port = [configuration[@"Port"] unsignedIntValue];
+    metrics.interval_seconds = [configuration[@"IntervalSeconds"] unsignedIntValue];
+    metrics.workstation_id = [configuration[@"WorkstationID"] UTF8String];
+    metrics.slot_id = "host";
+    metrics.version = [configuration[@"Version"] UTF8String];
+    if (plank_transport_native_metrics_configure(_endpoint, &metrics, NULL) != PLANK_TRANSPORT_OK) {
+        NSLog(@"PLANK metrics unavailable; streaming is unaffected");
+        return;
+    }
+    PlankMetricsStreamInfo info = {0};
+    info.struct_size = sizeof(info);
+    info.width = [_selected[@"capture"][@"width"] unsignedIntValue];
+    info.height = [_selected[@"capture"][@"height"] unsignedIntValue];
+    info.requested_fps = 60;
+    info.capture_source = "screencapturekit";
+    info.encoding_profile = _metricsEncodingProfile.UTF8String;
+    plank_transport_native_metrics_stream_info(_endpoint, &info);
+}
+
 - (void)start {
     dispatch_async(_queue, ^{
         if (self.state != PLANKMacPreviewPrepared) return;
         self.state = PLANKMacPreviewConnecting;
+        self->_displaySleepAssertion = PLANKMacPreventIdleDisplaySleep(CFSTR("PLANK active remote session"));
+        if (self->_displaySleepAssertion == kIOPMNullAssertionID) {
+            [self stopOnQueueForReason:@"display-sleep-protection-failed"]; return;
+        }
         if (plank_transport_native_endpoint_start(self->_endpoint) != PLANK_TRANSPORT_OK) {
             [self stopOnQueueForReason:@"transport-start-failed"]; return;
         }
@@ -488,6 +520,9 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
         (unsigned long long)_inputDeliveryTiming.count, (unsigned long long)_inputDeliveryTiming.slow,
         (double)_inputDeliveryTiming.maximum / NSEC_PER_MSEC);
     self.state = PLANKMacPreviewStopping;
+    // Release before framework drain: a delayed capture callback must not keep
+    // an abandoned session's display awake indefinitely.
+    PLANKMacReleaseDisplayAssertion(&_displaySleepAssertion);
     [_clipboard stop];
     [_microphone stop]; _microphone = nil;
     [_camera stop]; _camera = nil;
@@ -525,6 +560,7 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
     for (void (^callback)(void) in callbacks) callback();
 }
 - (void)dealloc {
+    PLANKMacReleaseDisplayAssertion(&_displaySleepAssertion);
     [_clipboard stop];
     [_sessions endStreamLease:_lease];
     if (_watch) dispatch_source_cancel(_watch);

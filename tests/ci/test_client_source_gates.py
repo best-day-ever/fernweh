@@ -1,6 +1,7 @@
 """Exercise source gates without compiling a client or preparing dependencies."""
 from pathlib import Path
 import shutil
+import importlib.util
 import subprocess
 import tempfile
 import unittest
@@ -9,27 +10,49 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ClientSourceGateTests(unittest.TestCase):
-    def test_private_sdl_does_not_embed_its_install_prefix_in_consumers(self):
-        bootstrap = (ROOT / 'scripts/build/build-client-sdl.sh').read_text()
-        self.assertIn('-DSDL_RPATH=OFF', bootstrap)
-        verifier = (ROOT / 'scripts/build/client-sdl.sh').read_text()
-        # Exercise the real fail-closed metadata gate with generated .pc files;
-        # no installed SDL, devices, display or source download is needed.
-        gate = verifier.split('    link_flags=$(', 1)[1].split('    [[ $(sha256sum', 1)[0]
-        for inject in (False, True):
-            with self.subTest(inject=inject), tempfile.TemporaryDirectory() as tmp:
-                pkgconfig = Path(tmp) / 'install/lib/pkgconfig'
-                pkgconfig.mkdir(parents=True)
-                (pkgconfig / 'sdl3.pc').write_text(
-                    'Name: SDL fixture\nDescription: Test only\nVersion: 3.4.2\nLibs: -lSDL3' +
-                    (' -Wl,-rpath,/build/fixture/install/lib' if inject else '') + '\n')
-                script = ('function check_metadata() { local work=$1 link_flags\n'
-                          '    link_flags=$(' + gate + '\n}\ncheck_metadata "$1"')
-                result = subprocess.run(['bash', '-c', script, 'gate', tmp],
+    def test_ffmpeg_identity_guard_fixtures(self):
+        subprocess.run(['python3', str(ROOT / 'tests/packaging/test-client-ffmpeg-identity.py')],
+                       check=True, capture_output=True, text=True)
+
+    def test_both_clients_require_decoder_policy_and_format_offer_tests(self):
+        for script in ('scripts/build/build-client-package-binaries.sh',
+                       'scripts/build/build-macos-client.sh'):
+            with self.subTest(script=script):
+                text = (ROOT / script).read_text()
+                self.assertIn('scripts/test/check-client-ffmpeg-identity.py', text)
+                self.assertIn('tests/video/client-hardware-formats.cpp', text)
+                self.assertIn('tests/video/decoder-policy.cpp', text)
+                self.assertIn('tests/auth/client-reconnect-policy.cpp', text)
+
+    def test_source_gate_covers_the_root_compositor_probe(self):
+        spec = importlib.util.spec_from_file_location('no_sdl_gate', ROOT / 'scripts/test/check-client-no-sdl.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'client'
+            probe = Path(tmp) / 'qt-session'
+            probe.mkdir()
+            (probe / 'qt-session.pro').write_text('PKGCONFIG += libavcodec sdl3\n')
+            with self.assertRaisesRegex(ValueError, 'qt-session/qt-session.pro'):
+                module.check(source, probe)
+            (probe / 'qt-session.pro').write_text('PKGCONFIG += libavcodec\n')
+            module.check(source, probe)
+
+    def test_source_gate_rejects_sdl_api_and_link_inputs(self):
+        for filename, content in (('code.cpp', 'SDL_GetTicks();'),
+                                  ('app.pro', 'PKGCONFIG += sdl3'),
+                                  ('audio.mm', '#include <SDL3/SDL.h>')):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
+                app = Path(tmp) / 'app'
+                app.mkdir()
+                (app / filename).write_text(content)
+                result = subprocess.run(['python3', str(ROOT / 'scripts/test/check-client-no-sdl.py'), tmp],
                                         capture_output=True, text=True)
-                self.assertEqual(result.returncode, 1 if inject else 0, result.stderr)
-                if inject:
-                    self.assertIn('must not inject', result.stderr)
+                self.assertNotEqual(result.returncode, 0)
+                (app / filename).write_text('// SDL_GetTicks historical attribution\n')
+                result = subprocess.run(['python3', str(ROOT / 'scripts/test/check-client-no-sdl.py'), tmp],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_svg_reader_is_an_explicit_build_and_runtime_dependency(self):
         for filename in ('scripts/ci/install-linux-deps.sh',

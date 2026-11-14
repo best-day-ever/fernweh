@@ -3,6 +3,7 @@
 #include "Connection.c"
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #define CHECK(x) do { checks++; if (!(x)) { \
     fprintf(stderr, "line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
@@ -11,7 +12,7 @@ static int audioInit, audioStart, audioStop, audioDestroy;
 static int inputInit, inputStart, inputStop, inputDestroy;
 static int videoInit, videoStart, videoStop, videoDestroy;
 static int controlInit, controlStart, controlStop, controlDestroy;
-static int failStage, completed, started, wiggles;
+static int failStage, completed, started;
 
 static void logMessage(const char* format, ...) { (void)format; }
 static void stageStarting(int value) { (void)value; }
@@ -23,24 +24,10 @@ static void connectionTerminated(int error) { (void)error; CHECK(false); }
 int initializePlatform(void) { return 0; }
 void cleanupPlatform(void) {}
 void PltSleepMs(int ms) { (void)ms; }
-int PltCreateThread(const char* name, ThreadEntry entry, void* context, PLT_THREAD* thread) {
-    (void)name; (void)entry; (void)context; (void)thread;
-    CHECK(false); return -1;
-}
-void PltDetachThread(PLT_THREAD* thread) { (void)thread; CHECK(false); }
 void fixupMissingCallbacks(PDECODER_RENDERER_CALLBACKS* video,
                           PAUDIO_RENDERER_CALLBACKS* audio,
                           PCONNECTION_LISTENER_CALLBACKS* listener) {
     CHECK(*video != NULL && *audio != NULL && *listener != NULL);
-}
-int resolveHostName(const char* host, int family, int port,
-                    struct sockaddr_storage* address, SOCKADDR_LEN* length) {
-    (void)host; (void)family; (void)port; memset(address, 0, sizeof(*address));
-    address->ss_family = AF_INET; *length = sizeof(struct sockaddr_in); return 0;
-}
-int getLocalAddressByUdpConnect(const struct sockaddr_storage* remote, SOCKADDR_LEN length,
-                               unsigned short port, struct sockaddr_storage* local, SOCKADDR_LEN* localLength) {
-    (void)remote; (void)port; memset(local, 0, sizeof(*local)); *localLength = length; return 0;
 }
 int initializeAudioStream(void) { audioInit++; return failStage == STAGE_AUDIO_STREAM_INIT ? -7 : 0; }
 int startAudioStream(void* context, int flags) {
@@ -62,7 +49,6 @@ int initializeControlStream(void) { controlInit++; return failStage == STAGE_CON
 int startControlStream(void) { controlStart++; return failStage == STAGE_CONTROL_STREAM_START ? -7 : 0; }
 int stopControlStream(void) { controlStop++; return 0; }
 void destroyControlStream(void) { controlDestroy++; }
-int LiSendMouseMoveEvent(short x, short y) { (void)x; (void)y; wiggles++; return 0; }
 
 static PLANK_NATIVE_SESSION_CONFIGURATION configuration(bool linuxSession) {
     PLANK_NATIVE_SESSION_CONFIGURATION c = {0};
@@ -89,7 +75,9 @@ static void exercise(bool linuxSession, int failure) {
     DECODER_RENDERER_CALLBACKS video = {0};
     AUDIO_RENDERER_CALLBACKS audio = {0};
     CONNECTION_LISTENER_CALLBACKS listener = {0};
-    server.address = "127.0.0.1";
+    // DNS and route selection belong to the already connected QUIC owner.
+    // No socket or resolver stubs are linked into this lifecycle fixture.
+    server.address = "must-not-resolve.invalid";
     // Native session setup must work without a legacy application version.
     server.serverInfoAppVersion = NULL;
     server.serverCodecModeSupport = 1;
@@ -104,7 +92,7 @@ static void exercise(bool linuxSession, int failure) {
     inputInit = inputStart = inputStop = inputDestroy = 0;
     videoInit = videoStart = videoStop = videoDestroy = 0;
     controlInit = controlStart = controlStop = controlDestroy = 0;
-    started = wiggles = completed = 0; failStage = failure;
+    started = completed = 0; failStage = failure;
     CHECK(LiSetPlankNativeSessionConfiguration(&c) == 0);
     CHECK(LiStartConnection(&server, &stream, &listener, &video, &audio,
                            NULL, 0, NULL, 0) == (failure ? -7 : 0));
@@ -116,7 +104,6 @@ static void exercise(bool linuxSession, int failure) {
     }
     LiStopConnection();
     CHECK(stage == STAGE_NONE && LiGetPlankNativeServiceFlags() == 0);
-    CHECK(RemoteAddrString == NULL);
     CHECK(audioDestroy == (linuxSession && completed >= STAGE_AUDIO_STREAM_INIT));
     CHECK(audioStop == (linuxSession && completed >= STAGE_AUDIO_STREAM_START));
     CHECK(inputDestroy == (linuxSession && completed >= STAGE_INPUT_STREAM_INIT));
@@ -125,13 +112,33 @@ static void exercise(bool linuxSession, int failure) {
     CHECK(videoStop == (completed >= STAGE_VIDEO_STREAM_START));
     CHECK(controlDestroy == (completed >= STAGE_CONTROL_STREAM_INIT));
     CHECK(controlStop == (completed >= STAGE_CONTROL_STREAM_START));
-    CHECK(wiggles == (linuxSession && !failure ? 2 : 0));
     if (!linuxSession) CHECK(audioInit + audioStart + inputInit + inputStart == 0);
     LiStopConnection(); // Idempotent cleanup must not repeat destruction.
     CHECK(videoDestroy <= 1 && audioDestroy <= 1 && inputDestroy <= 1 && controlDestroy <= 1);
 }
 
+static atomic_int notifications;
+static void countTermination(int error) { (void)error; atomic_fetch_add(&notifications, 1); }
+static void* failConcurrently(void* ignored) {
+    (void)ignored; ClInternalConnectionTerminated(-1); return NULL;
+}
+static void terminationTest(void) {
+    originalTerminationCallback = countTermination;
+    for (unsigned attempt = 0; attempt < 20; ++attempt) {
+        atomic_store(&notifications, 0);
+        atomic_store(&alreadyTerminated, false);
+        pthread_t producers[16];
+        for (unsigned i = 0; i < 16; ++i) CHECK(pthread_create(&producers[i], NULL, failConcurrently, NULL) == 0);
+        for (unsigned i = 0; i < 16; ++i) CHECK(pthread_join(producers[i], NULL) == 0);
+        CHECK(atomic_load(&notifications) == 1);
+        LiStopConnection();
+        ClInternalConnectionTerminated(-2);
+        CHECK(atomic_load(&notifications) == 1);
+    }
+}
+
 int main(void) {
+    terminationTest();
     PLANK_NATIVE_SESSION_CONFIGURATION c = configuration(true);
     CHECK(LiSetPlankNativeSessionConfiguration(&c) == 0);
     c.serviceFlags = 0;

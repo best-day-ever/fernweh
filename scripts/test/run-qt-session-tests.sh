@@ -3,28 +3,55 @@ set -euo pipefail
 source_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 build_root=${PLANK_QT_SESSION_TEST_BUILD:?Set a dedicated Qt-session test build directory}
 : "${PLANK_CLIENT_FFMPEG_WORK:?Set the retained private Client FFmpeg work directory}"
-ffmpeg_source="$PLANK_CLIENT_FFMPEG_WORK/ffmpeg-9.0.1"
+ffmpeg_source="$PLANK_CLIENT_FFMPEG_WORK/ffmpeg-9.0.2"
 patch="$source_root/apps/client/app/deploy/linux/ffmpeg-patches/0001-hevc-enable-hwaccel-for-identity-gbr.patch"
-patch --batch --reverse --no-backup-if-mismatch --dry-run -d "$ffmpeg_source" -p1 < "$patch"
+patch --batch --fuzz=0 --reverse --no-backup-if-mismatch --dry-run -d "$ffmpeg_source" -p1 < "$patch"
 # The release preflight pins the resulting source too: patch-context offsets
 # alone are not proof that this is the qualified prepared dependency.
 test "$(sha256sum "$ffmpeg_source/libavcodec/hevc/hevcdec.c" | cut -d' ' -f1)" = \
-    f3e5ce5ab334c0bc39661dccd68dcc91f90c47fcaae72d3c20511088f71387e8
+    b4b3523850229d57ac51d931e2a8c17680280f1b84e6df19a6c6884a58fa99c2
 export PKG_CONFIG_PATH="$PLANK_CLIENT_FFMPEG_WORK/install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if [[ -n ${PLANK_CLIENT_SDL_WORK:-} ]]; then
-    export PKG_CONFIG_PATH="$PLANK_CLIENT_SDL_WORK/install/lib/pkgconfig:$PKG_CONFIG_PATH"
-fi
 test "$(pkg-config --variable=prefix libavutil)" = "$PLANK_CLIENT_FFMPEG_WORK/install"
 qmake=${QMAKE:-qmake6}
 qmake_flags=()
+cxx_flags=()
 case ${PLANK_QT_SESSION_SANITIZERS:-0} in
     0) ;;
-    1) qmake_flags+=(CONFIG+=debug
+    1) cxx_flags+=(-fsanitize=address,undefined -fno-omit-frame-pointer)
+       qmake_flags+=(CONFIG+=debug
         'QMAKE_CFLAGS+=-fsanitize=address,undefined -fno-omit-frame-pointer'
         'QMAKE_CXXFLAGS+=-fsanitize=address,undefined -fno-omit-frame-pointer'
         'QMAKE_LFLAGS+=-fsanitize=address,undefined') ;;
     *) echo 'PLANK_QT_SESSION_SANITIZERS must be 0 or 1' >&2; exit 2 ;;
 esac
+mkdir -p "$build_root"
+python3 "$source_root/scripts/test/check-client-ffmpeg-identity.py" \
+    "$ffmpeg_source/libavcodec/hevc/hevcdec.c"
+c++ -std=c++17 -Wall -Wextra -Werror "${cxx_flags[@]}" \
+    -I"$source_root/apps/client/app/streaming" \
+    "$source_root/tests/video/client-hardware-formats.cpp" $(pkg-config --cflags --libs libavcodec libavutil) \
+    -o "$build_root/client-hardware-formats"
+"$build_root/client-hardware-formats"
+bash "$source_root/scripts/test/test-code-simplification.sh" "$build_root/simplification"
+c++ -std=c++17 -Wall -Wextra -Werror -DPLANK_TEST_REAL_FFMPEG "${cxx_flags[@]}" \
+    -I"$source_root/apps/client/app/streaming" \
+    "$source_root/tests/session/decode-pump.cpp" $(pkg-config --cflags --libs libavcodec libavutil) \
+    -o "$build_root/decode-pump-ffmpeg"
+"$build_root/decode-pump-ffmpeg"
+c++ -std=c++17 -Wall -Wextra -Werror "${cxx_flags[@]}" \
+    -I"$source_root/apps/client/app/streaming" \
+    -I"$source_root/apps/client/moonlight-common-c/moonlight-common-c/src" \
+    "$source_root/tests/session/decode-packet.cpp" $(pkg-config --cflags --libs libavcodec libavutil) \
+    -o "$build_root/decode-packet"
+"$build_root/decode-packet"
+mkdir -p "$build_root/polling-tests"
+(
+    cd "$build_root/polling-tests"
+    "$qmake" "$source_root/apps/client/tests/pollingthread/pollingthread.pro" "${qmake_flags[@]}"
+    make -j"${PLANK_BUILD_JOBS:-4}"
+    ./pollingthread
+)
+
 for variant in production qt; do
     mkdir -p "$build_root/identity-$variant"
     (

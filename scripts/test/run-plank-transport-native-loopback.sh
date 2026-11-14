@@ -3,6 +3,13 @@
 
 set -euo pipefail
 
+case ${1:-} in
+  '') performance=1 ;;
+  --functional-only) performance=0 ;;
+  *) echo 'Usage: run-plank-transport-native-loopback.sh [--functional-only]' >&2; exit 2 ;;
+esac
+[[ $# -le 1 ]] || exit 2
+
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 crate_dir="$repo_root/protocol/plank-transport"
 test_tmp=$(mktemp -d /tmp/plank-native-kyproto.XXXXXX)
@@ -16,8 +23,8 @@ openssl x509 -in "$test_tmp/cert.pem" -outform DER -out "$test_tmp/cert.der"
 
 export SC_NATIVE_TEST_CERTIFICATE="$test_tmp/cert.pem"
 export SC_NATIVE_TEST_PRIVATE_KEY="$test_tmp/key.pem"
-SC_NATIVE_TEST_CERTIFICATE_SHA256=$(sha256sum "$test_tmp/cert.der")
-export SC_NATIVE_TEST_CERTIFICATE_SHA256=${SC_NATIVE_TEST_CERTIFICATE_SHA256%% *}
+SC_NATIVE_TEST_CERTIFICATE_SHA256=$(openssl dgst -sha256 "$test_tmp/cert.der")
+export SC_NATIVE_TEST_CERTIFICATE_SHA256=${SC_NATIVE_TEST_CERTIFICATE_SHA256##* }
 
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$crate_dir/include" \
   "$repo_root/tests/protocol/camera-v1.c" -o "$test_tmp/camera-wire"
@@ -37,42 +44,46 @@ fi
 
 # Dependency tests are not included by an ordinary product cargo test. Run the
 # actual audio/video FEC parsers and receiver state machines with our lockfile.
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   -p plank-transport -p kyproto --lib protocol::driver::av
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
-  native::version_tests::incompatible_peers_fail_tls_before_setup_or_media \
-  -- --ignored --exact --nocapture
+if [[ ${SC_NATIVE_CARGO_PROFILE:-release} == release && $performance == 1 ]]; then
+  bash "$repo_root/scripts/test/run-source-first-fec.sh" "${CARGO_TARGET_DIR:-$crate_dir/target}"
+fi
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
-  native::tests::native_kyproto_round_trip_preserves_all_initial_lanes \
-  -- --ignored --exact --nocapture
+# Exact test filters must execute a test, not report success with zero matches.
+run_ignored() {
+  cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+    "$1" -- --ignored --exact --nocapture | tee "$test_tmp/result.log"
+  grep -q 'test result: ok. 1 passed;' "$test_tmp/result.log" || {
+    echo "Required integration test did not run: $1" >&2
+    return 1
+  }
+}
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
-  native_ffi::data_tests::reliable_data_overflow_fails_both_receivers \
-  -- --ignored --exact --nocapture
+run_ignored native_ffi::data_tests::reliable_data_backpressure_recovers_both_receivers
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::cancellation_tests::cancellation_interrupts_real_auth_endpoints_and_promotion \
   -- --ignored --exact --nocapture
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::cancellation_tests::closed_or_unreachable_peer_releases_live_endpoint \
   -- --ignored --exact --nocapture
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::collaboration_tests:: \
   -- --ignored --nocapture
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::microphone_lane::tests::encrypted_ffi_microphone_mute_reopen_and_bounds \
   -- --ignored --exact --nocapture
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::camera_lane::tests::encrypted_camera_with_and_without_microphone \
   -- --ignored --exact --nocapture
 
-cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
   native_ffi::camera_lane::tests::encrypted_version_mismatch_disables_only_camera \
   -- --ignored --exact --nocapture
 
@@ -99,14 +110,14 @@ if [[ -n ${SC_NATIVE_LOSS_ATTESTED_SHA256:-} ]]; then
     exit 1
   }
   echo "native_loss_matrix_attested=pass trials_per_mode=3 modes=vbr,cbr executable_sha256=$actual_sha256"
-else
+elif (( performance )); then
   # Three required passes, not retries: set -e stops on the first failure.
   for loss_trial in 1 2 3; do
     echo "native_loss_matrix_trial=$loss_trial"
-    cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+    cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
       native::tests::native_raptorq_survives_progressive_transport_loss_at_150_mbps \
       -- --ignored --exact --nocapture
-    cargo test "${cargo_profile_args[@]}" --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
+    cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offline --manifest-path "$crate_dir/Cargo.toml" \
       native::tests::native_raptorq_survives_progressive_transport_loss_at_150_mbps_cbr \
       -- --ignored --exact --nocapture
   done

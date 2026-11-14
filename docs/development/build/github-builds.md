@@ -1,7 +1,12 @@
 # GitHub-hosted builds
 
 `Hosted builds` compiles all four public products from clean Git worktrees.
-It runs on pushes, pull requests and manual dispatch. No self-hosted machine,
+It runs on pushes, pull requests and manual dispatch. Push/PR jobs select the
+affected products: Host/Client gitlinks and platform packaging select their
+consumers; shared or unrecognized changes select all four. Documentation-only
+changes run policy checks without building packages. Missing comparison history
+also selects all products. Manual `product=all` always forces full qualification.
+No self-hosted machine,
 deployment credential, private repository or signing secret is available to
 these jobs. Actions are pinned to commit IDs and receive read-only permissions.
 
@@ -49,10 +54,74 @@ It verifies endpoint retention/replacement and shutdown, not real hid-wacom
 probing. Keep mouse/Wacom disconnect/reconnect qualification as a separate
 hardware gate.
 
+The isolated audio gate starts a temporary PulseAudio daemon, stalls it with
+SIGSTOP, and verifies capture cancellation, bounded cleanup and reconnection.
+It neither attaches to an installed user's audio server nor proves live audio
+quality on hardware.
+
 Feature builds retain their branch-qualified visible and package versions.
 These jobs do not install products or perform live display, audio, input,
 network-loss or hardware-decoder qualification. Existing hardware gates and
 local builders remain available until hosted builds are qualified.
+
+The Hosted builds workflow accepts `product=dependency-tests` with
+`dependency_scope=all`, `transport` or `vulkan`. Select `transport` for isolated
+QUIC window/ACK-delay and native KyProto loss tests without rebuilding application
+or FFmpeg dependencies. Its test-only Rust cache is keyed by the toolchain,
+lockfile and tested sources. These loopback measurements do not replace an
+installed WAN/session comparison. The transport group runs natively on Ubuntu
+and the SDK27 Mac worker; labelling a second Linux invocation as a Mac test is
+not platform qualification. The credential-free Mac job also exports its exact
+loopback-test executable and a source/hash manifest, even if a later test fails.
+That diagnostic artifact is not an installable product. It permits comparison
+on an authorized development Mac without compiling there or restarting its Host.
+It uses the Mac Host's `sender-timing` shipping feature selection. The operator
+assigned the strict Mac performance gate to that hardware: both accepted main
+and the candidate intermittently failed the hosted timing test. Hosted Mac
+checks remain mandatory for correctness/lifecycle, while Linux also retains its
+hosted performance matrices. Do not report package creation as Mac performance
+acceptance; retain the exact exported executable's three-run hardware result.
+Dispatch through `build.yml` to bind qualification to an explicit source commit:
+
+```bash
+gh workflow run build.yml --ref "$(git branch --show-current)" \
+  -f product=dependency-tests -f dependency_scope=transport \
+  -f source_sha="$(git rev-parse HEAD)"
+```
+
+## Fast Native10 iteration and Linux Host compiler reuse
+
+For a capture-buffer experiment, dispatch the committed source with
+`bash scripts/ci/dispatch.sh linux-native10-tests false`. It uses the qualified
+Rocky/GCC toolchain, initializes only the necessary Host/header sources, runs
+normal/sanitized production-code fixtures and checks package-version freshness.
+Its artifact contains small GPU probes, source commits and checksums. It does
+not build FFmpeg, Boost, Rust or an RPM and never runs a GPU test on the hosted
+worker. Run the exact probe on authorized hardware, then dispatch the full
+`linux-host` job when an installable candidate is needed.
+
+The full Host job uses a separate compiler-output cache for C/C++, NVCC and
+eligible Rust compilations. Checksum-pinned sccache 0.19.0 lives only in job
+scratch. CMake/Cargo retain qualified compiler selection and the full CUDA
+architecture set. Per-object compiler/source/header/flag keys validate reuse;
+clean source/build directories, final linking and all tests still run. Runtime
+version metadata affects only the two source files that consume it.
+
+The Host cache is bounded at 2 GiB. Only successful trusted jobs save snapshots;
+PRs can read their permitted branch/default-branch cache scope but cannot publish
+a trusted snapshot. No build tree, installed payload or signing material is
+cached. `--clean-bootstrap` disables compiler and dependency reuse. Bootstrap
+dependency keys and Ubuntu's existing compiler cache are unchanged.
+
+The fast job passed in 50 seconds on its worker (13 seconds of component work),
+with probe binaries identical to the hardware-tested pair. Host source checkout
+uses exact shallow submodule revisions; it does not need full fork history.
+Cold/warm qualification passed on `host-build-iteration`: full worker duration
+15m58s to 6m43s; build/test/package step 11m52s to 3m07s. Both ran every candidate
+gate and produced identical Host binary digests. Warm reuse included 339 C/C++,
+151 Rust and six NVCC hits. These are measured results for this source, not a
+fixed build-time guarantee; fresh linking, tests and worker setup still take time.
+See [the implementation and validation plan](../plans/host-build-iteration.plan).
 
 ## Local downloads and cleanup
 
@@ -91,8 +160,8 @@ See the release runbook's fortified-I/O and stale-preflight failure signatures
 before retrying a failed job; do not skip those gates.
 
 The job builds one complete Client with all ordinary preflight checks, requires
-native PipeWire playback rather than SDL audio, and checks three real
-launcher/shutdown cycles with SDL video deliberately unavailable. It packages
+native PipeWire playback and no SDL linkage, and checks three real
+launcher/shutdown cycles. It packages
 that exact binary under `plank-client`, validates source/linkage and package
 identity, and collects it in the normal mainline or candidate catalog.
 Existing bookmarks, trust, policy and logs keep their ordinary PLANK locations.
@@ -183,6 +252,13 @@ an operator's Mac, shared runner or public PR. Local interactive keychain rules
 remain unchanged. See [GitHub's signing guidance](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
 
 ### Approved contributor Host test builds
+
+Retain `codex/macos26-host-test` for the contributor's macOS 26.7 qualification
+baseline and `macos-host-test` for reviewed Host candidates. The operator has
+explicitly kept both branches and their signing access. Their code reaching main
+does not make them branch-cleanup candidates. Before retiring a contributor test
+workflow, review its approval registry, live environment branch policies and
+testing use with the operator.
 
 Chris (`cnoellert`) can request a signed macOS Host candidate by posting a new
 PR Conversation comment containing exactly:
@@ -288,17 +364,12 @@ FFmpeg or Boost, and a Mac FFmpeg patch must not redownload Qt.
 | Product | Independent cache groups |
 | --- | --- |
 | Linux Host | Rust toolchain; Cargo downloads (including vendor-test dependencies); FFmpeg/codec build tree; Boost sources |
-| Ubuntu Client | Rust toolchain; Cargo downloads; FFmpeg libraries/source/archive; private SDL libraries/source/archive |
+| Ubuntu Client | Rust toolchain; Cargo downloads; FFmpeg libraries/source/archive |
 | macOS Host | Rust toolchain; Cargo downloads (capture/encoding/audio use Apple frameworks) |
 | macOS Client | Rust toolchain; Cargo downloads; native-library install/source/download tree; Qt |
 
-The Linux Host FFmpeg/x264/x265 build tree is one coupled cache.
-Ubuntu's patched SDL has a separate native-library cache, keyed to its pinned
-archive, repair, verifier, regression test and build recipe. Restore verifies
-the patched source tree and installed bytes; application/package preflight
-verifies them again. No system library is replaced.
-
-Mac FFmpeg, OpenSSL, SDL, FreeType, Opus and pkgconf remain a coupled group because
+The Linux Host FFmpeg/x264 build tree is one coupled cache.
+Mac FFmpeg, OpenSSL, Opus and pkgconf remain a coupled group because
 their current bootstrap shares one installation prefix. Never restore
 overlapping directories from independent keys. Qt is outside that prefix.
 
@@ -306,22 +377,23 @@ overlapping directories from independent keys. Qt is outside that prefix.
 fingerprint hashes only its own preparation commands, versions, flags and
 required patches. Keep such inputs in the relevant recipe, not in the shared
 `bootstrap.sh` orchestration wrapper. The Host FFmpeg group additionally hashes
-the build-deps Git pin, tracked files and source gitlinks. Both Client library
+build-relevant tracked files and source gitlinks; documentation-only dependency commits do not invalidate libraries. Both Client library
 groups retain all FFmpeg patch inputs and build-path/sanitization helpers.
 
 Rust toolchain changes invalidate Rust and Cargo downloads; transport and
 vendor-test manifests/locks invalidate only their Cargo group. Linux Host
-library keys retain the exact installed package inventory; Mac keys retain
-SDK/compiler/build tools. Ubuntu keys use the qualified OS/architecture, actual
+library keys retain header, toolchain and runtime-library versions; Mac keys retain
+SDK/compiler/build tools without the runner image date or unrelated OS build identity. Ubuntu keys use the qualified OS/architecture, actual
 compiler/build-tool versions, development packages and relevant ABI/protocol
 packages, not the runner image date or unrelated desktop/runtime packages.
-Native development packages remain conservative inputs because FFmpeg and SDL
-auto-detect optional libraries. Unrelated PHP SDK packages are excluded: neither
-library uses them, and GitHub image updates can change PHP independently.
+Native development packages remain conservative inputs because FFmpeg
+auto-detects optional libraries. Unrelated PHP SDK packages are excluded: FFmpeg
+does not use them, and GitHub image updates can change PHP independently.
 Downloads/source-only groups do not depend on those C/C++ build tools.
-All keys remain product/platform/path-specific; Mac Client native/Qt keys
-retain the explicit deployment-target policy. Changes to the shared cache
-implementation itself invalidate all groups conservatively. Application-only
+All keys remain product/platform-specific; compiled-library keys retain exact
+build paths and Mac Client native/Qt keys retain the explicit deployment target.
+Rust/Cargo downloads and Boost sources are relocatable. Cache policy uses an
+explicit schema revision instead of hashing the orchestration helper itself. Application-only
 changes do not invalidate dependency keys. OS packages are still installed by
 the package manager on each disposable runner; CUDA architecture coverage and
 all dependency versions/build flags are unchanged.
@@ -332,7 +404,8 @@ or miss independently. Save skips exact hits, and job-local hit bookkeeping is
 not cached. The narrow Rust/Cargo allowlist excludes credentials/configuration
 and compiled target objects. Dependency caches never contain application,
 package or signing state. Ubuntu's separate per-object compiler cache is
-described below; the other product jobs still compile application sources fresh.
+described below; Linux Host compiler reuse is documented above. Both Mac
+products still compile application and transport objects fresh.
 
 Mac Host's cache avoids Rust installation/downloads, not application or
 transport compilation. Do not promise the same improvement as caching FFmpeg.
@@ -470,6 +543,15 @@ Use `bash scripts/ci/dispatch.sh linux-host` (or another product) after pushing.
 It requires a clean, fully pushed branch and passes its exact expected SHA.
 The policy job rejects a stale dispatch revision before costly bootstrap.
 
+Before dispatching, inspect existing runs for that exact source SHA. If its
+automatic push already started or successfully completed an applicable Linux
+product job, use that job's verified package instead of starting a duplicate.
+Record the workflow/job and original manifest as usual. A prior revision's
+package or a skipped product is not a substitute. Signed Mac installers still
+require their separate explicit signing dispatches. The 1.4.15 release used
+one automatic push for both Linux packages and one signed dispatch per Mac
+product, with every applicable test and package gate retained.
+
 ### macOS 26.7 Host build
 
 The standard Host package now targets **26.7** and runs on 26.7 and newer.
@@ -528,9 +610,6 @@ after pushing can otherwise select the prior revision during ref propagation.
   follow the next 9.x release. Pin the 9.7 vault **before the first package
   transaction**, including Git/Python installation. The container's existing
   `curl-minimal` is sufficient; do not conflict with it by installing `curl`.
-- `glad: jinja2 not found`: `python3-jinja2` is an explicit Host bootstrap
-  prerequisite. Do not depend on a previous builder's Python environment or
-  let CMake install ad hoc dependencies late in the build.
 - Download HTTP 502/503: use bounded retries of the pinned input, retaining its
   SHA-256 gate. Do not change versions or accept a partial download.
 - Node.js 20 deprecation: the Node runtime embedded in a GitHub Action is

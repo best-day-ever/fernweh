@@ -4,14 +4,29 @@
 #import "fixed-capture.h"
 #import "macos-fake-input.h"
 #import "agent-connection.h"
+#import <IOKit/pwr_mgt/IOPMLib.h>
 #include "plank_transport_control.h"
 #include "plank_transport_input.h"
 #include <unistd.h>
 #include <stdatomic.h>
 #include <sys/resource.h>
 
-static unsigned checks;
+static atomic_uint checks;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "check failed line %d: %s\n", __LINE__, #x); exit(1); } ++checks; } while (0)
+// Interpose power calls: hosted tests must not change runner power policy.
+static atomic_uint displayAssertions, assertionAcquires, assertionReleases;
+static atomic_bool failDisplayAssertion;
+IOReturn IOPMAssertionCreateWithName(CFStringRef type, IOPMAssertionLevel level, CFStringRef name, IOPMAssertionID *result) {
+    CHECK(CFEqual(type,kIOPMAssertionTypePreventUserIdleDisplaySleep) && level==kIOPMAssertionLevelOn && name);
+    CHECK(*result==kIOPMNullAssertionID);
+    if (atomic_load(&failDisplayAssertion)) return kIOReturnError;
+    CHECK(atomic_fetch_add(&displayAssertions,1)==0);
+    atomic_fetch_add(&assertionAcquires,1); *result=101; return kIOReturnSuccess;
+}
+IOReturn IOPMAssertionRelease(IOPMAssertionID assertion) {
+    CHECK(assertion==101 && atomic_fetch_sub(&displayAssertions,1)==1);
+    atomic_fetch_add(&assertionReleases,1); return kIOReturnSuccess;
+}
 static BOOL until(BOOL (^predicate)(void)) {
     for (unsigned i = 0; i < 350; ++i) { if (predicate()) return YES; usleep(20000); }
     return NO;
@@ -54,6 +69,7 @@ PLANKMacAuthenticationResult PLANKMacVerifyAccountIsolated(
     else completion(self.failBitrate ? 0 : 2 * bitrate);
 }
 - (void)stopWithCompletion:(void (^)(void))completion {
+    CHECK(atomic_load(&displayAssertions)==0); // release before a potentially stuck framework drain
     self.revokedBeforeStop = [self.video sendSample:NULL processingLatency:0] == PLANK_TRANSPORT_ERROR_INVALID_STATE;
     self.revokedBeforeStop &= [self.audio sendOpusPacket:nil presentationTime:kCMTimeZero discontinuity:YES] == PLANK_TRANSPORT_ERROR_INVALID_STATE;
     self.stops++; self.video = nil;
@@ -135,7 +151,10 @@ int main(int argc, const char **argv) {
         NSDictionary *request = fixture ? [NSJSONSerialization JSONObjectWithData:fixture options:0 error:NULL] : nil;
         CHECK(PLANKMacPreviewRequestMatchesTopology(request, topology));
         NSMutableDictionary *fullRequest = [request mutableCopy];
-        fullRequest[@"encoding_mode"] = @"hevc-10-444-videotoolbox";
+        NSMutableDictionary *fullFeatures = [request[@"features"] mutableCopy];
+        NSMutableDictionary *fullDesktop = [fullFeatures[@"desktop"] mutableCopy];
+        fullDesktop[@"encoding_mode"] = @"hevc-10-444-videotoolbox";
+        fullFeatures[@"desktop"] = fullDesktop; fullRequest[@"features"] = fullFeatures;
         NSDictionary *fullTopology = PLANKMacFixedCaptureDescription(topology[@"generation"], @"cgdisplay:42",
             3840, 2160, CGRectMake(-1920, 0, 1920, 1080), @"hevc-10-444-videotoolbox");
         CHECK(PLANKMacPreviewRequestMatchesTopology(fullRequest, fullTopology));
@@ -148,26 +167,27 @@ int main(int argc, const char **argv) {
             CHECK(!PLANKMacPreviewRequestMatchesTopology(bad, topology));
             for (id value in @[[NSNull null], @[], @{}, @YES, @"invalid"]) {
                 bad[field] = value;
-                BOOL validBoolean = ([field isEqual:@"clipboard"] || [field isEqual:@"microphone"] || [field isEqual:@"camera"]) &&
-                    value == (__bridge id)kCFBooleanTrue;
-                CHECK(PLANKMacPreviewRequestMatchesTopology(bad, topology) == validBoolean);
-            }
-        }
-        for (id value in @[@0, @1, @1.5, @"true"]) {
-            NSMutableDictionary *bad = [request mutableCopy]; bad[@"clipboard"] = value;
-            CHECK(!PLANKMacPreviewRequestMatchesTopology(bad, topology));
-        }
-        for (NSString *field in @[@"width", @"height", @"frame_rate", @"bitrate_kbps", @"max_udp_payload_size"]) {
-            for (NSNumber *value in @[@(-1), @1.5, @(UINT64_MAX)]) {
-                NSMutableDictionary *bad = [request mutableCopy]; bad[field] = value;
                 CHECK(!PLANKMacPreviewRequestMatchesTopology(bad, topology));
             }
         }
-        for (unsigned schema = 0; schema < 6; schema++) {
+        for (NSString *field in @[@"width", @"height", @"frame_rate", @"bitrate_kbps"]) {
+            for (NSNumber *value in @[@(-1), @YES, @1.5, @(UINT64_MAX)]) {
+                NSMutableDictionary *bad = [request mutableCopy], *features = [request[@"features"] mutableCopy];
+                NSMutableDictionary *desktop = [features[@"desktop"] mutableCopy]; desktop[field] = value;
+                features[@"desktop"] = desktop; bad[@"features"] = features;
+                CHECK(!PLANKMacPreviewRequestMatchesTopology(bad, topology));
+            }
+        }
+        for (unsigned schema = 0; schema < 7; schema++) {
             NSMutableDictionary *bad = [request mutableCopy]; bad[@"schema_version"] = @(schema);
             CHECK(!PLANKMacPreviewRequestMatchesTopology(bad, topology));
         }
-        NSMutableDictionary *extra = [request mutableCopy]; extra[@"audio"] = @YES;
+        for (NSNumber *value in @[@(-1), @1199, @65528, @1.5, @(UINT64_MAX)]) {
+            NSMutableDictionary *bad = [request mutableCopy]; bad[@"max_udp_payload_size"] = value;
+            CHECK(!PLANKMacPreviewRequestMatchesTopology(bad, topology));
+        }
+        // Additive optional hints are allowed; an unknown required feature is not.
+        NSMutableDictionary *extra = [request mutableCopy]; extra[@"required_features"] = @[@"desktop", @"audio", @"input", @"unknown"];
         CHECK(!PLANKMacPreviewRequestMatchesTopology(extra, topology));
 
         PlankTransportConfig cfg = {0}; cfg.struct_size = sizeof(cfg); cfg.abi_version = PLANK_TRANSPORT_ABI_VERSION;
@@ -203,6 +223,7 @@ int main(int argc, const char **argv) {
             PLANKMacPreviewSession *session = [[PLANKMacPreviewSession alloc] initWithSessions:auth token:token peer:peer
                 request:request topology:snapshot config:&cfg capture:source input:input microphoneGeneration:0];
             CHECK(session && session.state == PLANKMacPreviewPrepared);
+            CHECK(atomic_load(&displayAssertions)==0);
             __block atomic_uint stopNotifications = 0;
             __weak PLANKMacPreviewSession *weakSession = session;
             session.didStop = ^{
@@ -224,6 +245,7 @@ int main(int argc, const char **argv) {
             if (scenario < 4 || scenario >= 6) {
                 CHECK(until(^BOOL { return session.state == PLANKMacPreviewStreaming; }));
                 CHECK(source.starts == 1 && source.bitrate == 50000);
+                CHECK(atomic_load(&displayAssertions)==1);
                 CHECK(plank_transport_native_input_send(client, 5, (uint8_t[]){0x80, 0x41, 1, 0, 0}, 5) == PLANK_TRANSPORT_OK);
                 CHECK(plank_transport_native_input_send(client, 2, (uint8_t[]){1, 1}, 2) == PLANK_TRANSPORT_OK);
                 CHECK(until(^BOOL { return input.delivered == 2; }));
@@ -317,6 +339,7 @@ int main(int argc, const char **argv) {
                 session = nil; // accidental owner abandonment must still drain safely
                 CHECK(until(^BOOL { return source.stops == 1; }));
                 CHECK(source.revokedBeforeStop);
+                CHECK(atomic_load(&displayAssertions)==0);
                 plank_transport_native_endpoint_destroy(client);
                 continue;
             } else if (scenario == 8) {
@@ -376,6 +399,7 @@ int main(int argc, const char **argv) {
                 CHECK(session.state == PLANKMacPreviewStopped);
             }
             CHECK(source.stops == 1 && source.revokedBeforeStop && session.transportToken == nil);
+            CHECK(atomic_load(&displayAssertions)==0);
             CHECK(input.releases == (scenario == 20 ? 3u : (scenario == 0 || scenario == 3 || scenario == 8 || scenario == 10 || scenario >= 15) ? 2u : 0u));
             if (scenario == 20) {
                 unsigned stoppedCount = input.delivered;
@@ -409,7 +433,24 @@ int main(int argc, const char **argv) {
                     3840, 2160, CGRectMake(-1920, 0, 1920, 1080), @"hevc-10-420-videotoolbox");
             }
         }
+        // No protection for an unstarted object, and no leaked protection or
+        // capture attempt if the OS cannot create the session assertion.
+        for (unsigned failure=0; failure<2; ++failure) {
+            token=authenticate(auth,peer); source=[PLANKFakeCapture new]; input=[PLANKFakeInput new];
+            PLANKMacPreviewSession *session=[[PLANKMacPreviewSession alloc] initWithSessions:auth token:token peer:peer
+                request:request topology:snapshot config:&cfg capture:source input:input microphoneGeneration:0];
+            CHECK(session && atomic_load(&displayAssertions)==0);
+            if (failure) {
+                atomic_store(&failDisplayAssertion,true); [session start];
+                CHECK(until(^BOOL { return session.state==PLANKMacPreviewStopped; }));
+                CHECK([session.stopReason isEqual:@"display-sleep-protection-failed"]);
+                atomic_store(&failDisplayAssertion,false);
+            }
+            session=nil;
+            CHECK(!source.starts && !source.stops && atomic_load(&displayAssertions)==0);
+        }
+        CHECK(atomic_load(&assertionAcquires)==24 && atomic_load(&assertionReleases)==24);
         [auth revokeAll];
-        printf("macos_preview_session=pass checks=%u scenarios=24 synthetic_capture=1 real_quic=1 cleanup=1 agent_bound=1 edge_bounds=1 stop_reason=1\n", checks);
+        printf("macos_preview_session=pass checks=%u scenarios=26 display_sleep_cleanup=1 synthetic_capture=1 real_quic=1 cleanup=1 agent_bound=1 edge_bounds=1 stop_reason=1\n", atomic_load(&checks));
     }
 }

@@ -12,7 +12,7 @@ the source of truth, not a dependency repository's newest branch tip.
 | `instinctual/plank-host-linux` | `main` | Allowlisted build/runtime submodules; no inherited Windows/gamepad/Flatpak updates |
 | `instinctual/plank-client` | `main` | Common-C and qmdnsengine submodules |
 | `instinctual/plank-kymux` | `main` | Cargo workspace |
-| `instinctual/plank-build-deps` | `plank/main` | FFmpeg release/8.1, x264/x265, NV headers, AMF, paired Vulkan Headers/Loader |
+| `instinctual/plank-build-deps` | `plank/main` | FFmpeg release/9.0, x264, NV headers, AMF, paired Vulkan Headers/Loader |
 | `instinctual/plank-libvirtualhid` | `plank/main` | Build/documentation submodules |
 | `instinctual/plank-common-c` | `plank/client`, `plank/host` | Source review only: no dependency manifests/recursive dependencies on either maintained branch |
 
@@ -57,11 +57,11 @@ together; do not treat this table as another build manifest.
 
 | Input / baseline | Owning source and required related checks |
 | --- | --- |
-| Rust/Cargo 1.89.0; rustup 1.28.2 | `rust-toolchain.toml`, `scripts/ci/bootstrap.sh`, Host/Client package builders and Mac transport builder; update exact-toolchain assertions together |
+| Rust/Cargo 1.99.1; rustup 1.29.2 | `rust-toolchain.toml`, `scripts/ci/bootstrap.sh`, Host/Client package builders and Mac transport builder; update exact-toolchain assertions together |
 | Qt 6.10.2; aqtinstall 3.3.0 | `scripts/ci/bootstrap.sh`, `scripts/ci/install-linux-deps.sh`, Mac Client builder and dependency-cache scripts; Ubuntu's Qt is distribution-provided |
-| Boost 1.89.0 | `scripts/ci/bootstrap.sh` URL/checksum, Host `cmake/dependencies/Boost_Sunshine.cmake`, Host package preflight and cache paths |
-| Client FFmpeg 9.0.1 | `scripts/build/build-client-ffmpeg.sh`, `scripts/build/bootstrap-macos-client-deps.sh`, `apps/client/app/deploy/linux/ffmpeg-patches/`, package preflight and cache verification; mandatory identity patches must apply or be proven applied |
-| Mac Client OpenSSL 3.5.5, Opus 1.5.2, SDL 3.4.2, SDL_ttf 3.2.2, FreeType 2.14.1 | URLs and SHA256 values in `scripts/build/bootstrap-macos-client-deps.sh`; Linux variants come from its distribution packages |
+| Boost 1.92.0 | `scripts/ci/dependencies/boost.sh` URL/checksum, Host `cmake/dependencies/Boost_Sunshine.cmake`, PAM/input qualification CMake, Host package preflight and cache paths |
+| Client FFmpeg 9.0.2 | `scripts/build/build-client-ffmpeg.sh`, `scripts/build/bootstrap-macos-client-deps.sh`, `apps/client/app/deploy/linux/ffmpeg-patches/`, package preflight and cache verification; mandatory identity patches must apply or be proven applied |
+| Mac Client OpenSSL 3.5.9, Opus 1.6.1 | URLs and SHA256 values in `scripts/build/bootstrap-macos-client-deps.sh`; Ubuntu uses its qualified distribution packages |
 | Host libva 2.24.1 and CMake-fetched dependencies | Build-deps `package-lock.cmake`; Host dependency CMake files and package lock; inspect fetched tags/URLs/checksums, including test-only inputs |
 | Qualified OS, compiler, CUDA and Apple SDK | `.github/workflows/build.yml`, `scripts/ci/install-linux-deps.sh`, bootstrap and runbooks; do not silently change the platform support contract |
 | OS libraries and build tools | Distribution installs in `scripts/ci/install-linux-deps.sh` and macOS workflow setup; keep package inventories from builds, and verify runtime dependency closure |
@@ -74,23 +74,19 @@ Quinn/Quinn-proto automatic PRs are intentionally excluded from the root and
 Kymux schedules, including automatic security fixes. Security alerts remain
 enabled; these dependencies require manual advisory triage and repairs.
 Production and probes share the repaired
-`third_party/quinn-proto-0.11.17` source via Cargo patches. Review upstream
+`third_party/quinn-proto-0.11.19` source via Cargo patches. Review upstream
 security advisories manually, including RustSec reports, and upgrade the fork,
 callers, both lockfiles and documented repairs together. Never remove that path
 override merely to make a bot PR compile. The vendored crate's own Cargo.lock
 is not the production dependency lockfile.
 
-The pinned Vulkan Loader is 1.4.362, commit
-`b8b96a2862bff1eed468e602d43f706beae89cf1`, with the required ID-filter
-allocation repair in build-deps. It returns `VK_ERROR_OUT_OF_HOST_MEMORY` and
-propagates failure through both enumeration APIs and cleanup. Bootstrap, cache
-validation and package preflight require that patch; a newer Loader must not
-silently drop it. Twelve fault-injection cases failed on the unpatched candidate
-and passed with the repair; the repaired candidate passed 713 Loader tests.
-Retain/reproduce those negative controls when upgrading the changed allocation
-code. The [qualification record](reviews/vulkan-loader-qualification.md) records
-the clean Host build and hardware checks without implying new Vulkan encoding
-support or complete interactive acceptance. The operator's current NVIDIA
+The pinned Vulkan Loader/Headers pair is 1.4.367 (Loader `aa6dee8385afe4b2cc0152d086af2184743e16fd`).
+The allocation-failure fix is now upstream. Require unmodified pinned production
+sources, retain the 24-case fault-injection test patch and reproduce its negative
+control before accepting this upgrade. The old
+[qualification record](reviews/vulkan-loader-qualification.md) records results
+for 1.4.362; do not treat them as acceptance of the new pair.
+The operator's current NVIDIA
 baseline is 595.104.02; historical qualification records retain their actual
 tested driver. CUDA 13.2 Update 2 (NVCC 13.2.86) is the separate Host toolchain
 candidate. The current NVENC headers remain SDK 13.0.19: the proposed 13.1

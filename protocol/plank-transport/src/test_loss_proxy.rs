@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Test-only receiver-side loss injection. Keep socket draining independent of
-//! the Tokio workers doing encryption and FEC. Report unplanned kernel drops
+//! forwarding and the Tokio workers doing encryption and FEC. A bounded ingress
+//! FIFO absorbs bursts without changing product sockets or system limits.
+//! Report unplanned kernel drops
 //! separately: a pass with extra loss still proves recovery, but cannot be
 //! described as an exact-loss measurement. Never relax frame assertions.
 
+use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(crate) struct LossProxy {
     pub address: SocketAddr,
@@ -18,8 +21,72 @@ pub(crate) struct LossProxy {
     pub forwarded: Arc<AtomicU64>,
     pub dropped: Arc<AtomicU64>,
     pub blackhole: Arc<AtomicBool>,
+    return_hold_until_ms: Arc<AtomicU64>,
+    pub held_return_packets: Arc<AtomicU64>,
+    epoch: Instant,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<io::Result<Option<u64>>>>,
+}
+
+// Also stop the scoped reader when forwarding unwinds, before scope joins it.
+struct StopReader<'a>(&'a AtomicBool);
+impl Drop for StopReader<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+type PacketBatch = Vec<(SocketAddr, Vec<u8>)>;
+const PACKETS_PER_BATCH: usize = 32;
+
+fn receive_packets(
+    socket: &UdpSocket,
+    stop: &AtomicBool,
+    queued: &AtomicUsize,
+    ingress: mpsc::SyncSender<PacketBatch>,
+) -> io::Result<Option<u64>> {
+    const MAX_INGRESS_BYTES: usize = 8 * 1024 * 1024;
+    let mut buffer = vec![0_u8; 65_535];
+    let mut batch = Vec::with_capacity(PACKETS_PER_BATCH);
+    while !stop.load(Ordering::Acquire) {
+        match socket.recv_from(&mut buffer) {
+            Ok((size, source)) => {
+                batch.push((source, buffer[..size].to_vec()));
+                if batch.len() < PACKETS_PER_BATCH {
+                    continue;
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => return Err(error),
+        }
+        if batch.is_empty() {
+            continue;
+        }
+        // Amortize channel wakes and byte-accounting atomics across a small
+        // burst. Flush a partial burst on the socket's 2 ms timeout as well;
+        // quiet handshake/control traffic must not wait for a full batch.
+        let bytes = batch.iter().map(|(_, data)| data.len()).sum::<usize>();
+        if queued.fetch_add(bytes, Ordering::AcqRel) + bytes > MAX_INGRESS_BYTES {
+            queued.fetch_sub(bytes, Ordering::Release);
+            return Err(io::Error::other(
+                "loss proxy exceeded its ingress byte budget",
+            ));
+        }
+        let ready = std::mem::replace(&mut batch, Vec::with_capacity(PACKETS_PER_BATCH));
+        if ingress.try_send(ready).is_err() {
+            queued.fetch_sub(bytes, Ordering::Release);
+            if !stop.load(Ordering::Acquire) {
+                return Err(io::Error::other("loss proxy ingress queue unavailable"));
+            }
+            break;
+        }
+    }
+    kernel_drops(socket)
 }
 
 impl LossProxy {
@@ -33,15 +100,20 @@ impl LossProxy {
             "fec_loss_proxy_receive_buffer_bytes={}",
             socket_ref.recv_buffer_size()?
         );
-        socket.set_read_timeout(Some(Duration::from_millis(20)))?;
+        socket.set_read_timeout(Some(Duration::from_millis(2)))?;
         socket.set_write_timeout(Some(Duration::from_millis(100)))?;
         let address = socket.local_addr()?;
         let loss_basis_points = Arc::new(AtomicU64::new(0));
         let forwarded = Arc::new(AtomicU64::new(0));
         let dropped = Arc::new(AtomicU64::new(0));
-        let stop = Arc::new(AtomicBool::new(false));
         let blackhole = Arc::new(AtomicBool::new(false));
-        let discard_all = blackhole.clone();
+        let blackhole_worker = blackhole.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let epoch = Instant::now();
+        let return_hold_until_ms = Arc::new(AtomicU64::new(0));
+        let held_return_packets = Arc::new(AtomicU64::new(0));
+        let hold = return_hold_until_ms.clone();
+        let held = held_return_packets.clone();
         let (loss, sent, omitted, stopping) = (
             loss_basis_points.clone(),
             forwarded.clone(),
@@ -51,52 +123,107 @@ impl LossProxy {
         let worker = thread::Builder::new()
             .name("loss-proxy".into())
             .spawn(move || {
-                let mut client = None;
-                let mut sequence = 0_u64;
-                let mut buffer = vec![0_u8; 65_535];
-                while !stopping.load(Ordering::Acquire) {
-                    let (size, source) = match socket.recv_from(&mut buffer) {
-                        Ok(packet) => packet,
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                io::ErrorKind::WouldBlock
-                                    | io::ErrorKind::TimedOut
-                                    | io::ErrorKind::Interrupted
-                            ) =>
-                        {
-                            continue;
+                let queued = AtomicUsize::new(0);
+                thread::scope(|scope| {
+                    // Keep receiving while forwarding or draining held ACKs.
+                    // This measurement-only FIFO avoids relying on the OS
+                    // accepting our receive-buffer request. Both byte and
+                    // packet bounds fail the test rather than hide omissions.
+                    let (ingress, packets) = mpsc::sync_channel(4096 / PACKETS_PER_BATCH);
+                    let reader = thread::Builder::new()
+                        .name("loss-proxy-receive".into())
+                        .spawn_scoped(scope, || {
+                            receive_packets(&socket, &stopping, &queued, ingress)
+                        })?;
+                    let stop_reader = StopReader(&stopping);
+                    let result: io::Result<()> = (|| {
+                        let mut client = None;
+                        let mut sequence = 0_u64;
+                        let mut pending: VecDeque<(u64, Vec<u8>)> = VecDeque::new();
+                        let mut pending_bytes = 0;
+                        while !stopping.load(Ordering::Acquire) {
+                            let now = epoch.elapsed().as_millis() as u64;
+                            while pending.front().is_some_and(|(until, _)| *until <= now) {
+                                let (_, packet) = pending.pop_front().unwrap();
+                                pending_bytes -= packet.len();
+                                if socket.send_to(&packet, server)? != packet.len() {
+                                    return Err(io::Error::other(
+                                        "delay proxy truncated a return datagram",
+                                    ));
+                                }
+                            }
+                            let batch = match packets.recv_timeout(Duration::from_millis(2)) {
+                                Ok(packet) => packet,
+                                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                                Err(mpsc::RecvTimeoutError::Disconnected)
+                                    if stopping.load(Ordering::Acquire) =>
+                                {
+                                    break;
+                                }
+                                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                    return Err(io::Error::other(
+                                        "loss proxy receive worker stopped",
+                                    ));
+                                }
+                            };
+                            queued.fetch_sub(
+                                batch.iter().map(|(_, data)| data.len()).sum::<usize>(),
+                                Ordering::Release,
+                            );
+                            for (source, buffer) in batch {
+                                if blackhole_worker.load(Ordering::Relaxed) { continue; }
+                                let size = buffer.len();
+                                let destination = if source == server {
+                                    let Some(client) = client else { continue };
+                                    sequence = sequence.wrapping_add(1);
+                                    let loss = loss.load(Ordering::Acquire);
+                                    // Same evenly distributed omissions as the original fixture;
+                                    // this is deliberately not a random WAN-loss model.
+                                    if (sequence % 10_000) * loss % 10_000 < loss {
+                                        omitted.fetch_add(1, Ordering::Relaxed);
+                                        continue;
+                                    }
+                                    client
+                                } else {
+                                    client = Some(source);
+                                    let until = hold.load(Ordering::Acquire);
+                                    if until > epoch.elapsed().as_millis() as u64
+                                        || !pending.is_empty()
+                                    {
+                                        if pending_bytes + size > 8 * 1024 * 1024 {
+                                            return Err(io::Error::other(
+                                                "delay proxy exceeded its bounded return queue",
+                                            ));
+                                        }
+                                        let until =
+                                            until.max(pending.back().map_or(0, |(at, _)| *at));
+                                        pending.push_back((until, buffer));
+                                        pending_bytes += size;
+                                        held.fetch_add(1, Ordering::Relaxed);
+                                        continue;
+                                    }
+                                    server
+                                };
+                                let written = socket.send_to(&buffer[..size], destination)?;
+                                if written != size {
+                                    return Err(io::Error::other(
+                                        "loss proxy truncated a UDP datagram",
+                                    ));
+                                }
+                                if source == server {
+                                    sent.fetch_add(1, Ordering::Relaxed);
+                                }
+                            }
                         }
-                        Err(error) => return Err(error),
-                    };
-                    if discard_all.load(Ordering::Acquire) {
-                        omitted.fetch_add(1, Ordering::Relaxed);
-                        continue;
-                    }
-                    let destination = if source == server {
-                        let Some(client) = client else { continue };
-                        sequence = sequence.wrapping_add(1);
-                        let loss = loss.load(Ordering::Acquire);
-                        // Same evenly distributed omissions as the original fixture;
-                        // this is deliberately not a random WAN-loss model.
-                        if (sequence % 10_000) * loss % 10_000 < loss {
-                            omitted.fetch_add(1, Ordering::Relaxed);
-                            continue;
-                        }
-                        client
-                    } else {
-                        client = Some(source);
-                        server
-                    };
-                    let written = socket.send_to(&buffer[..size], destination)?;
-                    if written != size {
-                        return Err(io::Error::other("loss proxy truncated a UDP datagram"));
-                    }
-                    if source == server {
-                        sent.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-                kernel_drops(&socket)
+                        Ok(())
+                    })();
+                    drop(stop_reader);
+                    let received = reader
+                        .join()
+                        .map_err(|_| io::Error::other("loss proxy receive worker panicked"))??;
+                    result?;
+                    Ok(received)
+                })
             })?;
         Ok(Self {
             address,
@@ -104,9 +231,21 @@ impl LossProxy {
             forwarded,
             dropped,
             blackhole,
+            return_hold_until_ms,
+            held_return_packets,
+            epoch,
             stop,
             worker: Some(worker),
         })
+    }
+
+    /// Hold encrypted return-direction packets without dropping or reordering
+    /// them. QUIC control travels here too; this is not an ACK-frame parser.
+    pub fn hold_return_for(&self, duration: Duration) {
+        self.return_hold_until_ms.store(
+            (self.epoch.elapsed() + duration).as_millis() as u64,
+            Ordering::Release,
+        );
     }
 
     fn join(&mut self) -> io::Result<Option<u64>> {
@@ -139,8 +278,84 @@ impl Drop for LossProxy {
     }
 }
 
+#[test]
+fn saturated_ingress_fails_instead_of_silently_dropping() {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    sender
+        .send_to(b"packet", socket.local_addr().unwrap())
+        .unwrap();
+    let (tx, _rx) = mpsc::sync_channel(0);
+    let queued = AtomicUsize::new(0);
+    let result = receive_packets(&socket, &AtomicBool::new(false), &queued, tx);
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("ingress queue unavailable")
+    );
+    assert_eq!(queued.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn idle_shutdown_joins_both_proxy_workers() {
+    let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let (done, joined) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        for _ in 0..20 {
+            let mut proxy = LossProxy::start(server.local_addr().unwrap()).unwrap();
+            // finish() must succeed, not merely join; Drop intentionally only
+            // reports failures while unwinding another assertion.
+            let _ = proxy.finish();
+        }
+        done.send(()).unwrap();
+    });
+    joined
+        .recv_timeout(Duration::from_secs(1))
+        .expect("proxy shutdown hung");
+    worker.join().unwrap();
+}
+
+#[test]
+fn return_hold_preserves_order_without_blocking_forward_packets() {
+    let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_millis(20)))
+        .unwrap();
+    let client = UdpSocket::bind("127.0.0.1:0").unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut proxy = LossProxy::start(server.local_addr().unwrap()).unwrap();
+    client.send_to(b"hello", proxy.address).unwrap();
+    let mut buffer = [0; 16];
+    server.recv_from(&mut buffer).unwrap();
+    proxy.hold_return_for(Duration::from_millis(100));
+    client.send_to(b"first", proxy.address).unwrap();
+    client.send_to(b"second", proxy.address).unwrap();
+    server.send_to(b"forward", proxy.address).unwrap();
+    assert_eq!(client.recv_from(&mut buffer).unwrap().0, 7);
+    assert_eq!(&buffer[..7], b"forward");
+    assert!(matches!(
+        server.recv_from(&mut buffer).unwrap_err().kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    ));
+    server
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    for expected in [b"first".as_slice(), b"second".as_slice()] {
+        let (size, _) = server.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..size], expected);
+    }
+    assert_eq!(proxy.held_return_packets.load(Ordering::Relaxed), 2);
+    proxy.finish();
+}
+
 #[cfg(target_os = "linux")]
-fn kernel_drops(socket: &UdpSocket) -> io::Result<Option<u64>> {
+pub(super) fn kernel_drops(socket: &UdpSocket) -> io::Result<Option<u64>> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::MetadataExt;
     let inode = std::fs::metadata(format!("/proc/self/fd/{}", socket.as_raw_fd()))?.ino();
@@ -165,7 +380,7 @@ fn parse_kernel_drops(table: &str, inode: u64) -> io::Result<u64> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn kernel_drops(_socket: &UdpSocket) -> io::Result<Option<u64>> {
+pub(super) fn kernel_drops(_socket: &UdpSocket) -> io::Result<Option<u64>> {
     // Do not mislabel unavailable per-socket counters as zero on other OSes.
     Ok(None)
 }

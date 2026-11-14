@@ -14,7 +14,8 @@ class HostSourceGateTests(unittest.TestCase):
         self.assertIn('"$fixture_build/input-recovery"', build)
         self.assertIn('"${HOST}/src/process.cpp"', fixture)
         self.assertIn('-Wl,--wrap=open', fixture)
-        self.assertIn('googletest libdisplaydevice', fixture)
+        self.assertIn('foreach(dependency libvirtualhid googletest)', fixture)
+        self.assertNotIn('libdisplaydevice', fixture)
 
     def test_host_input_fixture_links_header_only_boost_dependencies(self):
         build = (ROOT / 'scripts/ci/test-linux-host-input.sh').read_text()
@@ -26,6 +27,14 @@ class HostSourceGateTests(unittest.TestCase):
                 self.assertIn(dependency, links)
         self.assertIn("'/usr/(local/)?include/boost/'", build)
         self.assertIn('"$fixture_build/CMakeFiles/input-recovery.dir"', build)
+
+    def test_host_components_run_before_the_full_package_build(self):
+        build = (ROOT / 'scripts/ci/build.sh').read_text()
+        self.assertLess(build.index('scripts/ci/test-linux-host-input.sh'),
+                        build.index('scripts/package/build-host-rpm.sh'))
+        component = (ROOT / 'scripts/ci/test-linux-host-input.sh').read_text()
+        self.assertNotIn('CMakeCache.txt', component)
+        self.assertIn('PLANK_HOST_FFMPEG_ROOT', component)
 
     def test_macos_microphone_consumers_link_the_signing_requirement(self):
         for name in ('scripts/build/build-macos-host.sh',
