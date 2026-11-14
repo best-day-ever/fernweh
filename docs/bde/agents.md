@@ -80,11 +80,16 @@ Each release gets `docs/releases/<version>.md` and a `packaging/VERSION` bump.
 - **Broker**: on macOS `cd apps/broker && agent-heavy-run cargo test --no-default-features` (pure logic against fakes;
   the default `system` feature needs MIT krb5/LDAP and builds on Linux only). The full `cargo test --release` and the
   release build run on the Linux build VM; bde-linux `roles/plank_broker` deploys it, pinned by sha256 in `versions.yml`.
-- **Linux Host RPM** (~25 min warm): `scripts/bde/build-host-rpm.sh --budget-seconds 3600` in a Rocky 9.7 container,
-  from a real clone, not a worktree (the container cannot follow a worktree's `.git` link). The RPM stays in the
-  `plank-bde-host-deps` volume under `/deps/packages/candidates/<version>-<branch>/linux/`; copy it out, stage it on the
-  software share and pin it in bde-linux. Pinning in bde-linux `main` rolls it out to every PLANK workstation within
-  30 minutes (ansible-pull), so pin only a build you have tested.
+- **Linux Host RPM**: the operator explicitly selects the physical canary as the native Linux builder and test target
+  on13 November2026. This supersedes the Mac/OrbStack container workflow and upstream's builder-only restriction
+  for this BDE target. Use a clean, exact-source checkout and the pinned GCC/CUDA/Rust/Boost/FFmpeg recipes;
+  `scripts/bde/build-host-rpm.sh` runs the native bootstrap, packaging and input gates; the underlying packaging
+  entry point is `scripts/package/build-host-rpm.sh`. Supply `PLANK_DEP_ROOT`, `PLANK_WORK_ROOT`,
+  `PLANK_ARTIFACT_ROOT` and `PLANK_BUILD_BRANCH` in the builder's environment. Provision build dependencies
+  separately; never run the disposable CI repository-rewrite/install script on a workstation. Preserve the canary's desktop, farm
+  processes and Rocky/DKU/kernel/NVIDIA selections. Reuse its verified dependency caches. Do not run Linux builds
+  in a Rocky container on the operator's MacBook. Stage and pin only qualified artifacts in bde-linux: a main
+  pin rolls out through ordinary Ansible cycles. The Mac client still requires native macOS compilation.
 - Before merging, also run the root CI tests (`python3 -m unittest discover -s tests/ci`; one test fails on macOS
   only because of the `/private/var` symlink) and the private-information check above.
 

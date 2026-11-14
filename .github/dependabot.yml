@@ -14,6 +14,9 @@ updates:
       prefix: deps
   - package-ecosystem: gitsubmodule
     directory: /
+    # Upgrade the native transport and its consumers together with loss gates.
+    ignore:
+      - dependency-name: third_party/kyber-kymux
     schedule:
       interval: weekly
       day: monday

@@ -48,6 +48,7 @@ enable_testing()
 add_executable(input-recovery
   logging.cpp
   input-config.cpp
+  pointer-capture.cpp
   uhid-fixture.cpp
   "${HOST}/src/input.cpp"
   "${HOST}/src/session/collaboration.cpp"

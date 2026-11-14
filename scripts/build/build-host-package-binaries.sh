@@ -11,6 +11,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 source_dir="${repo_dir}/apps/host/linux"
 source "$repo_dir/scripts/build/host-cuda.sh"
 plank_verify_host_cuda
+python3 -c 'import jinja2' # Use the interpreter prepared by the Linux dependency recipe.
 python3 "$repo_dir/tests/video/test-linux-cuda-scaling.py"
 source "${repo_dir}/scripts/package/package-version.sh"
 plank_load_package_version "$repo_dir"
@@ -1110,6 +1111,8 @@ env \
   -DFFMPEG_PREPARED_BINARIES="$ffmpeg_dir" \
   -DBUILD_DOCS=OFF \
   -DBUILD_TESTS=OFF \
+  -DGLAD_SKIP_PIP_INSTALL=ON \
+  -DPython_EXECUTABLE="$(command -v python3)" \
   -DSUNSHINE_ENABLE_CUDA=ON \
   -DSUNSHINE_ENABLE_DRM=ON \
   -DSUNSHINE_ENABLE_KMS=OFF \

@@ -1,5 +1,21 @@
 # Unreleased BDE Fernweh changes
 
+## Immersive mouse candidate
+
+The Mac Client offers a live-session mouse toggle, **Ctrl+Alt+Shift+M**, with
+supporting X11 Linux Hosts. It forwards continuous pixel movement for Blender,
+Unreal Engine and games, including tools started from the keyboard. Releasing
+the mode restores ordinary pointing after an ordered Host acknowledgement.
+Focus loss, reconnect, display changes and tablet takeover release capture.
+See [usage](../user/immersive-mouse.md) and the
+[wire contract](../../protocol/immersive-mouse.md).
+
+This is candidate source, not a published installer. Native Mac build and
+component checks pass; installed application/session acceptance is pending.
+
+Linux Host builds now use the assigned native Rocky9.7 canary. The BDE build
+entry point refuses Mac/OrbStack execution and reuses native dependency caches.
+
 ## Shared desktop wording
 
 The shared-desktop action reads **Join session**. Its explanation, joining status

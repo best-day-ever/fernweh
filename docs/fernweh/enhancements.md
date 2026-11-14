@@ -12,8 +12,7 @@ Later upstream PLANK releases may already contain an equivalent solution.
 
 For a visual introduction, start with the [README](../../README.md). For the
 current integration gaps, read the [14 November upstream review](upstream-review-2026-11-14.md).
-The sections below distinguish source included in the pinned build from work
-still under review.
+The sections below distinguish integrated source from default-build and installed-session acceptance.
 
 ## Display matching and recovery
 
@@ -83,23 +82,19 @@ first notch across pointer sources: Host
 and [`a82acd13`](https://github.com/best-day-ever/fernweh-host-linux/commit/a82acd13).
 These do not imply complete tablet/device parity across platforms.
 
-### Immersive mouse: under review, not pinned here
+### Immersive mouse: source merged, default-build acceptance open
 
-The separate session-wide mouse-capture feature targets tools that hide/wrap
-the pointer, including Blender and Unreal. It adds explicit enter/release with
-a toolbar button or Ctrl+Alt+Shift+M, ordered relative pixel movement, and
-completion acknowledgement. The initial Host scope is Linux X11; Mac/Windows
-Client support is part of that development work. It is distinct from the saved
-immersive keyboard preference.
+The session-wide capture source is integrated across Client, common-C, Host,
+owned virtual input and protocol. Its Mac Qt Client / Linux X11 path carries
+unaccelerated pixel movement, explicit toolbar / Ctrl+Alt+Shift+M control,
+ordered completion acknowledgements and cancellation across focus, reconnect,
+layout and tablet transitions. It starts disabled in each session.
 
-On 14 November 2026,
-[Client PR78](https://github.com/best-day-ever/plank-client/pull/78) and
-[parent PR137](https://github.com/best-day-ever/plank/pull/137) are **open**.
-Reviewed branch tips are Client `868cd362115324d21bc8fb800566a39fc3a90a30`
-and parent `9cc35584b0c65e0a356291b584c82df326e69c3f`; neither is the pinned
-Fernweh build. Integration must carry Client, common-C, Host, virtual-input
-and protocol changes together. Source presence on that branch is not release
-or physical-session acceptance.
+The original Client78 / parent137 reviews are merged. This does not enable the
+feature in the standard Mac SDL packaging path or establish Blender/Unreal
+hands-on acceptance. The Qt frontend migration must preserve the display
+matcher, shared sessions and file clipboard before becoming the default.
+See the [current ledger](upstream-integration-2026-11-14.md).
 
 ## Crash, recovery and pacing repairs
 
