@@ -23,7 +23,7 @@ async fn reliable_data_backpressure_recovers_both_receivers() {
             let address = reservation.local_addr().unwrap();
             drop(reservation);
             let options = NativeOptions {
-        file_clipboard_enabled: false,
+                file_clipboard_enabled: false,
                 handshake_timeout: Duration::from_secs(5),
                 idle_timeout: Duration::from_secs(10),
                 keep_alive_interval: Duration::from_secs(1),
@@ -141,14 +141,14 @@ fn endpoint(phase: EndpointState) -> PlankTransportNativeEndpoint {
     shared.set_state(phase);
     PlankTransportNativeEndpoint {
         config: EndpointConfig::Client {
-        setup_mode: false,
+            setup_mode: false,
             remote_address: "127.0.0.1:28989".parse().unwrap(),
             server_name: "localhost".into(),
             certificate_sha256: None,
             session_token: "test-only".into(),
 
             options: super::super::RuntimeOptions {
-        file_clipboard_enabled: false,
+                file_clipboard_enabled: false,
                 handshake_timeout: Duration::from_secs(5),
                 idle_timeout: Duration::from_secs(5),
                 keep_alive_interval: Duration::from_secs(1),
