@@ -253,6 +253,6 @@ same privacy checks.
 The actual GitHub-rendered README passes 1440px/390px, light/dark checks: three
 images load, local jump links resolve and article content does not overflow.
 Desktop/mobile renders were visually reviewed. Local documentation checks pass
-137 links/anchors; all232 original review source commits are verified ancestors
+139 links/anchors; all232 original review source commits are verified ancestors
 of the recorded component source. The bde-linux repository gate passes with its
 existing lint advisories. Product builds were not repeated for documentation.
