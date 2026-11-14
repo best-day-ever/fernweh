@@ -1,0 +1,2328 @@
+{
+  "reviewed_on": "2026-11-14",
+  "source_parent": "17b2efe1370fa602985dc6a616438bc94e6e19e5",
+  "source_client": "20ca1fbfadaf79ab2ab141f10a80c236b10dab9f",
+  "source_linux_host": "ca113b5b9e1155f8a4d73c7711e52452a49a7a21",
+  "reviews": [
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 1,
+      "title": "deps: bump the actions group across 1 directory with 4 updates",
+      "source_commit": "4983353146a39f2d0da754c25b4be02a15b18aa4",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-22T14:03:37Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 3,
+      "title": "PLANK remote broker: broker service, host GSSAPI admission, client broker mode",
+      "source_commit": "1220aa8e7a0232c16aa09ac74a8a9bd44fd2993d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T15:06:22Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 5,
+      "title": "bde: build only merges and ready PRs, not every branch push",
+      "source_commit": "2efff66aa29dbcfbda7c4a78eca99f3ed1955d5e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T16:01:54Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 6,
+      "title": "bde: macOS broker test TLS backend + land stranded bde.run rename",
+      "source_commit": "aa6c2834e14967232f851c08d5f4a71aeecc7921",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T16:02:56Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 7,
+      "title": "broker: direct route for office clients",
+      "source_commit": "8e740f9a608a2e8a1691d6a66ceafc288e0aefa2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T20:08:21Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 8,
+      "title": "Mac Client for macOS 13+ (deployment target is one setting)",
+      "source_commit": "cf5577f7ab000b1d569d7c5c21ff4a6d20fda9f4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T20:28:33Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 9,
+      "title": "release: prepare 1.0.125 (broker direct route, macOS 13+ Client)",
+      "source_commit": "1ddbd2d00fb37f0f9c6869fada82a692780c8300",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T20:35:00Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 10,
+      "title": "bde: bundle and test the Mac Client's Touch ID helper",
+      "source_commit": "a9080c043e67393fb7462ea3b6db1f99618d42cb",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:30:03Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 11,
+      "title": "bde: broker passkey sign-in (PA-REDHAT-PASSKEY)",
+      "source_commit": "f42157d11cc9339e89e788f61c00a9fe668092be",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:24:42Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 12,
+      "title": "bde: host accepts any of several auth indicators (passkey logins)",
+      "source_commit": "fb51e73476362ef5630c13b0a42134fe8d1ffd25",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:27:47Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 13,
+      "title": "release: prepare 1.0.126 (passkey sign-in, Touch ID Mac Client)",
+      "source_commit": "aa639ce76a424bb0301d42a49f2bcce199f0c645",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:32:35Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 14,
+      "title": "release: 1.0.127 BDE Fernweh Client (remembered session, Remote start view)",
+      "source_commit": "8cf1f78b0414a2c2a1bd43c99a1a28cb5c2cc227",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:41:07Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 16,
+      "title": "deps: bump third_party/kyber-kymux from `912ece5` to `6f3df8e`",
+      "source_commit": "2347c737197045053eb83093b12cf8d7b888c806",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-22T14:03:34Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 18,
+      "title": "Device-bound remote sessions: 30 days, renewable TGT, survive broker restarts",
+      "source_commit": "36cf6aabdcc5642243285d9f9460d794b956dcf6",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T22:13:59Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 19,
+      "title": "One person per workstation: desktop handoff, sign-out, release 1.0.128",
+      "source_commit": "3f530c676e575633145417106ff136a851a92300",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T22:50:44Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 20,
+      "title": "bde: agent guide, code graph and shared memory for the fork",
+      "source_commit": "1d0c14045400fbcddf69a99bc71e97383062479b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T11:10:32Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 21,
+      "title": "bde: NVENC 4:2:0 host modes (host gitlink, protocol, vector)",
+      "source_commit": "960153cb394eada7187ffe6627afe8c115b6eab0",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T11:59:53Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 22,
+      "title": "Add bidirectional Mac and Linux file clipboard",
+      "source_commit": "0060827b2dd6f3b612b160fcf2b2823fc668dcd0",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:09:06Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 23,
+      "title": "bde: notch-safe 3024x1890 laptop virtual mode (feature 0x4000000)",
+      "source_commit": "a322e455c818f867711eb7e29565e68b43fa3580",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:44:49Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 24,
+      "title": "bde: NVENC 4:2:0 decode paths in the AGENTS.md video policy",
+      "source_commit": "c49ffb83f2a14821133d7957cb43c97744b1970e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:22:47Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 25,
+      "title": "release: 1.0.129 BDE Fernweh first sign-in, pointer fix, display fit, remote quality settings",
+      "source_commit": "8f8edbadaeb8fd1a2d06f60516ff86def6dd1275",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:49:16Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 26,
+      "title": "bde: fork submodules track bde/main; CI tests follow the #1 action pins",
+      "source_commit": "a53b107e9970a54df4c25a85ff261a259be5d9d6",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T14:05:15Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 27,
+      "title": "deps: rustls 0.23.45 in the transport and probe locks (GHSA-2mjx-qc3c-rqvc)",
+      "source_commit": "cca0ba45964abc391542b46ce1cddc8b779365d5",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-22T14:07:04Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 28,
+      "title": "Specify and integrate Linux display arrangements",
+      "source_commit": "4605567d7eb0f9677d040e12646d2ee8c17fc79d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T20:48:02Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 29,
+      "title": "Release PLANK 1.0.130 display arrangement",
+      "source_commit": "9538b281f99887078c94da09bb549d12e273894a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T20:50:28Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 30,
+      "title": "Fix host startup ordering on BDE workstations",
+      "source_commit": "bfa2be82e5fe939801b7fe97e78f3829ccc4e052",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T21:05:48Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 31,
+      "title": "Release host primary restore fix as 1.0.132",
+      "source_commit": "471def103d53b0f71d0f21483774ac32405829c3",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T21:23:06Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 32,
+      "title": "Release Fernweh first handoff recovery in 1.0.133",
+      "source_commit": "fc8f564cd90b0506d538f694a463273c30b4c6c4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T22:55:28Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 33,
+      "title": "Release GDM greeter recovery in 1.0.134",
+      "source_commit": "55e09036383c6688d8a27b574e13903ca531005b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T07:16:12Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 34,
+      "title": "Fernweh 1.0.135: Touch ID setup after OTP sign-in",
+      "source_commit": "9e9ec37a20729b0cdccf28f4fdea112046f53129",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T09:26:08Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 35,
+      "title": "Record Fernweh 1.0.135 release verification",
+      "source_commit": "e1e8fb20b490fb0c4d7ef068c32ce8f86cd631e8",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T09:38:02Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 36,
+      "title": "Release desktop display/handoff recovery",
+      "source_commit": "a824bac68b90b199a25ebb14c7a4bab8613056e7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T10:48:00Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 37,
+      "title": "bde: probe offline host again on connect",
+      "source_commit": "ef77de5799cbe3ed5fae5c1f469af01286acfdc7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T11:09:55Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 38,
+      "title": "Release desktop handoff recovery",
+      "source_commit": "a1226710dd457afe959647a829cfab6bf8de16a5",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T11:18:12Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 39,
+      "title": "release: prepare Fernweh 1.0.138 toolbar auto-hide",
+      "source_commit": "9852b5422a28d0974a47809fd5775c23d2857a1f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T12:48:34Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 40,
+      "title": "bde: serve Fernweh client releases from broker",
+      "source_commit": "8d4078149cc12c96231c53578889ac263ed4e90b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T13:34:13Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 41,
+      "title": "release: BDE fernweh 1.0.139 with Mac updater",
+      "source_commit": "ad9057416bd934a24bb9fe31e47b2a983773aa11",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T13:37:20Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 42,
+      "title": "Release BDE fernweh 1.0.140 with seamless sign-out handoff",
+      "source_commit": "1ab88287c52ca312dd31f573c337ee09025ec27a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T15:46:56Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 43,
+      "title": "release: BDE fernweh 1.0.141 with Mac multi-monitor windows",
+      "source_commit": "5bb69ce210cc712ba5ce75702a8d98a0baaf6b48",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T16:18:19Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 44,
+      "title": "docs/bde: record notarized Fernweh 1.0.141 package",
+      "source_commit": "5e375823d1abc13f1bb096bb1b44c95b9db3a26e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T16:27:21Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 45,
+      "title": "Release BDE fernweh 1.0.142 with branded macOS app menu",
+      "source_commit": "13de666fb1f6eac20e817b0ea5c367b873912f0a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T22:21:32Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 46,
+      "title": "Record verified BDE fernweh 1.0.142 release",
+      "source_commit": "947209fbe06d26373d40da993c5a7489b274b7a4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T22:32:55Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 47,
+      "title": "bde: import compatible upstream transport and client fixes",
+      "source_commit": "98a23c9834e0433d32b809233bc245ee7e7f3931",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-24T05:10:38Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 48,
+      "title": "Integrate coordinated upstream 1.1.001 Client and Host candidate",
+      "source_commit": "cae0a4e4a641fba6646c3e7a83111c72a226457c",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-24T08:35:08Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 49,
+      "title": "Add Windows fernweh client development build",
+      "source_commit": "234c3276706a8870634dd5e8d0bda582dbf1ce6e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T10:18:13Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 50,
+      "title": "bde: package Windows Fernweh MSI candidate",
+      "source_commit": "99019be7def0e6df4834a5d245a2f2604063da8a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T10:38:58Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 51,
+      "title": "release: prepare Fernweh 1.1.002 Wacom pressure fix",
+      "source_commit": "494bae4ef0854726d77793090e0006d96f64967c",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T10:41:20Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 52,
+      "title": "bde: integrate input hardening and immersive keyboard mode",
+      "source_commit": "01513d90303d585d5ce0617bac3c88ca19945b1a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T12:18:15Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 53,
+      "title": "release: stage Fernweh clipboard entitlements 1.1.004",
+      "source_commit": "67808f7dc11418c6fd35fca825b796a0dc4829a6",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T13:49:15Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 54,
+      "title": "release: combine Fernweh input and clipboard fixes in 1.1.005",
+      "source_commit": "edc324afc91f77c079936c7b91756363a39212b7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T14:38:00Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 55,
+      "title": "bde: show assigned workstations as Busy",
+      "source_commit": "b4c841fd0ed322a2c43b8655f48dc3ab14a2304f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-25T07:57:50Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 56,
+      "title": "docs/bde: note unmerged upstream session indicator",
+      "source_commit": "d93d88e2c6154f655ef90f8d628717ab95034ece",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-25T08:28:58Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 57,
+      "title": "Import Instinctual PLANK 1.1.024 as BDE 1.1.025",
+      "source_commit": "90aca58e05fa19c08451da634720c3a8220ca82a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T09:05:39Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 58,
+      "title": "List clipboard entitlement groups in the canonical Host config",
+      "source_commit": "bb057cd3b791d1876fa8fdde09c6ea75feafc53f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T09:14:39Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 59,
+      "title": "Release BDE fernweh 1.1.026: toolbar shortcut and gate fixes",
+      "source_commit": "f5fcc9815fa9195ec2e4ee8b758ca0903aee79d8",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T10:51:53Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 60,
+      "title": "bde: pin the client launcher UX polish (plank-client#42)",
+      "source_commit": "3c858afc19ade4402be3ee4bc37a535291cd463b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T16:36:43Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 61,
+      "title": "release: BDE fernweh 1.1.027 with the launcher polish",
+      "source_commit": "70863b3fd6f51bf3238b9fd05e3eecee51150aab",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T20:40:01Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 62,
+      "title": "Stop duplicate idle capture and handle stream window closure",
+      "source_commit": "d80b8937010d8993b3c27d665f20bae862dde208",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-29T09:55:34Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 63,
+      "title": "release: Fernweh 1.1.028 Windows test installer",
+      "source_commit": "f7f6cbc80e92a3955d363a9824c829b365d7e51e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-29T19:49:52Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 64,
+      "title": "Merge upstream PLANK 1.1.030 into BDE 1.1.031",
+      "source_commit": "3718fd9ffa8ada4a018f21c01608819b3b6efd1c",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-30T06:27:29Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 65,
+      "title": "Allow beta first setup without password age limit",
+      "source_commit": "5eba3882ba4b7156dd249c8cd2f019baefda0999",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-19T08:28:48Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 66,
+      "title": "bde: pin Windows display identity fix",
+      "source_commit": "8035f55ce6ffd6f6340091cc5da317a368bda4df",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-02T08:56:32Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 67,
+      "title": "release: BDE fernweh 1.1.032 Windows candidate",
+      "source_commit": "5b08b1ac826e82c49dcf413a3ff12c778908e99d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-02T09:01:15Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 68,
+      "title": "release: integrate upstream Wacom fix for Fernweh 1.1.033",
+      "source_commit": "49ebc90a6d50a421e65cd1fc03d4180195d3882f",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-10-05T07:48:12Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 75,
+      "title": "release: upgrade BDE Fernweh to upstream 1.1.039 with Windows updates",
+      "source_commit": "24ac9afd153593356f0b44fcf8dd6e3624ad31a7",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-10-19T08:28:46Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 76,
+      "title": "bde: keep eligible Fernweh users signed in without automatic expiry",
+      "source_commit": "4b230646fc8aa8f8c12824dd5d11efd636218a9a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-19T19:55:27Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 79,
+      "title": "bde: release Windows clipboard and tablet support as 1.1.041",
+      "source_commit": "a6b1ceff044c577b49dfb23cea1f9c4e623fd1e5",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-20T07:17:47Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 80,
+      "title": "Keep large file clipboard manifests flowing under backpressure",
+      "source_commit": "54fab08e7e08c41f109732e416891788ac3611b3",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-20T07:32:22Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 81,
+      "title": "release: prepare Mac file transfer candidate 1.1.042",
+      "source_commit": "f51a82065d85643ba7115aae00e385b24ddbb47a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T08:39:28Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 82,
+      "title": "bde: add consent-based multi-user desktop collaboration",
+      "source_commit": "8d94323d6484151c5685ab3300232446fbb15104",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T08:29:14Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 83,
+      "title": "bde: preserve Mac files in the collaboration release",
+      "source_commit": "1bd4376e662e7c2b91448f3b5f3f128d461e3617",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T08:39:26Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 84,
+      "title": "bde: release the listener port before native stop returns",
+      "source_commit": "017fc9b8d36ac21d40c9e02803280b9da2863ed7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T09:09:58Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 85,
+      "title": "release: Fernweh 1.1.043 reserved local session controls",
+      "source_commit": "90d6e37343a8285170411397fc1e1fbeb26e6e27",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:07:01Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 86,
+      "title": "Release 1.1.044: Mac display windows and desktop recovery",
+      "source_commit": "dcd70ac1a47059b695bb9e11d1fb1bfb2e47df23",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:26:07Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 87,
+      "title": "release: 1.1.045 display transition recovery",
+      "source_commit": "d358857ebad11c5b50b01c4bf7d21b4aa9f7e20b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:46:03Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 88,
+      "title": "Release Mac client 1.1.046 display capability fix",
+      "source_commit": "fb4f2142bfdc760cc323fd9da200bb29b645daa6",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T13:04:59Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 89,
+      "title": "release: correct display layout and recovery in 1.1.047",
+      "source_commit": "b14ca1d372be022074a064087b8435919b9464e2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T15:26:37Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 90,
+      "title": "bde: retain display recovery snapshots across service stops",
+      "source_commit": "34de70305575619c40589faec6f9de267f52c7e3",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T16:29:43Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 95,
+      "title": "bde: integrate selected upstream fixes as Fernweh 1.2.14",
+      "source_commit": "06849bf7894bc89fd150dfa69c0cfeb105a0e861",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-11-02T19:18:48Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 96,
+      "title": "bde: release Fernweh 1.2.15 session reliability fixes",
+      "source_commit": "ca5f20ef40e9e78fe114cc3d768fbbd88d1359e6",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-02T20:22:21Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 98,
+      "title": "bde: patch broker TLS and Tokio advisories",
+      "source_commit": "5802367a43cb1ec829640a8ba038a9e916d1e3d4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-02T23:59:34Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 99,
+      "title": "Release Windows Fernweh 1.2.16 updater repair",
+      "source_commit": "0b0df0ae715a8a81c4217a6d24e7b638194fbae4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-03T07:49:21Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 100,
+      "title": "bde: wire administrator support policy for desktop collaboration",
+      "source_commit": "646e75ec13894447e48b828c81896e6e0ca91b64",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-05T21:51:20Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 101,
+      "title": "bde: release Linux first-notch scrolling fix in Host 1.2.19",
+      "source_commit": "571ea08eae919e6e21339ca4b20ab1335014f037",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-05T21:55:34Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 102,
+      "title": "bde: integrate isolated support monitor test harness",
+      "source_commit": "34c8dbb0c88ad339a62ffa3efbd71499e1454021",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-05T22:15:54Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 103,
+      "title": "Support shared headless Mac hosts through Fernweh broker and native streams",
+      "source_commit": "58068763cb9af64ee2d72239e09b8c0e16f612a7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T16:19:58Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 104,
+      "title": "release: authorize workstation users to join in Host 1.2.20",
+      "source_commit": "d6138ad68a74d645e57b121b308387227868aabd",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-06T08:44:13Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 105,
+      "title": "bde: queue Join session wording for the next client release",
+      "source_commit": "9d4668b38eb916245a48a03bafc8e838f59c3c30",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T10:12:37Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 106,
+      "title": "bde: integrate simultaneous workstation client windows",
+      "source_commit": "cc40da2cc2be073036903e94c9538a56e7366468",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T10:26:17Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 107,
+      "title": "Track and display everyone connected to a workstation",
+      "source_commit": "ed9bb17c6ba45ff12804c40d8454b3bec659db9a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T10:52:47Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 108,
+      "title": "bde: integrate responsive shared control and remote pointer feedback",
+      "source_commit": "0be9d2a096b410e717c1422b7890d95b32eb9810",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T11:50:43Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 109,
+      "title": "bde: receive automatic beta client diagnostics",
+      "source_commit": "cac25ef3bbe957d82dac958d9eb72ff628f8a5cf",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T12:21:49Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 110,
+      "title": "bde: recover first connections across display layout and login transitions",
+      "source_commit": "66f1652b911ca92a6cb9f10b10db1d470fad879c",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T13:50:49Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 111,
+      "title": "release: coordinated Fernweh 1.2.21",
+      "source_commit": "f3f3281121b339e207e164f457921d286a63a4b0",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T16:00:24Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 113,
+      "title": "release: fix Windows updater service access in 1.2.23",
+      "source_commit": "17c3c0e267b9c8a688a57f14149093b105a1c949",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T08:59:58Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 114,
+      "title": "bde: pass the exact updater helper into the MSI package gate",
+      "source_commit": "d3346bf421afb42df4070f9c2307b6b3a4f2be8e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T09:03:13Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 115,
+      "title": "release: Linux Host startup-output recovery for 1.2.24",
+      "source_commit": "d125b4d366dde095af6f30ef1e3906e80a58f8dc",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T09:53:48Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 116,
+      "title": "bde: reject uninitialized Host dependency clone sources",
+      "source_commit": "1bc0b1a26073d889bff07f80d9b5779eaf97d560",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T10:05:07Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 117,
+      "title": "Release Linux greeter VT recovery as 1.2.25",
+      "source_commit": "016ecb4ec05c108922873138ebd4bf8ee40ee0c3",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T12:08:13Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 118,
+      "title": "bde: release locked desktop joining correction as1.2.26",
+      "source_commit": "6ca2b051b5c72b774158a10af4535add7ba5678d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T13:10:55Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 119,
+      "title": "bde: release explicit support Unlock and join as1.2.27",
+      "source_commit": "6be133a92387ef281f54397464e73f312ff7314a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T14:02:43Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 120,
+      "title": "host: complete support unlock package configuration",
+      "source_commit": "59d1f7d252b5b106d135799a7a6317a5596d6666",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T14:16:40Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 121,
+      "title": "host: separate studio sharing entitlement from workstation assignment",
+      "source_commit": "ba45d614e639aa9c5c680e5a96a8f81ee5e94e35",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T14:29:04Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 122,
+      "title": "host: release sharing policy controls as 1.2.28",
+      "source_commit": "2459ffdcde445641026211401df48b973a987a20",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T14:38:06Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 123,
+      "title": "host: release deterministic unlock join race correction as 1.2.29",
+      "source_commit": "21342ec28b109bb2affea784c9e3181669c964ee",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T15:06:21Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 124,
+      "title": "bde: integrate Linux NVENC lifecycle fix and package regressions",
+      "source_commit": "56dbf576f9439355ec75db942fdc65ec0028addf",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T23:23:53Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 126,
+      "title": "docs: record mainline NVENC lifecycle acceptance",
+      "source_commit": "fadbb986b385a6904d95cac953a304120a939a1f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-11T00:47:19Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 127,
+      "title": "bde: pace Host traffic with bounded bitrate headroom",
+      "source_commit": "443499852b5ba1a42768b651dcfe8e2cbdde59a3",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-11T11:21:28Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 128,
+      "title": "Prevent bounded pacing from starving video on delayed wakeups",
+      "source_commit": "e9736deb0cfd82da8e6b63b6feb48237299ac0e4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-11T12:05:45Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 129,
+      "title": "bde: release Windows video recovery client 1.2.33",
+      "source_commit": "b74ec29f5fe3a8cc96ad09d096e73b875526b374",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-12T10:57:31Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 130,
+      "title": "bde: release Windows 1.2.34 with standard-user updater qualification",
+      "source_commit": "845137b2087f573a8f8225dee8fc505782968c92",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-12T17:10:23Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 131,
+      "title": "bde: keep Linux desktop login manual in Host 1.2.35",
+      "source_commit": "cc8d9f9f0e559cdea0f0c85c6b6a5ec49c0914e4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T09:12:23Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 132,
+      "title": "bde: accept client startup and termination diagnostics",
+      "source_commit": "2644cd00a906a8eb19b3ddaaab3466c6009055f2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T11:43:34Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 133,
+      "title": "bde: integrate startup closure diagnostics",
+      "source_commit": "61470f4a60269b619acad43deaa71eacf9619be3",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T11:46:38Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 134,
+      "title": "release: prepare 1.2.36 startup diagnostics",
+      "source_commit": "9dee60bc66a7b5429dd777b3942dee5022354289",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T11:57:02Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 135,
+      "title": "bde: keep native stderr diagnostics from aborting Windows qualification",
+      "source_commit": "3d3dde3fc35e1b7ce5588498241608eb23de8b68",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T12:13:52Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 136,
+      "title": "bde: integrate reliable Windows deadline qualification",
+      "source_commit": "3da542845484b62ce1688f76d7c1e6e7c6b10f5f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T12:25:54Z"
+    },
+    {
+      "component": "Parent",
+      "original_repository": "best-day-ever/plank",
+      "pr": 138,
+      "title": "Integrate screen-change notice lifecycle repair",
+      "source_commit": "4d07c92327f4c23dbc66a050ed6d914b012c2d8a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T15:13:50Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 1,
+      "title": "Remote (broker) mode",
+      "source_commit": "a9600ac4965bea6aefd89b2c9676115e857c3243",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T15:06:17Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 3,
+      "title": "tests: select the OpenSSL TLS backend for broker tests on macOS",
+      "source_commit": "1f9ca014294f6adf1d80d399683197fb2a667b82",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T16:02:48Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 4,
+      "title": "Broker direct route for office clients (relay fallback)",
+      "source_commit": "fa1b7b9bde26a6a4930d39508d542fa6323e1bf8",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T20:06:41Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 5,
+      "title": "Run on macOS 13+ (Qt 6.10 floor)",
+      "source_commit": "5bf27e13a7b01a9e11a9958356b32a51bf2a8f80",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T20:28:24Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 6,
+      "title": "One request per connection to the PLANK host (brokered connect failed)",
+      "source_commit": "2aedf164ac440519ee58ac5912fdf21c0a42cfc7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:17:22Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 7,
+      "title": "bde: Touch ID (Secure Enclave passkey) sign-in for Remote mode",
+      "source_commit": "7ec0925ddb26def6fc92eb37b56bbf5abb8d1cf5",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:29:59Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 8,
+      "title": "Remote hosts: display setup on first connect + accept the host's upper-case transport digest",
+      "source_commit": "7b19083e9cf88f7e4a066cc62efe814ecd19ab06",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:28:23Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 9,
+      "title": "BDE Fernweh Client: remembered remote session, Remote as start view, rename",
+      "source_commit": "87e51684ea0043b26ffab6a4583f162bfeeeb9e5",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:40:40Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 10,
+      "title": "Offer to sign out an idle desktop owner (single-person workstations)",
+      "source_commit": "a30fd3cd5fb1423fc3b4973c227a654dfe5a326f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T22:50:41Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 11,
+      "title": "Device-bound remote sessions (Secure Enclave device key, signed broker requests)",
+      "source_commit": "fdd23c1af734224b6823fca22f0c4870bfc8870c",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T22:13:33Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 12,
+      "title": "NVENC 4:2:0 bandwidth profiles (H.264 High 8-bit, HEVC Main10)",
+      "source_commit": "70f213f3ff0ef3eba6bae1a6420ab2e33123a6ad",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:20:45Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 13,
+      "title": "Add bidirectional file clipboard support",
+      "source_commit": "615959c8e455387be172f7d8ec5b4b76e86e9601",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T11:57:49Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 14,
+      "title": "Pointer input follows the drawable the renderer letterboxes into",
+      "source_commit": "28b9abd825dcfe03c46c38947bcdb41d5920edaf",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:12:13Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 15,
+      "title": "Fetch common-c from the best-day-ever fork",
+      "source_commit": "f52dff367a822efd1c1f5e44b3da760bdb9b691d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:05:15Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 16,
+      "title": "Test the Mac launch reply at schema 3",
+      "source_commit": "43746fb90150ff80c67b55f808822c7445ef8f5f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:08:13Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 17,
+      "title": "Match odd client displays to the closest supported mode",
+      "source_commit": "f1f09fe8e074242bbadc439f1dbe4b561ab18b74",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:13:15Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 18,
+      "title": "All stream settings in Remote (broker) mode",
+      "source_commit": "e47645ca940383b96ffe821e95edf7f0136cff7b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:15:20Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 19,
+      "title": "Welcome to BDE Fernweh: first sign-in and 2FA setup in the client",
+      "source_commit": "ecabc820684fcbba20a122e682e6dfd634248e60",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:17:43Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 20,
+      "title": "bde: notch-safe 3024x1890 laptop mode for Match my display (feature 0x4000000)",
+      "source_commit": "69a2dd108685e225ca8ad2a450688543a0ddd619",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:24:03Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 21,
+      "title": "bde: offer only the virtual modes the workstation accepts",
+      "source_commit": "d3ffd664be8086b2a6bb3c3fdb3a81cd56b0da68",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T15:11:29Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 22,
+      "title": "Fernweh monitor setup and packed output presentation",
+      "source_commit": "ea485d2bac24706c4421820468a50731bb06b0a6",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T20:47:59Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 23,
+      "title": "Recover Fernweh first desktop handoff",
+      "source_commit": "4d21eaa72026db94ea4fb2d9f4020985b26c77e5",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T22:55:09Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 24,
+      "title": "Offer Touch ID after OTP sign-in",
+      "source_commit": "61007c0a2bf873eb5c600574267a1eb6de810475",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T09:22:03Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 25,
+      "title": "bde: retry transient topology and greeter handoff",
+      "source_commit": "f663c42e54412405722e042675454fc38921adff",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T10:46:14Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 26,
+      "title": "Retry offline broker admission during desktop handoff",
+      "source_commit": "778b3d50ec4d5eb8cc63f3b02eadb71477826adf",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T11:16:48Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 27,
+      "title": "bde: auto-hide idle Fernweh toolbar after unpinning",
+      "source_commit": "365fa3c029d4548029ae4a4a2ffa50aec213cb18",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T12:46:49Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 28,
+      "title": "bde: brand Fernweh client and offer broker updates",
+      "source_commit": "318334d33c8a626b3148148c324c43bfad896533",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T13:35:04Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 29,
+      "title": "bde: remove failed update downloads",
+      "source_commit": "c22824eb54bb86ea45c5702019315818be5cef42",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T13:36:10Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 30,
+      "title": "Retry remote admission during confirmed desktop sign-out",
+      "source_commit": "25748f0e09cea46552fdf2de03b0eb63479f1137",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T15:46:44Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 31,
+      "title": "bde: restore macOS per-monitor windows and cross-screen dragging",
+      "source_commit": "ea9e1c52a321531663e0187f24ce6b1bca89e511",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T16:17:01Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 32,
+      "title": "bde: import upstream render shutdown fix",
+      "source_commit": "e227aa6980695598cc3ea97d4625d1d8f6b8d0f1",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-24T05:10:05Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 33,
+      "title": "Integrate upstream 1.1.001 Fernweh Client improvements",
+      "source_commit": "272a4d0f403f07f28a8b57ead12af45031ffe243",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-24T08:33:54Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 34,
+      "title": "Bring up BDE fernweh client on Windows x64",
+      "source_commit": "85a45881a1b5a153874dc53aa8f88ef24ccf3b9d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T10:17:49Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 35,
+      "title": "bde: brand Windows Fernweh executable",
+      "source_commit": "adefa3a337226c627aee563600eca0f36d77f693",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T10:38:08Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 36,
+      "title": "bde: restore Mac Wacom pressure forwarding",
+      "source_commit": "597db0d71c6495d1207dbd414c31ff1baede1c01",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T10:38:34Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 37,
+      "title": "bde: harden first click and add immersive keyboard mode",
+      "source_commit": "370ad48fe3e6d0af8da556447c2e854e68ee6876",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T12:16:33Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 38,
+      "title": "bde: honor per-session clipboard grants from Host",
+      "source_commit": "f9dd52011ed70007aa6d3b0b6b2f668f22b1cf37",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T13:49:00Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 39,
+      "title": "bde: show occupied workstations as Busy",
+      "source_commit": "dbbff116f570824c4e6c0184cdb7f4b67e0c3f9d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-25T07:57:29Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 40,
+      "title": "Merge upstream Client 1.1.024 (Wacom focus, permissions, In Session)",
+      "source_commit": "2e540123b9c0fd4810e3213ced1b9877592f4cb1",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-28T09:05:26Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 41,
+      "title": "Toolbar shortcut Ctrl+Alt+Shift+T; capture label and hostchoices test fixes",
+      "source_commit": "965f9d3cd7603b5e7ebfd2ec952ae328d66d18f4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T10:51:50Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 42,
+      "title": "bde: polish the launcher UI (dialogs, sign-in, host list, settings)",
+      "source_commit": "77aa7a9dbad94f279d9d9540b2f6755c2343b26b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T16:36:12Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 43,
+      "title": "Disconnect stream windows on Close during streaming and reconnect",
+      "source_commit": "e1fcbb8b4c9c7b2e2a56b0d94ff9f24b938ca104",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-29T09:55:30Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 44,
+      "title": "Merge upstream PLANK Client 1.1.030 audio sync improvements",
+      "source_commit": "a7c00a6c96f06860a9438dfb86ca80c77ba2fc25",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-30T06:25:09Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 46,
+      "title": "bde: preserve Windows display choices in streams",
+      "source_commit": "60d10fe8592e9ac3ab31a102b85c7695f46b7980",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-02T08:56:04Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 47,
+      "title": "test: cover scaled display matching in broker suite",
+      "source_commit": "50ee5478a22c25b72c7142b2ae6dbfdb623ee9d9",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-05T07:47:32Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 48,
+      "title": "bde: refresh upstream client and support unsigned Windows updates",
+      "source_commit": "1b641186e482d0b01cf2a1a5ec207fff26d91133",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-10-19T08:28:04Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 49,
+      "title": "bde: add Windows clipboard, file transfer and Wacom input",
+      "source_commit": "a6babebfc1186308d325d2c90c9a48edaa6f8938",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-20T07:15:51Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 50,
+      "title": "bde: make Mac file transfer usable and recoverable",
+      "source_commit": "05778f067b35b182e5781d57bc051e5a6a68ec97",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T08:33:15Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 51,
+      "title": "Add consent-based desktop collaboration to Fernweh",
+      "source_commit": "81b5fd770d2a5a5ebd54cb5594e24d938e9c91ab",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T08:28:31Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 52,
+      "title": "bde: keep disconnect and toolbar hotkeys above immersive capture",
+      "source_commit": "8c79d37da59527ef53accfc0ac1a7de41c04860e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:05:35Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 53,
+      "title": "Preserve per-monitor Mac windows and recover desktop handoffs",
+      "source_commit": "a90395e39e52c5938a4679a1bcdedf1e626d821e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:23:40Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 54,
+      "title": "Align display recovery notes with Client 1.1.044",
+      "source_commit": "55350dbd5f2a3bc8cb7cbec7a0faa44d43cd9416",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:26:03Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 55,
+      "title": "Keep submitted display layout stable during recovery",
+      "source_commit": "f0eb2604d7c671e2534b4e0173513590a5ce15d9",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T11:45:31Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 56,
+      "title": "Preserve authenticated display capabilities across discovery polling",
+      "source_commit": "9dfa06d22cdde5d55f55e479a1870ec2c209a8c2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T13:04:41Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 57,
+      "title": "bde: preserve display profiles, primary placement and GUI session lifetime",
+      "source_commit": "68f537947052983055e91df238f5e94c1c1cc7f2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T15:25:34Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 58,
+      "title": "bde: refresh upstream Client and fix Windows clipboard negotiation",
+      "source_commit": "970aade0854f43e070ae035d16ca678d7d1fb84f",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-11-02T19:18:35Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 59,
+      "title": "bde: repair remembered sign-in and early lease renewal",
+      "source_commit": "24d1eb8022fd294ce10563e0d0b13cc9186c2c56",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-02T20:21:34Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 60,
+      "title": "Fix Windows update installer error 1619",
+      "source_commit": "54a0803838b48ee60e53faccf9aa54b7ae668bc2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-03T07:48:29Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 61,
+      "title": "Support shared Mac broker admission and reliable launcher polling",
+      "source_commit": "4c8673ceac73e327127487f5932fdb5d4fa12260",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T16:16:47Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 62,
+      "title": "bde: clarify shared-session joining wording",
+      "source_commit": "39dfb33734831bfe04a0415262eb9b2c44fe4f48",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T10:12:07Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 63,
+      "title": "bde: keep multiple workstation connections open",
+      "source_commit": "6b222ec4d14fc6d0045de30f12a89df881803708",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T10:25:51Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 64,
+      "title": "Show everyone connected to each workstation",
+      "source_commit": "52c30c78f345548ceb0651ed6b62f40ca89ee11b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T10:52:19Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 65,
+      "title": "bde: clarify shared control and show the remote desktop mouse",
+      "source_commit": "3a7db2eada2f2be5e4cf319e7e349ff4c5a3239b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T11:50:14Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 66,
+      "title": "bde: collect bounded beta session diagnostics",
+      "source_commit": "8a02c5f8e0de48cbd866e60829f1d26a5ec0dd78",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T12:21:02Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 67,
+      "title": "bde: keep first-connect layout recovery alive through worker admission",
+      "source_commit": "5587276cae64d7195d4a10ae26ee3c7145959981",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T13:50:30Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 68,
+      "title": "release: Fernweh 1.2.21 highlights",
+      "source_commit": "8322606ce5d95960b2af2b15d2e2c6a5cf01799c",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T16:00:02Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 69,
+      "title": "bde: fix Windows updater code 110 at the MSI service boundary",
+      "source_commit": "e324b85e5cd4a0063a8eb84b14a433987f667492",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T08:57:32Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 70,
+      "title": "bde: resolve the MSI test helper after parameter binding",
+      "source_commit": "d368066615d7a8312242b2434bdd05864920eacd",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T09:03:04Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 71,
+      "title": "bde: respect locked desktop sharing availability",
+      "source_commit": "56b951e202ac7530f78ba01449946a1b0195e1c2",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T13:09:51Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 72,
+      "title": "bde: add explicit Unlock and join for authorized support",
+      "source_commit": "3a59e878cddfb41daf22343f35f6d725176051e7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T14:00:43Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 74,
+      "title": "bde: repair native video recovery and Windows presentation stalls",
+      "source_commit": "5d87c9f03a4325d5720d8478f7e5d299cc53fc95",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-12T10:57:06Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 75,
+      "title": "bde: repair Windows updater permission changes before UAC",
+      "source_commit": "32f8315ace2a8ca62b6c663cb2c035b75144f210",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-12T17:10:18Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 76,
+      "title": "bde: explain startup closures in central diagnostics",
+      "source_commit": "4ba565206b5327dd16365c76b0000c2e22b69a1a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T11:44:34Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 77,
+      "title": "test: separate forced timeout from successful Windows probe startup",
+      "source_commit": "a92ae95fe3c6f86c96d23bf2b12805bdcc4294aa",
+      "ancestry_evidence": "source head",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T12:24:22Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 78,
+      "title": "bde: add a session-wide immersive mouse toggle",
+      "source_commit": "868cd362115324d21bc8fb800566a39fc3a90a30",
+      "ancestry_evidence": "source head",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-14T03:40:44Z"
+    },
+    {
+      "component": "Client",
+      "original_repository": "best-day-ever/plank-client",
+      "pr": 79,
+      "title": "Fix persistent and recurring screen-change notices",
+      "source_commit": "1f5167e9bcfff6a726cfd1071f4ad114c93495e7",
+      "ancestry_evidence": "source head",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T15:13:12Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 1,
+      "title": "auth: accept any of several GSSAPI auth indicators",
+      "source_commit": "9acec8c95743ac6e357350b38f5c46d0cd75a731",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T21:27:34Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 2,
+      "title": "Desktop handoff: one login, one person per workstation",
+      "source_commit": "06cac5b32649087bf53559b48e215079507e9b2c",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-21T22:50:38Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 3,
+      "title": "bde: notch-safe 3024x1890 laptop virtual mode (feature 0x4000000)",
+      "source_commit": "13673a2f222723e048e13c687412d8b32e67a66b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:44:26Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 4,
+      "title": "NVENC 4:2:0 modes for bandwidth-limited links (H.264 High 8-bit, HEVC Main10)",
+      "source_commit": "7d83c5fdc1edc07e5c10507babd139ccdc502c6b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:00:38Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 5,
+      "title": "Add bidirectional file clipboard support",
+      "source_commit": "2bfc56a6d07842431e45ad94787995526258ca3a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T11:57:50Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 6,
+      "title": "Fetch common-c from the best-day-ever fork",
+      "source_commit": "3c5621bba46e4e45a5c8ec209a263da237270def",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T12:08:59Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 7,
+      "title": "bde: display lease fixes: re-acquire keeps the original snapshot, 409 instead of an endless 425",
+      "source_commit": "e3a9a0721164cd59ff0b1e95ee1ca993733f5066",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T15:11:25Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 8,
+      "title": "Linux host display arrangements and packed NvFBC capture",
+      "source_commit": "dbe8a89a8e1795e167c800222312074126c3872d",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T20:47:56Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 9,
+      "title": "Restore RandR primary after arrangement lease",
+      "source_commit": "3db9848f1dd5f3622fa9a73c299c02e65ef13737",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-22T21:22:15Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 10,
+      "title": "Recover GDM greeter left without Xorg after session exit",
+      "source_commit": "bf573e751c4e4cda128d523e55ae1e89ce4caabb",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T07:15:47Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 11,
+      "title": "bde: preserve desktop monitors through remote layout transitions",
+      "source_commit": "b3a1e770b277df7d679b21a81c7bc70fc13938db",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T10:45:57Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 12,
+      "title": "Restore local display if desktop handoff never reconnects",
+      "source_commit": "1b8c7f4026aeb83c5403aa5f16fe3da0ecde4581",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-23T11:16:54Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 13,
+      "title": "Integrate upstream 1.1.001 Linux Host improvements",
+      "source_commit": "e300c55500adf7412808a38a408f3262ece0a814",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-24T08:22:17Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 14,
+      "title": "bde: require remote input devices before Host startup",
+      "source_commit": "4cbd1e9ed88f57da9aabe21c78fe8dc6e74bbd80",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T12:16:18Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 15,
+      "title": "bde: enforce IPA clipboard entitlements per session",
+      "source_commit": "e45451e326b8763ac9cba8625fa8fd073eb11504",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-24T13:48:47Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 16,
+      "title": "bde: report coarse workstation occupancy",
+      "source_commit": "9082359d21e016cbfc7e8798137bb745f9e8ab2b",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-25T07:57:15Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 17,
+      "title": "Merge upstream Linux Host 1.1.024 (raw HID contact release, occupancy)",
+      "source_commit": "dc6077ef8fa381c4a48f1db92a42ed100d28e27e",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-09-28T09:05:22Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 18,
+      "title": "Expect the publisher support line only when an issue URL is set",
+      "source_commit": "addc1dee91b54daa2cb2990824b8c7cad2ce1905",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-28T10:51:46Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 19,
+      "title": "Skip duplicate NvFBC frames and report active transport state",
+      "source_commit": "d706037cc1e8306252038e8ee394d659f367daf4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-09-29T09:55:25Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 20,
+      "title": "bde: merge upstream host reconnect and capture upgrades",
+      "source_commit": "2317a193314c5c1cba4721987b69de6d40dbaa5a",
+      "ancestry_evidence": "merge",
+      "classification": "upstream/dependency",
+      "merged_at": "2026-10-19T08:16:27Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 21,
+      "title": "bde: recover file transfers after collisions and cancellation",
+      "source_commit": "a892dbe4878282a926f3c122bf2dd1aaa323a1cb",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-20T07:15:16Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 22,
+      "title": "Drain crossed file manifests during Host send backpressure",
+      "source_commit": "88efd3649ac0853b30d52bf32b9afc59455bcbf4",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-20T07:31:49Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 23,
+      "title": "Add owner-approved desktop collaboration",
+      "source_commit": "7fb88886a1f4f5a4f1dc7b0491de805bedfea4b7",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T08:28:27Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 24,
+      "title": "bde: preserve display recovery state and native screen geometry",
+      "source_commit": "d4c62575947e133f3fc507e01587e557e2824b15",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-10-22T15:15:28Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 25,
+      "title": "bde: allow configured administrators to join for support without consent",
+      "source_commit": "b02840fc42288c417c7896ba090859b9e2abd993",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-05T21:50:05Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 26,
+      "title": "bde: fix first-notch X11 scrolling with the owned virtual pointer",
+      "source_commit": "8543eb3b53d2c45e6a9af2daca82697bcc511469",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-05T21:53:32Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 27,
+      "title": "bde: isolate collaboration monitor fixture from host suite",
+      "source_commit": "f37a05fe016a77ac6710863bce1e0a5cd49b769e",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-05T22:15:10Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 28,
+      "title": "bde: authorize collaboration from workstation access policy",
+      "source_commit": "487293670d0d274c4990ac26ccb29f341da0927f",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-06T08:43:07Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 29,
+      "title": "bde: make shared control responsive and protect active mouse drags",
+      "source_commit": "43d671d1208cd3ebb94304642942f13c3c80f11c",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T11:49:45Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 30,
+      "title": "bde: tolerate capture creation during first-login display modesets",
+      "source_commit": "41e46a76d48a01431c9b1fefee6f74bc7d370c11",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-09T13:50:23Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 31,
+      "title": "bde: retry empty display inventories before capture startup",
+      "source_commit": "97009125d85400a9c40678ce8c9857387f63d327",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T09:52:28Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 32,
+      "title": "Recover stranded greeter virtual terminals without terminating desktops",
+      "source_commit": "6107b4dc3af7165bf4a6a5a98c1190c5d6d6ab99",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T12:07:17Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 33,
+      "title": "bde: add explicit authorized support unlock with bounded relocking",
+      "source_commit": "a1692422ca86ea6e13e13b8f7b3e8e145612ad5a",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T13:59:07Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 34,
+      "title": "session: restrict shared desktop access to a configured group",
+      "source_commit": "3fa52e20ed87cb2750415512aadca37d61106447",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T14:28:01Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 35,
+      "title": "session: prevent stale lock observations from revoking fresh joins",
+      "source_commit": "78e348c57490931a735b5dbfad4b88777a1f6ae9",
+      "ancestry_evidence": "merge",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T15:05:12Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 36,
+      "title": "bde: preserve CUDA context lifetime during NVENC teardown",
+      "source_commit": "e8edfce2e23b5d8136fef6273dac901b4ec71e67",
+      "ancestry_evidence": "source head",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-10T23:23:04Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 37,
+      "title": "bde: require manual Linux login by default",
+      "source_commit": "fb3a689618093e345908945a90cf226d93cc67d7",
+      "ancestry_evidence": "source head",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-13T09:06:58Z"
+    },
+    {
+      "component": "Linux Host",
+      "original_repository": "best-day-ever/plank-host-linux",
+      "pr": 38,
+      "title": "bde: support ordered immersive mouse capture on X11",
+      "source_commit": "50d8093454163de6db3f5d2936ad44f13fcb035b",
+      "ancestry_evidence": "source head",
+      "classification": "downstream/release",
+      "merged_at": "2026-11-14T03:40:39Z"
+    }
+  ]
+}

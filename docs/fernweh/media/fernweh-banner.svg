@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-labelledby="title desc">
-  <title id="title">Fernweh — your workstation, wherever you work</title>
+  <title id="title">Fernweh — PLANK client, host and optional broker</title>
   <desc id="desc">A blue path connects a studio workstation to a laptop and a second display, on a dark blue background.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
@@ -17,8 +17,8 @@
   <g font-family="Inter, Helvetica Neue, Helvetica, Arial, sans-serif">
     <text x="66" y="67" fill="#89b7cc" font-size="12" letter-spacing="3">BEST DAY EVER · BUILT ON PLANK</text>
     <text x="62" y="159" fill="#f4f7fa" font-weight="700" font-size="82" letter-spacing="-3">fernweh</text>
-    <text x="66" y="206" fill="#d2e2ed" font-size="25">Your workstation. Wherever you work.</text>
-    <text x="66" y="266" fill="#8dabc0" font-size="16">Creative workflows · thoughtful display tools · optional studio access</text>
+    <text x="66" y="206" fill="#d2e2ed" font-size="25">PLANK client, host and optional broker</text>
+    <text x="66" y="266" fill="#8dabc0" font-size="16">Display profiles · shared sessions · file transfer</text>
   </g>
   <g stroke-linecap="round" stroke-linejoin="round">
     <path d="M834 127C773 127 794 237 853 237H1059" stroke="#75bde6" stroke-width="2" stroke-dasharray="5 8" fill="none"/>

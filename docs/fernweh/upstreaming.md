@@ -8,18 +8,19 @@ notices. Check current upstream first: it may already have an equivalent fix.
 The [14 November 2026 comparison](upstream-review-2026-11-14.md) records a
 source-checked starting point, including upstream repairs still missing here.
 
-## Private source fork and GitHub fork metadata
+## Source ancestry and GitHub fork metadata
 
-During review these are independent **private source repositories with preserved
-Git ancestry**. They are not GitHub-native forks of the public repositories:
+These are independent **source repositories with preserved Git ancestry**,
+initially created privately for review. They are not GitHub-native forks of the public repositories:
 [GitHub requires forks of public repositories to be public](https://docs.github.com/en/pull-requests/reference/forks).
-Do not change visibility or create a public PR until Finn authorizes publication.
+Publication authorization and audit status are recorded in [review.md](review.md).
+An upstream PR still needs its own task scope and focused review.
 Native fork metadata is a hosting relationship; preserved commits/merge bases
 are what make merging upstream and extracting patches possible today.
 
-When publication is authorized, choose between publishing these independent
-source forks (clear upstream links remain) and asking GitHub to arrange the
-appropriate fork-network relationship. For actual upstream PRs, a normal public
+Publication preserves the independent repository relationship and upstream
+links; it does not create GitHub-native fork metadata. GitHub support can arrange
+a suitable fork-network relationship separately if needed. For actual upstream PRs, a normal public
 fork of the relevant upstream component is sufficient: push only the reviewed
 contribution branch there. Never push a private review branch wholesale.
 

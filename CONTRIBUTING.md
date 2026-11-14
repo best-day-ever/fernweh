@@ -3,7 +3,8 @@
 Fernweh is a downstream ALPHA fork. Start with [the development guide](docs/fernweh/development.md),
 [platform build instructions](docs/fernweh/build.md) and [the upstream contribution workflow](docs/fernweh/upstreaming.md).
 The latter covers preparing small PLANK contributions without requiring our broker
-or infrastructure. Keep these review repositories private until publication is authorized.
+or infrastructure. Source audit and visibility are recorded in
+[the publication receipt](docs/fernweh/review.md).
 The inherited contribution principles below still apply; references to Windows as
 a future upstream product do not describe Fernweh's existing Windows ALPHA client.
 

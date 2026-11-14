@@ -1,4 +1,4 @@
-# Private review status
+# Source review and publication record
 
 Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE
 Fernweh as an enhanced PLANK fork. No new release version, binary asset, feed
@@ -12,8 +12,8 @@ publication, installed app or service deployment is part of this task.
   and [broker/Host integration](broker.md).
 - [Claude/Codex development](development.md), [upstream contribution workflow](upstreaming.md)
   and [ancestry/license provenance](provenance.md).
-- The parent `.gitmodules` pins private Fernweh components. Existing public
-  nested dependencies remain unchanged.
+- The parent `.gitmodules` pins Fernweh component repositories. Existing
+  public nested dependencies retain their provenance.
 
 ## Verification receipt
 
@@ -61,9 +61,11 @@ Cross-platform product builds, signed installers and live streaming are not
 implied by source/configuration tests. Existing BDE release notes retain their
 original scope and do not qualify bytes built from this repository.
 
-## Before public visibility
+## Initial publication requirements (historical)
 
-Keep all three maintained repositories private until Finn explicitly approves.
+The initial preparation required keeping maintained repositories private until
+Finn explicitly approved publication. That authorization was given on 14 November;
+the subsequent audit is recorded below. The original requirements were:
 Review the full reachable histories and hosting metadata for secrets and private
 operational information, including binary screenshots and every maintained
 submodule; current-tree checks are insufficient. Verify license notices and
@@ -174,3 +176,56 @@ real TLS/QUIC display-lease recovery and three-peer shared-desktop checks; its
 administrator-only handoff fixture then stops because this runner has no
 passwordless sudo. That remaining fixture is not reported as passed. Privacy,
 local Markdown targets and 13 build-configuration regressions pass.
+
+## 14 November: developer documentation and publication audit
+
+Finn authorized publication after checking Git and its history. The README now
+uses developer-oriented descriptions and includes knocking/owner consent,
+view/control roles, multi-user sharing, independent workstation sessions,
+presence, files/folders, clipboard grants and recovery, support policies and
+smaller reliability fixes. [The implementation map](enhancements.md) provides
+source/contract boundaries; [the history index](merged-history.md) verifies
+232 original merged reviews by reachable merge/source-head ancestry, plus
+10 post-import Fernweh reviews. Imports/releases/tests are labeled as such,
+not counted as distinct downstream features. Existing real QML screenshots
+retain their fictional-data provenance.
+
+Publication audit scope: `fernweh`, `fernweh-client`, `fernweh-host-linux` and
+`fernweh-common-c`, including advertised branches/tags and PR head/merge refs.
+Each repository was audited separately; gitlinks do not substitute for scanning
+the nested histories. Inherited public dependencies retain their pinned sources.
+The native-input repository main supports the unfinished coordinated upgrade;
+it is not the current Client main pin.
+
+- Gitleaks **8.30.1**, default rules plus the repository SSH-password rule,
+  all-history patches, no baseline/local ignore suppression, and inline allow
+  comments ignored. Reports were redacted and retained outside Git.
+- An independent object pass scanned every reachable blob, commit message and
+  annotated-tag object: **11,770 commit objects and 34,679 blob objects** across
+  the four repositories, approximately **1.67 GB** of content. It also checked
+  credential literals/URLs, private-key markers, LFS pointers, private filenames
+  and documentation/deployment identifier heuristics. No LFS pointers were found.
+- The seven historical patch findings resolve to Client loopback TLS test-key
+  material and a synthetic GSSAPI token, inherited Sunshine test/pairing/demo
+  keys, and a placeholder curl authentication example. The object pass sees
+  repeated versions of the same material; three additional Sourcegraph-rule
+  hits are audit-generated object SHA markers, not source credentials. No broad
+  test-directory allowlist was introduced.
+- Identifier findings were reviewed as synthetic network/RP validation tests,
+  inherited software-version strings, canonical address ranges and upstream
+  Docker/configuration examples. No unresolved operational inventory finding
+  remains in the publication scope.
+- Binary inventory and provenance were checked. Client historical libraries,
+  translations and shaders and Host fonts/images are inherited upstream objects;
+  downstream Client icons/screenshots, Host EDID fixture and parent media were
+  reviewed separately. Screenshot accounts/hosts are fictional or loopback data.
+- GitHub-visible PR/issue bodies, comments and release metadata passed separate
+  secret and privacy scans. Authenticated API-only temporary clone credentials
+  were excluded from that public-metadata input. The repositories have no wiki,
+  release assets or Actions artifacts. Hosted Actions remain disabled.
+
+No unresolved credential findings remain in the reviewed scope. This audit does
+not change runtime trust, claim new hardware qualification or certify a new
+binary release. Private reports, source excerpts and credentials are not
+published. Visibility changes and final anonymous-access verification are
+recorded below after execution.

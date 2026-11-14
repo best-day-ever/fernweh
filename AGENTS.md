@@ -4,11 +4,11 @@
 > instinctual/PLANK. Read `docs/fernweh/development.md` for current repositories,
 > configuration and verification, and `docs/fernweh/upstreaming.md` when preparing
 > a contribution. The inherited guidance below defines media/security contracts;
-> `HANDOFF.md` describes upstream history, not this private review's release status.
+> `HANDOFF.md` describes upstream history, not this fork's release status.
 > No BDE infrastructure, memory server, signing account or credentials are required
 > for source development. Repository skills live in `.agents/skills/` (Codex) and
-> `.claude/skills/` (Claude Code). Keep the review repositories private until Finn
-> explicitly authorizes publication. Creating this fork does not authorize deployment.
+> `.claude/skills/` (Claude Code). Repository visibility is recorded in `docs/fernweh/review.md`.
+> Publication does not authorize deployment or upstream submissions.
 
 ## Mac Client compatibility scope
 
