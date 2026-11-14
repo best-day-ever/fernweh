@@ -40,6 +40,7 @@ python3 "$source_root/tests/packaging/test-macos-fullscreen.py" "$source_root"
 mkdir -p "$build/tests"
 run_shared_client_test() {
     local suite=$1
+    shift
     mkdir -p "$build/tests/$suite"
     (
         cd "$build/tests/$suite"
@@ -52,7 +53,7 @@ run_shared_client_test() {
             PLANK_QT_SESSION_CAPTURE_DIR="${PLANK_ARTIFACT_ROOT:-$build}/qualification/mac-qt-session" \
             PLANK_REPO_ROOT="$source_root" PLANK_CLIENT_SOURCE="$client" \
             PLANK_PASSKEY_HELPER="$build/app/plank-client.app/Contents/MacOS/plank-passkey" \
-            QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "./$suite"
+            QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "./$suite" "$@"
     )
 }
 # These small policy/network fixtures need no application objects; fail early.
@@ -64,6 +65,14 @@ run_shared_client_test deployment
 run_shared_client_test plankclientpolicy
 run_shared_client_test internetconnectivity
 run_shared_client_test macqtsession
+run_shared_client_test qtinputruntime pointerDragHasOrderedDeltasAndAuthoritativeEnd \
+    pointerEndDefersInputWithoutLosingNextClick pointerFocusCancellationReleasesAndIgnoresLateAck \
+    pointerMultipleButtonsShareOneCaptureAndWheelRemainsOrdered immersiveModeCanRestartWhileEndAckIsDelayed \
+    immersiveEndKeepsModifiersClicksAndWheelInOrder immersiveTabletCancellationPreservesHeldKeyboardModifiers \
+    immersiveActivationDuringNormalDragDoesNotStartOrCancelThatDrag \
+    immersiveFailedRestartDiscardsDeferredInputAndReanchorsOnlyOnce \
+    immersiveRawTabletHandoffOrdersCancelBeforeReportAndExcludesNewBegin \
+    immersiveBeginDoesNotSplitRawTabletReportEnqueue
 bash "$source_root/scripts/test/test-macos-qt-metal.sh" "$source_root" "$build/tests/qt-metal"
 xcrun clang++ -std=c++17 -include arm_acle.h -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -Wextra -Werror \
     -F"$PLANK_QT_ROOT/lib" -I"$client/app" "$source_root/tests/packaging/macos-client-paths.cpp" \

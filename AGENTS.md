@@ -74,10 +74,14 @@ private denylist handling and publication limitations. Never print secret matche
 in tool output, reports, commit messages or CI logs.
 
 The Linux product input scope is keyboard, absolute-position mouse with buttons
-and scrolling, normalized pen-tablet fallback, and raw-HID Wacom forwarding.
+and scrolling, negotiated immersive mouse capture, normalized pen-tablet fallback,
+and raw-HID Wacom forwarding. On 13 November 2026 the operator explicitly requests
+a session-wide Immersive mouse mode toggle for 3D tools and games. It carries
+unaccelerated pixel movement until released, with ordered pointer resynchronization;
+ordinary pointing remains absolute. Keep its activation in the live session,
+with an always-available release shortcut, rather than a persisted global mode.
 Do not restore gamepad/controller support, direct generic-touchscreen
-forwarding, touchscreen-as-trackpad emulation, or a relative/absolute mouse
-mode preference. Physical Wacom touch interfaces remain part of raw-HID Wacom
+forwarding or touchscreen-as-trackpad emulation. Physical Wacom touch interfaces remain part of raw-HID Wacom
 device forwarding and are distinct from generic direct-touchscreen input.
 
 UPnP/NAT traversal is not a PLANK capability. Do not restore the
@@ -134,6 +138,14 @@ Mac, Apple Silicon, SDK27 or newer and deployment target15.0. See
 permission to compile Linux packages on the Mac or restore inherited prebuilts.
 
 Builder and hardware-test roles are deliberately separate:
+
+**BDE operator override,13 November2026:** the physical canary is explicitly
+authorized for native Linux Host compilation, packaging and tests. This
+supersedes the builder-only restrictions below for that target. Do not use a
+Rocky/OrbStack VM on the operator's local MacBook for Linux builds. Preserve the
+canary's existing desktop, farm services and platform/driver pins; use clean
+source snapshots and the same pinned build dependencies. Mac Client builds
+remain native macOS work. See `docs/bde/agents.md`.
 
 The Ubuntu Client uses the Qt session frontend and direct PipeWire playback
 under the ordinary `plank-client` identity. Build and test it on GitHub-hosted

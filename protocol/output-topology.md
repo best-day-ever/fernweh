@@ -41,6 +41,7 @@ The host returns `schema_version: 13` and a numeric `feature_flags` field from
 - `0x8000000` — display arrangements: up to four desktop outputs of any size in client positions, with host-resolved physical/virtual backing; see "Display arrangement extension" (Linux Host)
 - `0x10000000` — negotiated virtual primary connector order (Linux Host)
 - `0x20000000` — owner-consented desktop collaboration with Host-enforced viewer/controller permissions; see [collaboration](collaboration.md) (Linux Host)
+- `0x40000000` — optional [immersive mouse capture](immersive-mouse.md) with ordered pixel deltas and completion acknowledgement (X11 Linux Host)
 
 ### Expected desktop handoff status
 

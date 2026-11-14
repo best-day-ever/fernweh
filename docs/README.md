@@ -18,6 +18,8 @@ upstream-only scope, the Fernweh platform matrix takes precedence for this fork.
   main-window connectivity checks and administrator-controlled targets.
   [Mac remote audio output](user/macos-audio-output.md) explains PLANK Output,
   volume controls and restoration of local playback.
+  [Immersive mouse](user/immersive-mouse.md) covers pointer capture for 3D tools
+  and games, its release shortcut and the current candidate scope.
 - [Architecture](architecture/): media, input, authentication and lifecycle.
 - [Development](development/): platform matrix, acceptance, build runbooks and plans.
   [macOS 15 integration review](development/macos15-integration-review.md)
