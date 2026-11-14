@@ -1,8 +1,8 @@
 {
   "format_version": 1,
   "prepared_on": "2026-11-13",
-  "status": "private-source-review",
-  "source_fork_note": "Preserved Git ancestry; independent private repositories, not GitHub public-fork network members.",
+  "status": "public-source",
+  "source_fork_note": "Preserved Git ancestry; independent public source repositories, not GitHub native-fork network members.",
   "components": [
     {
       "path": ".",
@@ -20,7 +20,7 @@
       "import_commit": "1f5167e9bcfff6a726cfd1071f4ad114c93495e7",
       "upstream": "https://github.com/instinctual/plank-client",
       "comparison_merge_base": "7edb5c3b1d50765afeca2d93c9dca6293d54606c",
-      "review_commit": "20ca1fbfadaf79ab2ab141f10a80c236b10dab9f"
+      "review_commit": "98378b998ebaae376a412ac1acc1754cc6f1309f"
     },
     {
       "path": "apps/host/linux",
@@ -29,7 +29,7 @@
       "import_commit": "fb3a689618093e345908945a90cf226d93cc67d7",
       "upstream": "https://github.com/instinctual/plank-host-linux",
       "comparison_merge_base": "65dc0f1be60fe78d0457364f83813118c70bc8a8",
-      "review_commit": "ca113b5b9e1155f8a4d73c7711e52452a49a7a21"
+      "review_commit": "663cc6ae2b044ed30468fb1a66468679c3de5ba4"
     },
     {
       "path": "third_party/kyber-kymux",
@@ -43,5 +43,14 @@
     }
   ],
   "review_updated_on": "2026-11-14",
-  "integration_ledger": "docs/fernweh/upstream-integration-2026-11-14.md"
+  "integration_ledger": "docs/fernweh/upstream-integration-2026-11-14.md",
+  "published_on": "2026-11-14",
+  "additional_review_repositories": [
+    {
+      "repository": "https://github.com/best-day-ever/fernweh-common-c",
+      "review_commit": "9ade59ab32f88c0724c06710afe05237337d336d",
+      "purpose": "Preserved input source for the draft coordinated upgrade; not the current Client main pin."
+    }
+  ],
+  "publication_receipt": "docs/fernweh/review.md"
 }
