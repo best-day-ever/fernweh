@@ -103,3 +103,28 @@ Windows/Linux builds, installed sessions and signed distribution are unrun.
 No deployment, public visibility change or binary release is part of this work.
 
 Client change [PR2](https://github.com/best-day-ever/fernweh-client/pull/2) is merged with preserved history as `19adb7e8247da99f5dbe5c2e99e4f5b3d0560bb7`; the parent pins that exact commit.
+
+## 14 November: feature showcase and upstream review
+
+The root README now presents the display matcher, creative input, specific
+reliability fixes, optional studio access, build choices and contribution path.
+Two screenshots render the actual pinned Client's overview/advanced QML using
+fictional display data, with capture source and provenance in [media](media/README.md).
+Both complete pages were visually checked. This does not run a real session.
+
+The [upstream comparison](upstream-review-2026-11-14.md) uses fresh parent,
+Client and Linux Host `main` fetches, inspects the relevant diffs and current
+Fernweh call sites, and prioritizes missing recovery/request/backpressure work.
+Exact 60 Hz timing is attributed upstream. Immersive mouse is explicitly under
+review in separate BDE PRs and is not represented as included at the current pin.
+No product source, dependency pin, runtime service or repository visibility is
+changed by this documentation work.
+
+The capture program builds and renders both pages without QML warnings. A
+GitHub-Markdown preview passes at 1440px desktop and 390px phone widths, in
+light/dark themes, with all images loaded, jump links resolved and no page
+overflow or JavaScript errors. Local document links/anchors and the ancestry
+of cited included implementations pass; PNG metadata, SVG syntax, shell syntax,
+changed-content privacy and whitespace checks pass. The bde-linux repository
+gate passes with its existing lint advisories. Product builds were not repeated
+for this documentation-only change.

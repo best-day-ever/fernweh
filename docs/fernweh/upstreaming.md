@@ -5,6 +5,8 @@ acceptance; a downstream feature list is not an agreement to merge it. Start
 with a small generic fix or a clearly bounded optional capability and describe
 the user's observable problem. Attribute original authors and retain license
 notices. Check current upstream first: it may already have an equivalent fix.
+The [14 November 2026 comparison](upstream-review-2026-11-14.md) records a
+source-checked starting point, including upstream repairs still missing here.
 
 ## Private source fork and GitHub fork metadata
 

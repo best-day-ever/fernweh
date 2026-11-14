@@ -3,6 +3,8 @@
 | Need | Guide |
 | --- | --- |
 | Understand the changes over upstream PLANK | [Enhancement map](enhancements.md) |
+| See the display matcher and advanced layout UI | [Screenshots and capture source](media/README.md) |
+| Compare current PLANK fixes with this fork | [14 November upstream review](upstream-review-2026-11-14.md) |
 | Build a Client, Host or broker | [Build guide](build.md) |
 | Set broker address, trust, realm and update policy | [Configuration](configuration.md) |
 | Integrate FreeIPA, broker, relay and Hosts | [Broker integration](broker.md) |

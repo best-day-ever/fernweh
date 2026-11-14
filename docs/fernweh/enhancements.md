@@ -10,6 +10,111 @@ Compare a component with its recorded merge base in
 [the source manifest](source-manifest.json), not with a moving upstream `main`.
 Later upstream PLANK releases may already contain an equivalent solution.
 
+For a visual introduction, start with the [README](../../README.md). For the
+current integration gaps, read the [14 November upstream review](upstream-review-2026-11-14.md).
+The sections below distinguish source included in the pinned build from work
+still under review.
+
+## Display matching and recovery
+
+The profile-based matcher adds a preview of local screens and their remote
+physical/virtual backing, per-screen participation and primary selection,
+Retina exact-pixel versus text-size choices, custom geometry and saved monitor
+sets. The advanced view adds hand placement with snapping and backing choices.
+The Client's `app/gui/DisplaySetupPanel.qml`, `DisplaySetupDialog.qml` and
+`DisplayAdvancedPage.qml` render the same `DisplayPlanner`/`DisplayProfile`
+model used at connection time. [Actual UI captures](media/README.md).
+
+Source entry points are Client commits
+[`a86eb36d`](https://github.com/best-day-ever/fernweh-client/commit/a86eb36d)
+(wizard/settings/banner),
+[`3534aa07`](https://github.com/best-day-ever/fernweh-client/commit/3534aa07)
+(planner) and
+[`f604647a`](https://github.com/best-day-ever/fernweh-client/commit/f604647a)
+(per-display Mac windows). These build on PLANK display selection and matching;
+neither display matching nor virtual displays began with Fernweh.
+
+Layout recovery also retains the original arrangement snapshot until exact
+restoration succeeds, reserves verified virtual heads across connector changes,
+and positions boot outputs using native physical widths independently of their
+remote carrier mode. See [1.1.047](../releases/1.1.047.md) and Host regressions
+`test_display_lifecycle.cpp`, `test_display_inventory.cpp` and
+`test_display_metamode.cpp`.
+
+**Attribution for timing work:** exact 60 Hz virtual timings were implemented by
+upstream PLANK in
+[`3bf60106`](https://github.com/instinctual/plank/commit/3bf60106d48717bb17b1405f2ed54f06e3fb813b).
+Fernweh's later native-geometry/carrier separation and restoration work should
+be credited separately, rather than presenting the underlying timing fix as ours.
+
+### Windows display selection
+
+Client [`0d2746cb`](https://github.com/best-day-ever/fernweh-client/commit/0d2746cb)
+repairs a mismatch between stable GUI monitor keys and the SDL-derived identities
+used during streaming. A monitor disabled in setup could otherwise reappear in
+the Host request. Windows now uses GUI-probed identities, accepts unique native
+size matches when logical scaling differs and rejects ambiguous identities.
+`tests/displayplanner/test_displayplanner.cpp` covers the selected-monitor case.
+
+### Screen-change notices
+
+Client [`1f5167e9`](https://github.com/best-day-ever/fernweh-client/commit/1f5167e9)
+honors ask-on-change, separates applied and observed geometry, remembers Keep
+for the session, and restores ordinary toolbar idle hiding. Returning to the
+applied arrangement can restore Client windows without reconfiguring the Host.
+Regressions live in `tests/displayplanner` and `tests/planktoolbar`. This source
+repair does not establish a particular user's physical display-event cause.
+
+## Input for creative work
+
+The included Mac immersive **keyboard** mode forwards ordinary shortcuts while
+the stream has focus; local disconnect/toolbar controls are reserved before
+remote enqueue. First-click handling, drawable-based pointer mapping and
+cross-screen dragging are separate improvements. Source:
+[`6432305d`](https://github.com/best-day-ever/fernweh-client/commit/6432305d),
+[`b8b46d0b`](https://github.com/best-day-ever/fernweh-client/commit/b8b46d0b),
+[`0e205292`](https://github.com/best-day-ever/fernweh-client/commit/0e205292) and
+[`9882081d`](https://github.com/best-day-ever/fernweh-client/commit/9882081d).
+[Keyboard behavior](../releases/1.1.003.md), [reserved controls](../releases/1.1.043.md).
+
+Linux wheel fixes select one XInput pointer for motion/scrolling and retain the
+first notch across pointer sources: Host
+[`19214c4d`](https://github.com/best-day-ever/fernweh-host-linux/commit/19214c4d)
+and [`a82acd13`](https://github.com/best-day-ever/fernweh-host-linux/commit/a82acd13).
+These do not imply complete tablet/device parity across platforms.
+
+### Immersive mouse: under review, not pinned here
+
+The separate session-wide mouse-capture feature targets tools that hide/wrap
+the pointer, including Blender and Unreal. It adds explicit enter/release with
+a toolbar button or Ctrl+Alt+Shift+M, ordered relative pixel movement, and
+completion acknowledgement. The initial Host scope is Linux X11; Mac/Windows
+Client support is part of that development work. It is distinct from the saved
+immersive keyboard preference.
+
+On 14 November 2026,
+[Client PR78](https://github.com/best-day-ever/plank-client/pull/78) and
+[parent PR137](https://github.com/best-day-ever/plank/pull/137) are **open**.
+Reviewed branch tips are Client `868cd362115324d21bc8fb800566a39fc3a90a30`
+and parent `9cc35584b0c65e0a356291b584c82df326e69c3f`; neither is the pinned
+Fernweh build. Integration must carry Client, common-C, Host, virtual-input
+and protocol changes together. Source presence on that branch is not release
+or physical-session acceptance.
+
+## Crash, recovery and pacing repairs
+
+| Repair included here | Source and regression evidence |
+| --- | --- |
+| Keep direct CUDA/NVENC teardown on its owning thread; retain context references; drain failed conversions before borrowed frames can be released | Host [`ee8f12b6`](https://github.com/best-day-ever/fernweh-host-linux/commit/ee8f12b6), [`e8edfce2`](https://github.com/best-day-ever/fernweh-host-linux/commit/e8edfce2); `CudaPrimaryContext`/`CudaStreamWork` tests; [lifetime contract](../development/nvenc-cuda-lifecycle.md) |
+| Retry Windows receiver recovery after a lost keyframe response; avoid blocking presentation and hardware-frame release under the pacer lock | [1.2.33](../releases/1.2.33.md); Client native recovery/pacer/presentation suites |
+| Bound Host packet bursts using selected bitrate, encoder peak and capped scheduler credit | [1.2.32](../releases/1.2.32.md), [pacing contract and tests](../development/bitrate-pacing.md); downstream Quinn patch |
+
+The new upstream NVENC refresh scheduler and reliable-data backpressure repair
+address **other** failure paths. These downstream repairs do not subsume them;
+see the [comparison](upstream-review-2026-11-14.md).
+
+## Component and contribution map
+
 | Downstream area | Source / contract | Integration and limits | Upstream contribution unit |
 | --- | --- | --- | --- |
 | Access broker and scoped relay | `apps/broker/src/{broker,api,hbac,relay}.rs`, [API](../../apps/broker/README.md) | Linux service, FreeIPA/Kerberos + explicit HBAC; no arbitrary LDAP/OIDC backend claimed | Optional broker, adapter contracts and tests |
