@@ -600,6 +600,12 @@ mod tests {
                         PLANK_TRANSPORT_OK
                     );
                 }
+                if host.shared.setup_mode {
+                    wait_state(&host, EndpointState::SetupReady).await;
+                    wait_state(&client, EndpointState::SetupReady).await;
+                    assert_eq!(plank_transport_native_endpoint_authorize_session(&mut *host), PLANK_TRANSPORT_OK);
+                    assert_eq!(plank_transport_native_endpoint_authorize_session(&mut *client), PLANK_TRANSPORT_OK);
+                }
                 wait_state(&host, EndpointState::Ready).await;
                 wait_state(&client, EndpointState::Ready).await;
                 assert_eq!(

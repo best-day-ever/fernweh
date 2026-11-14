@@ -1113,10 +1113,10 @@ cmake --build "$build_dir" --parallel "$build_jobs" \
   cargo test --locked --offline --release --features "$plank_transport_cargo_features" \
     --manifest-path "$plank_transport_dir/Cargo.toml"
   cargo test --locked --offline --release \
-    --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+    --manifest-path "$repo_dir/third_party/quinn-proto-0.11.19/Cargo.toml" \
     --lib connection::pacing
   cargo test --locked --offline --release \
-    --manifest-path "$repo_dir/third_party/quinn-proto-0.11.17/Cargo.toml" \
+    --manifest-path "$repo_dir/third_party/quinn-proto-0.11.19/Cargo.toml" \
     --lib tests::plank_pacing_cap_bounds_encrypted_datagram_bursts -- --exact
   PLANK_TRANSPORT_CARGO_FEATURES="$plank_transport_cargo_features" SC_NATIVE_CARGO_PROFILE=release \
     bash "$repo_dir/scripts/test/run-plank-transport-native-loopback.sh"
