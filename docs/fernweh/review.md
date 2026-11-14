@@ -128,3 +128,49 @@ of cited included implementations pass; PNG metadata, SVG syntax, shell syntax,
 changed-content privacy and whitespace checks pass. The bde-linux repository
 gate passes with its existing lint advisories. Product builds were not repeated
 for this documentation-only change.
+
+
+## 14 November: source merges and focused upstream repairs
+
+The original immersive chain is merged in its five BDE component/parent PRs;
+parent `54ee7b9c` pins the actual merged Client and Host revisions. Private
+Fernweh Client PR3 / Host PR4 integrate those changes while preserving broker
+configuration and the prior fork fixes. Client PR4 adds retiring-session retries;
+Host PR5 adds coalesced NVENC refresh requests, request/audio bounds, mapped-key
+cleanup and non-finite pen rejection. Current component review SHAs are recorded
+in the manifest. Merge commits remain intact.
+
+The parent backports reliable-data backpressure without changing its transport
+versions, plus PLANK 1.4.18 Mac display wake / incomplete-first-setup recovery.
+Transport unit/wire results: 72+6 pass. Encrypted functional connections: 11 pass,
+including reliable bursts in both directions, sharing, authorization,
+cancellation, microphone and camera. Mac wake recovery: 37 checks; readiness: 378
+checks across 9 cases; authenticated topology/retry/timeout checks pass. The
+changed Mac Session compiles with SDK 27 and deployment target 15.0; its existing
+bounded/continuous/status reconnect policy fixture passes. These focused ports
+have not been built into a new signed package or deployed.
+
+The standard Mac packaging script still selects the SDL frontend. The merged
+immersive source currently requires the Mac Qt frontend and Linux X11 Host;
+turning it on in the standard build requires display/clipboard/sharing parity.
+Installed Blender/Unreal acceptance is still open. The wholesale 1.4.18 upgrade
+remains an unfinished private integration branch. The
+[integration ledger](upstream-integration-2026-11-14.md) lists its blockers and
+release coverage; this receipt does not claim that every upstream change landed.
+
+Generic default-branch dependency proposals that discard PLANK native input were
+rejected. The GoogleTest proposal was a verified 1.17.0→1.14.0 downgrade and was
+rejected. The upload-artifact 7.0.2 SHA matches its official tag. A fourth private
+repository, `fernweh-common-c`, preserves the combined input-library source for
+the future coordinated upgrade; its 8 C tests pass. Current focused builds retain
+the earlier native library pin. All review repositories remain private, hosted
+Actions are disabled, and no binary, feed, fleet pin or runtime service changes.
+
+The native Linux Host builds successfully: 106 focused cases pass, with 3 kernel
+UHID cases skipped. The two HTTPS regressions pass separately with an ephemeral
+loopback TLS identity. A shuffled 25-run input/pointer/context/scheduler repeat
+passes 54 cases per run, with 2 UHID skips per run. The Mac preview gate reaches
+real TLS/QUIC display-lease recovery and three-peer shared-desktop checks; its
+administrator-only handoff fixture then stops because this runner has no
+passwordless sudo. That remaining fixture is not reported as passed. Privacy,
+local Markdown targets and 13 build-configuration regressions pass.

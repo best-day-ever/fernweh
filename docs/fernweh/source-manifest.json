@@ -20,7 +20,7 @@
       "import_commit": "1f5167e9bcfff6a726cfd1071f4ad114c93495e7",
       "upstream": "https://github.com/instinctual/plank-client",
       "comparison_merge_base": "7edb5c3b1d50765afeca2d93c9dca6293d54606c",
-      "review_commit": "19adb7e8247da99f5dbe5c2e99e4f5b3d0560bb7"
+      "review_commit": "20ca1fbfadaf79ab2ab141f10a80c236b10dab9f"
     },
     {
       "path": "apps/host/linux",
@@ -29,7 +29,7 @@
       "import_commit": "fb3a689618093e345908945a90cf226d93cc67d7",
       "upstream": "https://github.com/instinctual/plank-host-linux",
       "comparison_merge_base": "65dc0f1be60fe78d0457364f83813118c70bc8a8",
-      "review_commit": "cc51fa3e965706cef016d2498d16649fe9c5ee96"
+      "review_commit": "ca113b5b9e1155f8a4d73c7711e52452a49a7a21"
     },
     {
       "path": "third_party/kyber-kymux",
@@ -39,8 +39,9 @@
     {
       "path": "apps/client/moonlight-common-c/moonlight-common-c",
       "repository": "https://github.com/best-day-ever/plank-common-c",
-      "pinned_commit": "7660c2cae7ee315b6eae47e35c93efe4d32672b9"
+      "pinned_commit": "bc38a07b47beaf598d41131a415ee63629ea6e6f"
     }
   ],
-  "review_updated_on": "2026-11-14"
+  "review_updated_on": "2026-11-14",
+  "integration_ledger": "docs/fernweh/upstream-integration-2026-11-14.md"
 }

@@ -106,7 +106,7 @@ scroll-wheel device handling. Tablet paths remain platform-specific; see the
 On Mac, use **Control + Option + Shift**. Disconnect and toolbar controls remain
 local during immersive keyboard capture, including while reconnecting.
 
-### In development: immersive mouse for Blender and similar tools
+### Merged source: immersive mouse for Blender and similar tools
 
 Applications that hide or wrap the pointer need more than ordinary desktop
 pointing. Our **immersive mouse** work adds an explicit session toggle for
@@ -114,11 +114,12 @@ continuous relative movement, with a toolbar action and
 **Ctrl + Alt + Shift + M** to enter or release capture. It is designed for tools
 such as Blender and Unreal, rather than an application-specific workaround.
 
-**This feature is not in this repository's pinned build yet.** The implementation
-is under review in [Client PR #78](https://github.com/best-day-ever/plank-client/pull/78)
-and [integration PR #137](https://github.com/best-day-ever/plank/pull/137), with
-matching protocol/Host work. Its initial target is a Linux X11 Host. We will
-move it into the included list when those components are integrated and checked.
+The coordinated Client, Host, input library and protocol source is now merged.
+Its current path is the **Mac Qt Client → Linux X11 Host**. The standard Mac
+packaging script still selects the established SDL frontend; enabling this mode
+in that default build awaits the Qt adapter's display/clipboard/sharing parity.
+Blender/Unreal hands-on acceptance is also open. See the
+[integration status](docs/fernweh/upstream-integration-2026-11-14.md).
 
 ## The fixes that make a difference
 
@@ -138,6 +139,19 @@ These are scoped fixes, not a promise that every crash or network freeze is
 solved. The [enhancement map](docs/fernweh/enhancements.md) links implementation
 commits and regression coverage. Exact 60 Hz virtual timings themselves are
 inherited PLANK work; we credit that separately from our layout corrections.
+
+## Keeping up with PLANK
+
+We reviewed PLANK's recent releases through **1.4.18** and brought its independent
+reliability fixes into this fork: queued NVENC refreshes, retiring-session retries,
+bounded control requests, cancellable Linux audio, reliable-data backpressure and
+Mac display wake recovery. The input boundary tests also exposed a missing
+non-finite pen-coordinate check, which is now repaired.
+
+The larger frontend and dependency migration remains separate because it must
+preserve Fernweh's display profiles, shared sessions, file clipboard and Windows
+path. The [release-by-release ledger](docs/fernweh/upstream-integration-2026-11-14.md)
+records what landed, the evidence, and what is still outstanding.
 
 ## Studio access, when you want it
 
