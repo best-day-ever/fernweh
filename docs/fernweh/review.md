@@ -267,3 +267,29 @@ A separate deployment-identifier check of the archived logs also has zero
 matches. These are dependency-update records, not product build qualification.
 There are still no Actions artifacts, and Actions remain disabled. Private
 copies of the raw records/logs stay with the external publication audit.
+
+## 14 November: Windows port credit and implementation catalogue
+
+The README now identifies the Windows Client port as a first-class downstream
+addition, using Moonlight Qt's Windows foundation. Original Client `57932ae7`
+adds native MSVC transport/build integration, DPAPI broker storage and graphics/
+display changes; parent `97ff1875` adds build/dependency/staging scripts and
+`6471486a` adds the WiX MSI. Current platform, contribution and source-build guides
+no longer call the implemented Windows Client future work.
+
+The [detailed catalogue](change-catalogue.md) and JSON evidence separate 191
+change records across 15 areas with 262 implementation references. This includes
+the original optional Mac normalized-pen adapter and smaller fixes inside PRs.
+The source walk covers 611 non-merge commits outside recorded upstream tips;
+it includes docs/tests/imports/repeated patches and is not a feature count or
+an authorship claim. The existing 232-review index remains complementary.
+
+Validation: all 262 source references are ancestors of the recorded snapshots;
+232 original review references and local documentation links/anchors pass. Representative
+port/enrollment/rendering changes were inspected in source. Actual GitHub
+README renders pass desktop/mobile and light/dark checks; the catalogue renders
+all 15 tables on mobile with resolved anchors and no article overflow. Images
+load and the desktop/mobile pages were visually checked. Privacy, commit and
+whitespace checks pass; the bde-linux repository gate passes with existing
+lint advisories. Product builds are not repeated for this documentation-only
+change. No product source, dependency pin, workflow setting or binary changes.

@@ -1,7 +1,8 @@
 # Fernweh changes: implementation map
 
 This document describes downstream behavior at the component pins in
-[source-manifest.json](source-manifest.json). The [merged-history index](merged-history.md)
+[source-manifest.json](source-manifest.json). The [detailed change catalogue](change-catalogue.md) separates individual fixes
+and implementation commits. The [merged-history index](merged-history.md)
 contains the individual reviews, source commits, upstream imports and follow-up
 fixes. It is deliberately broader than the README's feature summary.
 
@@ -16,6 +17,24 @@ account authentication, display selection and tablet forwarding. Changes to
 those systems are credited as extensions or repairs. The later PLANK integration
 is tracked in the [current ledger](upstream-integration-2026-11-14.md), separately
 from the [earlier comparison](upstream-review-2026-11-14.md).
+
+## Windows Client port
+
+Fernweh brought up a Windows x64 Client for the PLANK stack, building on the
+Windows foundation inherited from Moonlight Qt. Client
+[`57932ae7`](https://github.com/best-day-ever/fernweh-client/commit/57932ae7f4b2e84a75adb601a338547d6ffdda33)
+integrates the MSVC native transport, required header/library checks, Win32
+link/build changes, DPAPI broker session storage and graphics/display adaptation.
+Parent [`97ff1875`](https://github.com/best-day-ever/fernweh/commit/97ff1875)
+adds the native build, dependency setup and staging scripts;
+[`6471486a`](https://github.com/best-day-ever/fernweh/commit/6471486a)
+adds WiX MSI packaging. These correspond to original Client34/35 and parent49/50.
+
+This is larger than the later clipboard/tablet adapters or updater repairs.
+The [Windows catalogue](change-catalogue.md#windows-client-port-and-native-integration)
+tracks the port and follow-up work individually. Current Windows remains an
+ALPHA Client product; SDK/signing and each candidate's physical acceptance stay
+explicit. Fernweh does not claim to have originated Moonlight's Windows code.
 
 ## Shared desktops and knocking
 
@@ -124,6 +143,7 @@ any particular user's physical display event.
 | Reserve local disconnect/toolbar/keyboard release ahead of remote capture | Client [52](https://github.com/best-day-ever/plank-client/pull/52); `tests/sessionhotkeys`; [1.1.043](../releases/1.1.043.md) | Ctrl+Alt+Shift+Q / T / Z (Control+Option+Shift on Mac), including reconnect. |
 | Preserve initial click and drawable-based pointer coordinates | Client [14](https://github.com/best-day-ever/plank-client/pull/14), [37](https://github.com/best-day-ever/plank-client/pull/37); `9882081d`, `0e205292` | Letterboxing, packed outputs, per-monitor windows and display scaling require platform coverage. |
 | Close an active/reconnecting stream when its window closes | Client [43](https://github.com/best-day-ever/plank-client/pull/43) | Session teardown, not a hidden background stream. |
+| Add optional Mac SDL3 normalized pen with pressure/tilt and focus-scoped state | Client [`6319bc54`](https://github.com/best-day-ever/fernweh-client/commit/6319bc5428b0f07fc815ffc9489ceb1da18fc0c6); `app/streaming/input/macpen.h`, `tests/macpen` | Opt-in adapter; default raw-HID and physical device acceptance remain separate. |
 | Restore Mac raw-HID Wacom startup/pressure | Client [36](https://github.com/best-day-ever/plank-client/pull/36); [1.1.002](../releases/1.1.002.md) | Repairs inherited raw forwarding; does not originate Wacom support. |
 | Windows raw USB Wacom and Windows Ink normalized pen fallback | Client [49](https://github.com/best-day-ever/plank-client/pull/49); `docs/bde/windows-tablet.md` in Client | Pressure/tilt/eraser/buttons in fallback; pad/ring/touch depend on successful raw device forwarding and physical tests. |
 | Required virtual input readiness and first X11 wheel notch | Host [14](https://github.com/best-day-ever/plank-host-linux/pull/14), [26](https://github.com/best-day-ever/plank-host-linux/pull/26); `19214c4d`, `a82acd13` | Retry failed input-worker startup rather than presenting a video-only session. |
