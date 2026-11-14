@@ -77,7 +77,7 @@ acceptance remain separate; the retained Windows MSI tooling is ALPHA/unsigned.
 | Client sessions | Independent workstation windows, connected-person presence, explicit local controls and updater/session coordination |
 | Files and clipboard | Bidirectional files/folders, Mac file picker, Windows native adapters, separate account grants and transfer/ownership recovery |
 | Displays | Saved monitor sets, per-workstation profiles, physical/virtual backing, packed capture, primary selection, Retina/notch geometry and Apply/Keep lifecycle |
-| Input | Mac immersive keyboard, negotiated immersive mouse, first-click/coordinate repairs, Wacom startup and Windows tablet adapters |
+| Input | Mac immersive keyboard, negotiated immersive mouse, first-click/coordinate repairs, a Mac normalized-pen adapter, Wacom startup and Windows tablet adapters |
 | Shared Mac Hosts | Signed broker admission, concurrent desktop streams/audio taps, stable Host TLS identity and broker-aware display matching |
 | Capture and transport | NVENC bandwidth profiles, CUDA/NVENC lifetime fixes, idle capture suppression, bounded pacing and shared-listener isolation |
 | Recovery | Greeter/VT handoff, retained display snapshots, first-login modesets, stale callback/lease races and Windows video recovery |

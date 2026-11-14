@@ -1416,6 +1416,18 @@
     },
     {
       "area": "Creative input and local controls",
+      "kind": "Addition",
+      "change": "Add an opt-in Mac SDL3 normalized-pen adapter carrying pressure, tilt and focus-scoped pen state.",
+      "sources": [
+        {
+          "component": "Client",
+          "repository": "best-day-ever/fernweh-client",
+          "commit": "6319bc5428b0f07fc815ffc9489ceb1da18fc0c6"
+        }
+      ]
+    },
+    {
+      "area": "Creative input and local controls",
       "kind": "Fix",
       "change": "Restore raw-HID Wacom session startup after normalized pen support displaced it.",
       "sources": [

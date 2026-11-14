@@ -1,6 +1,6 @@
 # Detailed downstream change catalogue
 
-This catalogue separates **190 implementation/change records** across
+This catalogue separates **191 implementation/change records** across
 15 areas, including the Windows Client port and the smaller repairs
 that were previously compressed into broad feature rows. Records are not a
 count of distinct features or fixed bugs. Several records can belong to one PR,
@@ -190,6 +190,7 @@ Immersive mouse source is merged for Mac Qt Client→Linux X11 Host. Standard Ma
 | Fix | Map pointer input against the actual drawable used for letterboxing. | [Client b8b46d0b](https://github.com/best-day-ever/fernweh-client/commit/b8b46d0b2753dca6deedffd6e88d7cdc5f127916) |
 | Fix | Use decoded-frame geometry only for renderers that actually fit the decoded frame. | [Client d6273f5b](https://github.com/best-day-ever/fernweh-client/commit/d6273f5b82ba5d2be0bb77fdde9340e5e9977ebd) |
 | Addition | Add focus-bound Mac immersive keyboard capture and preserve the first click in the stream. | [Client 6432305d](https://github.com/best-day-ever/fernweh-client/commit/6432305d3828c54cf94622c254e43e80d250e864) |
+| Addition | Add an opt-in Mac SDL3 normalized-pen adapter carrying pressure, tilt and focus-scoped pen state. | [Client 6319bc54](https://github.com/best-day-ever/fernweh-client/commit/6319bc5428b0f07fc815ffc9489ceb1da18fc0c6) |
 | Fix | Restore raw-HID Wacom session startup after normalized pen support displaced it. | [Client 2d56b638](https://github.com/best-day-ever/fernweh-client/commit/2d56b63834f9f53857cf3b9dbf9c172792829e00) |
 | Fix | Fail Linux worker startup if the virtual keyboard or mouse cannot be created. | [Linux Host 9a5990d1](https://github.com/best-day-ever/fernweh-host-linux/commit/9a5990d163b7f77af274d9a143d8243d4a6593fb), [Linux Host d18e5eaa](https://github.com/best-day-ever/fernweh-host-linux/commit/d18e5eaa783410cb7b17b959a43a7ed02697a76c) |
 | Addition | Reserve a local toolbar shortcut and keep disconnect/toolbar actions above remote keyboard capture. | [Client 4aa46a10](https://github.com/best-day-ever/fernweh-client/commit/4aa46a100d9d602d5ba0b246c356e8f70421cee1), [Client 9882081d](https://github.com/best-day-ever/fernweh-client/commit/9882081d868e8dbd8493c3e249b7d1e6c1cb455c) |
