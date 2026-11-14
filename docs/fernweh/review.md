@@ -285,7 +285,7 @@ it includes docs/tests/imports/repeated patches and is not a feature count or
 an authorship claim. The existing 232-review index remains complementary.
 
 Validation: all 262 source references are ancestors of the recorded snapshots;
-232 original review references and 152 local links/anchors pass. Representative
+232 original review references and local documentation links/anchors pass. Representative
 port/enrollment/rendering changes were inspected in source. Actual GitHub
 README renders pass desktop/mobile and light/dark checks; the catalogue renders
 all 15 tables on mobile with resolved anchors and no article overflow. Images
