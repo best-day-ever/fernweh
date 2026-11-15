@@ -8,7 +8,7 @@ export CARGO_NET_OFFLINE=true
 python3 "$PLANK_SOURCE_ROOT/tests/network/test_datagram_sender.py"
 if [[ $role != macos-client ]]; then
   mkdir -p "$PLANK_WORK_ROOT"
-  CARGO_BUILD_JOBS=2 cargo test --locked --offline --release \
+  CARGO_BUILD_JOBS=2 cargo test --target-dir "$HOME/.cargo/shared-target" --locked --offline --release \
     --manifest-path "$PLANK_SOURCE_ROOT/third_party/quinn-udp-0.5.16/Cargo.toml" \
     --features plank-bounded-receive-buffer --test tests plank_receive_buffer -- --nocapture \
     2>&1 | tee "$PLANK_WORK_ROOT/quinn-udp-sockets.log"

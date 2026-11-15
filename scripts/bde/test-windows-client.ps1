@@ -22,7 +22,7 @@ $udpCommand = '@echo off' + "`r`n" +
     'cd /d "' + $SourceRoot + '"' + "`r`n" +
     'if errorlevel 1 exit /b 1' + "`r`n" +
     'set CARGO_BUILD_JOBS=2' + "`r`n" +
-    'cargo test --locked --offline --release --manifest-path "' + $SourceRoot + '\third_party\quinn-udp-0.5.16\Cargo.toml" --features plank-bounded-receive-buffer --test tests plank_receive_buffer -- --nocapture >"' + $udpLog + '" 2>&1' + "`r`n" +
+    'cargo test --target-dir "%USERPROFILE%\.cargo\shared-target" --locked --offline --release --manifest-path "' + $SourceRoot + '\third_party\quinn-udp-0.5.16\Cargo.toml" --features plank-bounded-receive-buffer --test tests plank_receive_buffer -- --nocapture >"' + $udpLog + '" 2>&1' + "`r`n" +
     'exit /b %ERRORLEVEL%' + "`r`n"
 [IO.File]::WriteAllText($udpRunner, $udpCommand, [Text.Encoding]::ASCII)
 cmd /c $udpRunner
