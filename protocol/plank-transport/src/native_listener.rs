@@ -277,6 +277,8 @@ impl Listener {
 
     fn connection_configuration(&self) -> Result<(quinn::ServerConfig, RatePolicyBinding)> {
         let mut transport = quinn::TransportConfig::default();
+        // Use the same bounded keyframe/FEC burst capacity as generic Kynet peers.
+        transport.datagram_send_buffer_size(kynet::quinn::DATAGRAM_SEND_BUFFER_BYTES);
         transport.max_idle_timeout(Some(self.options.idle_timeout.try_into()?));
         transport.keep_alive_interval(Some(self.options.keep_alive_interval));
         if self.options.max_udp_payload_size.is_some() {
