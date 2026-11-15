@@ -289,6 +289,50 @@ source/repair equivalence, reliable recovery and C ABI checks with
 `run-plank-transport-native-loopback.sh --functional-only`. The Linux builder
 continues to run the full suite, including performance.
 
+The Linux controlled-loss receiver fixture requires at least 4 MiB of effective
+`SO_RCVBUF` capacity on its three owned UDP sockets: client, server and proxy.
+It prints every actual capacity and stops before the timed matrix if any is
+smaller. This is a measurement prerequisite, not a Linux Host fleet policy or a
+product startup requirement. The Host generally sends media to Mac/Windows
+clients; a loopback receiver's limitation does not establish their requirements.
+The product's bounded 4 MiB request remains best-effort. Linux can clamp that
+request, and reports doubled bookkeeping capacity through `getsockopt`; see
+the [socket manual](https://man7.org/linux/man-pages/man7/socket.7.html).
+Inspect `sysctl net.core.rmem_max net.core.rmem_default` alongside the reported
+effective capacities before qualification. Build scripts never change them.
+A separately reviewed Linux fixture preparation may use `SO_RCVBUFFORCE` on
+only those three newly owned test sockets, requiring `CAP_NET_ADMIN`. Elevate
+only an explicitly selected trusted loopback test executable, never Cargo,
+the build, Host or runtime services. Keep the default/unprivileged path as an
+explanatory prerequisite failure. Record actual per-socket capacities and
+protected state; the sockets close with the fixture even after termination.
+Do not change global receive ceilings/defaults or grant persistent privileges.
+For this explicit fixture-only preparation, obtain the release unit-test ELF
+from Cargo's `--no-run --message-format=json` output for the exact source and
+shipping features, record its SHA-256, then run as the ordinary build user:
+
+```sh
+python3 scripts/test/run-linux-owned-socket-loss.py \
+  --plank-owned-socket-headroom --sha256 "$TRUSTED_TEST_SHA256" \
+  /absolute/transport-test-elf /absolute/loopback-cert.cnf
+```
+
+The runner verifies the selected ELF, makes a root-owned temporary copy and
+permits only the two exact VBR/CBR loopback tests, three trials each. It retains
+only four fixture environment inputs for those selected invocations; Cargo,
+compilation, packaging, installed Host and runtime services remain unprivileged.
+Each selected invocation has a fixed external TERM timeout of 120 seconds and
+KILL after 10 additional seconds. This bounds cleanup independently of the
+controller; the 100 ms frame deadlines and all measurement criteria remain unchanged.
+The trusted SHA identifies an operator-reviewed fixture artifact. Hash validation
+is not a privilege-delegation sandbox for untrusted executables. The runner
+changes no sudoers rules, setcap attributes or persistent privileges.
+A failed trial stops qualification without retry. Preserve the output and
+protected/global before-after state. After all six pass, the ordinary package
+gate can use the existing `SC_NATIVE_LOSS_ATTESTED_SHA256` input for that same
+compiled test ELF; the gate checks Cargo's exact artifact hash. This is prepared
+test-socket measurement, not the default Linux Client runtime or a fleet policy.
+
 The credential-free `dependency-tests / transport-macos` job exports
 `macos-transport-qualification-<run-id>`. Verify its source commit, Kymux pin,
 SHA-256 and `sender-timing` feature selection against the Mac Host candidate.
@@ -301,13 +345,16 @@ Preserve Terminal and active Host sessions, retain the report, and remove the
 temporary files. Package signing does not establish this performance gate or
 installed streaming acceptance; record both separately.
 
-Its dedicated test-only proxy reports
-the effective socket receive buffer and Linux per-socket kernel drops separately
-from deliberately injected loss. `controlled_loss_only=false` means extra local
-drops occurred (or the counter is unavailable on that OS); do not describe that
-run as an exact-loss measurement. A complete recovery pass still exercises at
-least the deliberate loss. Any frame failure remains a failure, regardless of
-proxy drops. Do not loosen assertions, add retries, tune machine-wide sysctls,
+Its dedicated test-only proxy reports the effective receive buffer and its own
+Linux kernel drops separately from deliberately injected loss.
+`proxy_controlled_loss_only` is scoped to that proxy. The Linux fixture also
+checks the exact three owned endpoint/proxy socket inodes: `owned_kernel_loss_free`
+describes only those kernel counters, not every QUIC/router/FEC loss layer.
+Unavailable counters remain unavailable on other OSes. Keep complete recovery,
+timing/FEC and kernel-loss evidence distinct; zero kernel drops do not establish
+frame recovery. Retain final metrics before rejecting a nonzero owned kernel
+drop count, and preserve every failed trial.
+Do not loosen assertions, add retries, tune machine-wide sysctls,
 or change product pacing/FEC/latency to hide a fixture limitation.
 
 For native transport lifecycle changes, run the Rust completion tests and the

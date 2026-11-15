@@ -425,6 +425,7 @@ dependencies = [
  "kymux-types",
  "kynet",
  "kyproto",
+ "libc",
  "quinn",
  "quinn-proto",
  "quinn-udp",

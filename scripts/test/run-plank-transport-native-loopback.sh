@@ -99,13 +99,12 @@ if [[ -n ${SC_NATIVE_LOSS_ATTESTED_SHA256:-} ]]; then
     echo "native loss attestation requires an x86_64 release build" >&2
     exit 1
   }
-  mapfile -t loss_test_binaries < <(find "${CARGO_TARGET_DIR:?}/release/deps" \
-    -maxdepth 1 -type f -name 'plank_transport-*' -perm -u+x)
-  [[ ${#loss_test_binaries[@]} == 1 ]] || {
-    echo "expected exactly one compiled plank-transport test executable" >&2
-    exit 1
-  }
-  actual_sha256=$(sha256sum "${loss_test_binaries[0]}")
+  # A shared target contains old profiles and worktrees. Bind attestation to
+  # Cargo's artifact for this exact source/profile/features, never cache age.
+  loss_test_binary=$(cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} \
+    --locked --offline --manifest-path "$crate_dir/Cargo.toml" --lib --no-run \
+    --message-format=json | python3 "$repo_root/scripts/test/cargo-transport-test-executable.py")
+  actual_sha256=$(sha256sum "$loss_test_binary")
   actual_sha256=${actual_sha256%% *}
   [[ $actual_sha256 == "$SC_NATIVE_LOSS_ATTESTED_SHA256" ]] || {
     echo "native loss attestation does not match the compiled test executable" >&2

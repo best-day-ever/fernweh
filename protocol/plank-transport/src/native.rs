@@ -1273,14 +1273,6 @@ mod tests {
         let endpoint_kernel_drops = endpoint_sockets
             .finish()
             .expect("failed to read loss-test endpoint kernel counters");
-        #[cfg(target_os = "linux")]
-        assert_eq!(
-            endpoint_kernel_drops,
-            Some(0),
-            "loss matrix included uncontrolled endpoint/proxy kernel drops"
-        );
-        #[cfg(not(target_os = "linux"))]
-        assert_eq!(endpoint_kernel_drops, None);
         let received = received
             .expect("loss-test receiver timed out")
             .expect("loss-test receiver task failed");
@@ -1323,10 +1315,24 @@ mod tests {
             .video_fec_source_symbols_missing
             .expect("missing pre-FEC counter");
         assert!(source > 0 && missing > 0 && missing <= source);
-        assert_eq!(fec.video_fec_source_symbols_unrecovered, Some(0));
+        let unrecovered = fec
+            .video_fec_source_symbols_unrecovered
+            .expect("missing unrecovered FEC counter");
         eprintln!(
-            "fec_loss_matrix_frames={TOTAL_FRAMES} source={source} missing={missing} unrecovered=0"
+            "fec_loss_matrix_frames={TOTAL_FRAMES} source={source} missing={missing} unrecovered={unrecovered}"
         );
+        assert_eq!(fec.video_fec_source_symbols_unrecovered, Some(0));
+
+        // Retain delivered-frame, timing and FEC evidence even when the
+        // independent kernel-loss measurement fails. Acceptance remains zero.
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            endpoint_kernel_drops,
+            Some(0),
+            "loss matrix included uncontrolled endpoint/proxy kernel drops"
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(endpoint_kernel_drops, None);
 
         server_connection.close();
         client_connection.close();

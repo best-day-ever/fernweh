@@ -31,6 +31,9 @@ subtle = "2.6"
 socket2 = "0.6"
 tokio = { version = "1.54.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"
+
 [patch.crates-io]
 # Keep the same Quinn release with PLANK telemetry shared by production and the
 # standalone probes. See third_party/quinn-proto-0.11.19/PLANK-PATCH.md.

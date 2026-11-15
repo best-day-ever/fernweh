@@ -279,6 +279,30 @@ pub(crate) struct OwnedUdpSockets {
     tracked: Vec<(u64, std::os::fd::OwnedFd)>,
 }
 
+// Effective getsockopt capacity, not the requested SO_RCVBUF value. This is
+// a controlled-loss measurement prerequisite, not product/fleet configuration.
+#[cfg(target_os = "linux")]
+const LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES: usize = 4 * 1024 * 1024;
+
+#[cfg(target_os = "linux")]
+fn sufficient_loss_receive_capacity(capacities: &[usize]) -> bool {
+    capacities.len() == 3
+        && capacities
+            .iter()
+            .all(|capacity| *capacity >= LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES)
+}
+
+#[cfg(target_os = "linux")]
+fn fixture_socket_preparation_opt_in(value: Option<&std::ffi::OsStr>) -> io::Result<bool> {
+    match value {
+        None => Ok(false),
+        Some(value) if value == "1" => Ok(true),
+        Some(_) => Err(io::Error::other(
+            "PLANK_TEST_FORCE_OWNED_RCVBUF must be exactly 1 when explicitly enabled",
+        )),
+    }
+}
+
 impl OwnedUdpSockets {
     pub fn before_endpoints() -> io::Result<Self> {
         Ok(Self {
@@ -297,6 +321,7 @@ impl OwnedUdpSockets {
         {
             use std::os::fd::BorrowedFd;
             let tables = udp_tables()?;
+            let mut capacities = Vec::new();
             for (inode, fd) in process_socket_fds()? {
                 if self.existing.contains(&inode) || !udp_inode_present(&tables, inode) {
                     continue;
@@ -308,12 +333,61 @@ impl OwnedUdpSockets {
                 let actual = socket2::SockRef::from(&owned).recv_buffer_size()?;
                 parse_kernel_drops(&tables, inode)?;
                 eprintln!("fec_loss_owned_udp_inode={inode} receive_buffer_bytes={actual}");
+                capacities.push(actual);
                 self.tracked.push((inode, owned));
             }
             if self.tracked.len() != 3 {
                 return Err(io::Error::other(
                     "expected exactly server, client and proxy UDP sockets",
                 ));
+            }
+            if fixture_socket_preparation_opt_in(
+                std::env::var_os("PLANK_TEST_FORCE_OWNED_RCVBUF").as_deref(),
+            )? {
+                use std::os::fd::AsRawFd;
+                for ((inode, owned), capacity) in self.tracked.iter().zip(capacities.iter_mut()) {
+                    if *capacity >= LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES {
+                        continue;
+                    }
+                    let requested =
+                        LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES as libc::c_int;
+                    // Only these three newly owned fixture sockets are eligible.
+                    // The live FD and c_int remain valid throughout setsockopt;
+                    // CAP_NET_ADMIN is required, with no global-policy fallback.
+                    let result = unsafe {
+                        libc::setsockopt(
+                            owned.as_raw_fd(),
+                            libc::SOL_SOCKET,
+                            libc::SO_RCVBUFFORCE,
+                            (&requested as *const libc::c_int).cast(),
+                            std::mem::size_of_val(&requested) as libc::socklen_t,
+                        )
+                    };
+                    if result != 0 {
+                        return Err(io::Error::other(format!(
+                            "explicit fixture socket preparation requires CAP_NET_ADMIN: {}",
+                            io::Error::last_os_error()
+                        )));
+                    }
+                    *capacity = socket2::SockRef::from(owned).recv_buffer_size()?;
+                    eprintln!(
+                        "fec_loss_owned_udp_inode={inode} fixture_force_requested_bytes={requested} receive_buffer_bytes={capacity}"
+                    );
+                }
+            }
+            // Print every owned socket's actual capacity before explaining a
+            // prerequisite failure; no frame/timing measurement has begun yet.
+            if !sufficient_loss_receive_capacity(&capacities) {
+                let policy = |name| {
+                    std::fs::read_to_string(format!("/proc/sys/net/core/{name}"))
+                        .map(|value| value.trim().to_owned())
+                        .unwrap_or_else(|_| "unavailable".into())
+                };
+                return Err(io::Error::other(format!(
+                    "Linux controlled-loss fixture requires effective SO_RCVBUF >= {LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES} bytes on all three owned sockets; observed={capacities:?} rmem_max={} rmem_default={}; review the benchmark environment prerequisite before measuring (no global setting was changed)",
+                    policy("rmem_max"),
+                    policy("rmem_default")
+                )));
             }
         }
         Ok(())
@@ -330,7 +404,7 @@ impl OwnedUdpSockets {
                 total += drops;
             }
             eprintln!(
-                "fec_loss_owned_udp_kernel_drops={total} controlled_loss_only={}",
+                "fec_loss_owned_udp_kernel_drops={total} owned_kernel_loss_free={}",
                 total == 0
             );
             Ok(Some(total))
@@ -338,10 +412,42 @@ impl OwnedUdpSockets {
         #[cfg(not(target_os = "linux"))]
         {
             eprintln!(
-                "fec_loss_owned_udp_kernel_drops=unavailable controlled_loss_only=unavailable"
+                "fec_loss_owned_udp_kernel_drops=unavailable owned_kernel_loss_free=unavailable"
             );
             Ok(None)
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn controlled_loss_receive_prerequisite_covers_every_owned_socket() {
+    let minimum = LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES;
+    assert!(sufficient_loss_receive_capacity(&[
+        minimum, minimum, minimum
+    ]));
+    assert!(sufficient_loss_receive_capacity(&[
+        minimum * 2,
+        minimum,
+        minimum * 4
+    ]));
+    for index in 0..3 {
+        let mut capacities = [minimum; 3];
+        capacities[index] -= 1;
+        assert!(!sufficient_loss_receive_capacity(&capacities));
+    }
+    assert!(!sufficient_loss_receive_capacity(&[]));
+    assert!(!sufficient_loss_receive_capacity(&[minimum; 2]));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn fixture_socket_preparation_requires_explicit_opt_in() {
+    use std::ffi::OsStr;
+    assert!(!fixture_socket_preparation_opt_in(None).unwrap());
+    assert!(fixture_socket_preparation_opt_in(Some(OsStr::new("1"))).unwrap());
+    for invalid in ["", "0", "true", "yes"] {
+        assert!(fixture_socket_preparation_opt_in(Some(OsStr::new(invalid))).is_err());
     }
 }
 
