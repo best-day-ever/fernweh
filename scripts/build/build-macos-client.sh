@@ -142,7 +142,7 @@ cd "$build"
 rm -f "$build/app/plank-client.app/Contents/Info.plist"
 # Recursive generation is mandatory when retaining a build: otherwise existing
 # subproject Makefiles may silently retain the previous source/version/flags.
-qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts \
+qmake -r "$client/moonlight-qt.pro" CONFIG+=release CONFIG+=disable-prebuilts CONFIG+=qtquickcompiler \
     CONFIG+=plank-transport CONFIG+=disable-libplacebo CONFIG+=disable-wayland \
     CONFIG+=disable-x11 CONFIG+=disable-libva CONFIG+=disable-libdrm \
     QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" QMAKE_APPLE_DEVICE_ARCHS=arm64 \

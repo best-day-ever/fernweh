@@ -221,12 +221,7 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
     NSMutableData *certificatePEM = readPrivate(fd, "cert.pem"), *keyPEM = readPrivate(fd, "key.pem");
     close(fd);
     NSDictionary *config = publicConfiguration ?: PLANKMacReadHostConfiguration(directory, directory, geteuid(), YES);
-    if (![config isKindOfClass:NSDictionary.class] ||
-        ![config[@"Address"] isKindOfClass:NSString.class] || ![config[@"Name"] isKindOfClass:NSString.class] ||
-        ![config[@"UUID"] isKindOfClass:NSString.class] || ![config[@"Port"] isKindOfClass:NSNumber.class] ||
-        CFGetTypeID((__bridge CFTypeRef)config[@"Port"]) == CFBooleanGetTypeID() ||
-        [config[@"Port"] doubleValue] != [config[@"Port"] unsignedShortValue] ||
-        [config[@"Port"] unsignedShortValue] == 0) return startupFailure("configuration-values");
+    if (!PLANKMacHostConfigurationValidForStartup(config)) return startupFailure("configuration-values");
     NSString *sharedUser = config[@"SharedDesktopUser"];
     if (sharedUser && (phase != PLANKMacScopeDesktop || ![sharedUser isEqual:desktopAccountName]))
         return startupFailure("shared-desktop-account-unavailable");
@@ -322,6 +317,11 @@ static int graphical(const char *service, NSString *role, NSString *directory, B
         }
         input:^id<PLANKMacInputDevice> { return [PLANKMacQuartzInput new]; }];
     runtime.sharedDesktop = sharedUser != nil;
+    NSMutableDictionary *metrics = [config[@"Metrics"] mutableCopy];
+    if (![metrics[@"Valid"] boolValue]) NSLog(@"PLANK metrics disabled: invalid metrics configuration");
+    metrics[@"WorkstationID"] = config[@"UUID"];
+    metrics[@"Version"] = @PLANK_MACOS_HOST_VERSION;
+    runtime.metricsConfiguration = metrics;
     if (config[@"BrokerPublicKey"]) {
         NSData *brokerKey = [[NSData alloc] initWithBase64EncodedString:config[@"BrokerPublicKey"] options:0];
         PLANKMacBrokerAdmission *broker = [[PLANKMacBrokerAdmission alloc] initWithPublicKey:brokerKey

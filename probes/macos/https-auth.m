@@ -137,6 +137,19 @@ int main(int argc, const char *argv[]) {
             }];
 #ifdef PLANK_SYNTHETIC_AUTH_TEST
         runtime.sharedDesktop = argc == 3 && !strcmp(argv[2], "shared-desktop");
+        __weak PLANKMacHostRuntime *weakRuntime = runtime;
+        NSString *displayProbe = NSProcessInfo.processInfo.environment[@"PLANK_TEST_DISPLAY_TRANSACTION"];
+        BOOL (^lockAvailable)(void) = ^BOOL {
+            if (!displayProbe) return YES;
+            dispatch_semaphore_t acquired = dispatch_semaphore_create(0);
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                // Exercise the actual admission lock from another queue while
+                // the real runtime invokes its slow display provider.
+                BOOL rejected = ![weakRuntime startOnPort:0 ready:^(uint16_t port) { (void)port; } failed:nil];
+                if (rejected) dispatch_semaphore_signal(acquired);
+            });
+            return dispatch_semaphore_wait(acquired, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0;
+        };
         runtime.releaseDisplay = ^BOOL {
             if (!lockAvailable()) { puts("display_lock_held_during_restore=1"); fflush(stdout); return NO; }
             desktopWidth = 1920; desktopHeight = 1080; desktopScale = 1;

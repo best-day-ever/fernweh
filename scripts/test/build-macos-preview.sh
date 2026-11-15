@@ -43,6 +43,7 @@ xcrun clang "${common[@]}" -DPLANK_MAC_PREVIEW_TEST -DPLANK_SYNTHETIC_AUTH_TEST 
 xcrun clang "${common[@]}" probes/macos/preview-receive.m "$archive" -lpthread -lm \
     -o "$preview_build/preview-receive"
 if [[ ${4:-} = --synthetic-only ]]; then
+    python3 tests/auth/macos-display-cancellation.py --server "$preview_build/preview-synthetic"
     python3 tests/auth/macos-display-lease.py --server "$preview_build/preview-synthetic" --receiver "$preview_build/preview-receive"
     python3 tests/auth/macos-shared-desktop.py --server "$preview_build/preview-synthetic" --receiver "$preview_build/preview-receive"
     # Root is confined to synthetic loopback children and ephemeral identities;

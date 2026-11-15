@@ -82,18 +82,7 @@
     _server.recoverTopology = ^BOOL(BOOL (^authorized)(void)) {
         typeof(self) owner = weakSelf;
         if (!owner) return NO;
-        @synchronized(owner) {
-            if (!owner.recoverDisplay || !owner->_started || atomic_load(&owner->_stopping) ||
-                [owner hasActiveStreams]) return NO;
-            PLANKMacGraphicalIdentity scope = owner->_snapshot();
-            BOOL (^valid)(void) = ^BOOL {
-                return !atomic_load(&owner->_stopping) && authorized() &&
-                    plank_macos_same_graphical_scope(scope, owner->_snapshot());
-            };
-            unsigned status = 0;
-            if (!valid() || [owner permissionError:&status]) return NO;
-            return owner.recoverDisplay(valid) && valid();
-        }
+        return [owner recoverTopologyAuthorized:authorized];
     };
     return _server ? self : nil;
 }
@@ -109,14 +98,76 @@
         if (stream.state != PLANKMacPreviewStopped) return YES;
     return _stream && _stream.state != PLANKMacPreviewStopped;
 }
-// Caller holds the runtime lock, never the graphical main queue. A failed
-// restoration fails future admission; the graphical owner retires its worker.
-- (BOOL)releasePreparedDisplay {
-    ++_displayGeneration;
-    if (!_displayPrepared) return YES;
-    if (self.releaseDisplay && !self.releaseDisplay()) return NO;
-    _displayPrepared = NO;
-    return YES;
+// Runtime state is guarded briefly. Display/WindowServer work and stream drain
+// happen only after reserving this slot, never while holding the runtime lock.
+- (dispatch_group_t)reserveDisplayOperation {
+    @synchronized(self) {
+        if (_displayOperation || !_started || atomic_load(&_stopping)) return nil;
+        _displayOperation = dispatch_group_create();
+        dispatch_group_enter(_displayOperation);
+        return _displayOperation;
+    }
+}
+- (void)finishDisplayOperation:(dispatch_group_t)operation {
+    @synchronized(self) {
+        NSAssert(_displayOperation == operation, @"display operation ownership changed");
+        _displayOperation = nil;
+    }
+    dispatch_group_leave(operation);
+}
+// Caller owns a display reservation. Restoration cannot overlap preparation.
+- (BOOL)restoreReservedDisplay {
+    BOOL prepared;
+    @synchronized(self) { ++_displayGeneration; prepared = _displayPrepared; }
+    BOOL restored = !prepared || !self.releaseDisplay || self.releaseDisplay();
+    @synchronized(self) {
+        _displayRestorationFailed = !restored;
+        if (restored) _displayPrepared = NO;
+    }
+    return restored;
+}
+- (void)releaseDisplayGeneration:(uint64_t)generation completion:(void (^)(void))completion {
+    dispatch_group_t pending, operation = nil;
+    @synchronized(self) {
+        pending = _displayOperation;
+        if (!pending) {
+            if ((generation != UINT64_MAX && generation != _displayGeneration) ||
+                    [self hasActiveStreams]) {
+                if (completion) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), completion);
+                return;
+            }
+            // Shutdown may reserve restoration after closing admission.
+            operation = _displayOperation = dispatch_group_create();
+            dispatch_group_enter(operation);
+        }
+    }
+    if (pending) {
+        dispatch_group_notify(pending, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            [self releaseDisplayGeneration:generation completion:completion];
+        });
+        return;
+    }
+    @try { [self restoreReservedDisplay]; }
+    @finally { [self finishDisplayOperation:operation]; }
+    if (completion) completion();
+}
+- (BOOL)recoverTopologyAuthorized:(BOOL (^)(void))authorized {
+    if (!self.recoverDisplay) return NO;
+    dispatch_group_t operation = [self reserveDisplayOperation];
+    if (!operation) return NO;
+    @try {
+        @synchronized(self) {
+            if ([self hasActiveStreams]) return NO;
+        }
+        PLANKMacGraphicalIdentity scope = _snapshot();
+        BOOL (^valid)(void) = ^BOOL {
+            return !atomic_load(&self->_stopping) && authorized() &&
+                plank_macos_same_graphical_scope(scope, self->_snapshot());
+        };
+        unsigned status = 0;
+        if (!valid() || [self permissionError:&status] || ![self restoreReservedDisplay]) return NO;
+        return self.recoverDisplay(valid) && valid();
+    } @finally { [self finishDisplayOperation:operation]; }
 }
 - (NSDictionary *)prepareDisplayRequest:(NSDictionary *)request token:(NSString *)token
                                   peer:(NSData *)peer valid:(BOOL (^)(void))requestValid status:(unsigned *)status {
@@ -152,6 +203,16 @@
         PLANKMacPreviewSession *stream;
         BOOL needsTakeover;
         @synchronized(self) {
+            if (self.sharedDesktop) {
+                if (scope.phase != PLANKMacScopeDesktop) { *status = 403; return nil; }
+                if (takeover) { *status = 400; return nil; }
+                // Guests adopt the workspace selected by the first participant.
+                if ([self hasActiveStreams] || _displayPrepared) {
+                    NSDictionary *existing = _topology();
+                    *status = existing && valid() ? 200 : 503;
+                    return *status == 200 ? existing : nil;
+                }
+            }
             stream = _stream;
             if (takeover && ![takeover isEqual:stream.sessionID]) {
                 *status = 409; return @{@"state": @"denied", @"error": @"session_changed"};
@@ -165,46 +226,9 @@
             }
             needsTakeover = stream && stream.state != PLANKMacPreviewStopped && !_takeoverToken;
         }
-        unsigned width = [request[@"width"] unsignedIntValue], height = [request[@"height"] unsignedIntValue];
-        unsigned scale = [request[@"scale"] unsignedIntValue];
-        if ([request[@"schema_version"] unsignedIntValue] != 3 || (scale != 1 && scale != 2) ||
-            width < 2 || height < 2 || width > 8192 || height > 8192 || width % 2 || height % 2) { *status = 400; return nil; }
-        PLANKMacGraphicalIdentity scope = _snapshot();
-        BOOL (^valid)(void) = ^BOOL {
-            PLANKMacAccountIdentity account = {0};
-            return requestValid() && !atomic_load(&self->_stopping) &&
-                plank_macos_same_graphical_scope(scope, self->_snapshot()) &&
-                [self->_sessions authorizeToken:token peer:peer identity:&account];
-        };
-        if (!valid()) { *status = 401; return nil; }
-        NSDictionary *permissionError = [self permissionError:status];
-        if (permissionError) return permissionError;
-        if (self.sharedDesktop) {
-            if (scope.phase != PLANKMacScopeDesktop) { *status = 403; return nil; }
-            if (takeover) { *status = 400; return nil; }
-            // Join the established workspace. Changing it would invalidate every
-            // existing capture/input contract. Clients adopt this returned size.
-            if ([self hasActiveStreams] || _displayPrepared) {
-                NSDictionary *existing = _topology();
-                *status = existing && valid() ? 200 : 503;
-                return *status == 200 ? existing : nil;
-            }
-        }
-        if (takeover && ![takeover isEqual:_stream.sessionID]) {
-            *status = 409; return @{@"state": @"denied", @"error": @"session_changed"};
-        }
-        if ([self takeoverReservedForAnotherToken:token peer:peer] ||
-                (_stream && _stream.state != PLANKMacPreviewStopped &&
-                 ![takeover isEqual:_stream.sessionID])) {
-            *status = 409;
-            return @{@"state": @"conflict", @"error": @"session_active", @"session_id": _stream.sessionID};
-        }
-        if (_stream && _stream.state != PLANKMacPreviewStopped) {
-            // The authentication lane is serial. Reserve the next launch while
-            // normal asynchronous teardown releases input/capture/QUIC. Neither
-            // the GUI nor network queue waits for this bounded drain.
-            if (!_takeoverToken) {
-                if (![_stream reserveTakeoverWithToken:token peer:peer]) { *status = 403; return nil; }
+        if (needsTakeover) {
+            if (!valid() || ![stream reserveTakeoverWithToken:token peer:peer]) { *status = 403; return nil; }
+            @synchronized(self) {
                 _takeoverToken = [token copy]; _takeoverPeer = [peer copy];
                 _takeoverDeadline = clock_gettime_nsec_np(CLOCK_MONOTONIC) + 15*NSEC_PER_SEC;
             }
@@ -224,8 +248,10 @@
             }
             NSLog(@"PLANK authenticated session transfer drained; preparing replacement display");
         }
-        if (![self releasePreparedDisplay]) { *status = 503; return nil; }
-        _displayPrepared = self.releaseDisplay != nil || self.sharedDesktop;
+        if ((stream && stream.state != PLANKMacPreviewStopped) || !valid() || ![self restoreReservedDisplay]) {
+            *status = 503; return nil;
+        }
+        @synchronized(self) { _displayPrepared = self.releaseDisplay != nil || self.sharedDesktop; }
         if (!self.prepareDisplay(width, height, scale, request[@"encoding_mode"], valid) || !valid()) {
             [self restoreReservedDisplay];
             NSLog(@"PLANK desktop preparation failed: %ux%u", width, height);
@@ -246,12 +272,7 @@
             __weak typeof(self) weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60*NSEC_PER_SEC),
                 dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                    typeof(self) owner = weakSelf; if (!owner) return;
-                    @synchronized(owner) {
-                        if (owner->_displayGeneration == generation &&
-                            ![owner hasActiveStreams])
-                            [owner releasePreparedDisplay];
-                    }
+                    [weakSelf releaseDisplayGeneration:generation completion:nil];
                 });
         }
         *status = 200; return topology;
@@ -313,9 +334,13 @@
             request:request topology:_topology config:&config capture:_capture() input:_input()
             microphoneGeneration:_snapshot().generation];
         if (!stream) {
-            if (![self hasActiveStreams]) [self releasePreparedDisplay];
+            const uint64_t generation = _displayGeneration;
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                [self releaseDisplayGeneration:generation completion:nil];
+            });
             *status = 503; return nil;
         }
+        [stream configureMetrics:self.metricsConfiguration];
         if (self.sharedDesktop) [_sharedStreams addObject:stream]; else _stream = stream;
         if (_displayPrepared || self.sharedDesktop) {
             uint64_t generation = _displayGeneration;
@@ -328,9 +353,8 @@
                     typeof(self) owner = weakSelf; if (!owner) return;
                     @synchronized(owner) {
                         [owner->_sharedStreams removeObject:weakStream];
-                        if (owner->_displayGeneration == generation && ![owner hasActiveStreams])
-                            [owner releasePreparedDisplay];
                     }
+                    [owner releaseDisplayGeneration:generation completion:nil];
                 });
             };
         }

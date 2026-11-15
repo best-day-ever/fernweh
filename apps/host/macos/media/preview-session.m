@@ -188,7 +188,10 @@ BOOL PLANKMacPreviewRequestMatchesTopology(NSDictionary *request, NSDictionary *
     metrics.port = [configuration[@"Port"] unsignedIntValue];
     metrics.interval_seconds = [configuration[@"IntervalSeconds"] unsignedIntValue];
     metrics.workstation_id = [configuration[@"WorkstationID"] UTF8String];
-    metrics.slot_id = "host";
+    // Shared desktops have independent authenticated streams. A random slot
+    // distinguishes their samples without exporting an account or admission token.
+    NSString *slot = NSUUID.UUID.UUIDString.lowercaseString;
+    metrics.slot_id = slot.UTF8String;
     metrics.version = [configuration[@"Version"] UTF8String];
     if (plank_transport_native_metrics_configure(_endpoint, &metrics, NULL) != PLANK_TRANSPORT_OK) {
         NSLog(@"PLANK metrics unavailable; streaming is unaffected");
