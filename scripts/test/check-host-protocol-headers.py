@@ -14,7 +14,7 @@ def validate(root):
             raise ValueError("retired Host protocol dependency: " + retired)
     source = root / "src"
     if not source.is_dir() or {p.name for p in source.iterdir()} != HEADERS:
-        raise ValueError("Host protocol tree must contain only the three qualified headers")
+        raise ValueError("Host protocol tree must contain exactly the three qualified headers")
     if not (root / "LICENSE.txt").is_file():
         raise ValueError("Host protocol license is missing")
     for header in HEADERS:

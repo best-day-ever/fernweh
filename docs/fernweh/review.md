@@ -293,3 +293,186 @@ load and the desktop/mobile pages were visually checked. Privacy, commit and
 whitespace checks pass; the bde-linux repository gate passes with existing
 lint advisories. Product builds are not repeated for this documentation-only
 change. No product source, dependency pin, workflow setting or binary changes.
+
+
+## 15 November: coordinated PLANK 1.4.18 integration
+
+The candidate reconciles current Fernweh main, its platform adapters and the
+coordinated
+transport/dependency changes. Source checkpoint: parent `8911ad1d`, Client
+`d7c5155c`, Linux Host `503fc870`. The runtime transport repair is already in
+`ef1cc84c`; later changes add test preparation, artifact selection and receipts.
+
+At this native checkpoint the source reviews remained drafts: [parent 6](https://github.com/best-day-ever/fernweh/pull/6),
+[Client 5](https://github.com/best-day-ever/fernweh-client/pull/5), and
+[Host 7](https://github.com/best-day-ever/fernweh-host-linux/pull/7).
+No installer feed, deployment pin, installed product, driver, desktop or
+persistent workstation policy changes are part of this work.
+
+### Upstream triage
+
+Upstream Client `121ed3eb` and Linux Host `c71333d7` remain the reviewed tips.
+Parent `4a1c1046` adds only HANDOFF/signing-policy housekeeping after `2712269c`.
+No additional product series is imported. Kymux stays at canonical upstream
+`9e1a7e30`; there is no upstream push or new dependency fork.
+
+### Reconciled behavior
+
+- Qt display planning retains saved monitor identities, primary selection, crops,
+  physical/virtual backing, shared views and Apply/Keep. Layout acknowledgement
+  precedes decoder probing; shutdown cancels pending handoffs. Bookmark sizing
+  uses selected displays while profile planning retains all monitor probes.
+- Qt clipboard callbacks retain focus, generation, permission and adapter lifetime
+  without SDL polling. File selection and changing participant permissions reach
+  actual controls. Add/Edit bookmarks preserve stable saved layout values and
+  discovered Host policy.
+- Native local Q/T shortcuts run before the bounded remote queue. Queued Qt
+  actions recheck focus/capture and disappear after object destruction. Repeat,
+  key-up, permission revocation, toolbar pin and five-second idle hiding are covered.
+  Narrow toolbars shorten version text while keeping status visible.
+- Windows retains its SDL decoder/pacer, D3D resources, lifecycle callbacks and
+  microphone adapter. Retired AV1 protocol branches are removed from retained
+  renderers. Shared timestamps use one clock; software fallback remains limited
+  to the exact selected codec/profile.
+- Linux capture shares one C++/NVCC image definition after Native10 added metadata.
+  Retained CUDA declarations, stale HDR code and HTTP test version scoping are
+  repaired. A real compiler-boundary regression fails with the old image layout.
+- Mac Host display operations run outside the admission lock and retain the first
+  shared owner's workspace until final drain. Metrics remain disabled by default;
+  startup/configuration/installer checks preserve their filesystem boundaries.
+- Native build phases do not install OS packages. Source-first FEC and attestation
+  use Cargo's actual artifacts instead of guessing among shared-cache outputs.
+
+### Native evidence
+
+| Gate | Result |
+| --- | --- |
+| Parent checks | Mac root suite: 157 passed and three Linux staging skips (160 total). All seven staging/manifest cases pass natively on Linux. Declaration-only Host headers pass eight C/C++ checks. |
+| Transport | 88 unit and six wire cases; 47 selected protocol/encrypted functional and four actual source-first FEC cases pass. |
+| Mac Client | Both complete profiles pass with SDK 27/macOS 15 target: direct 42 QtTest invocations / 701 passes; broker 46 / 884, each with two Linux-only skips. Actual production Qt/Metal 8/10-bit, crop, overlay, area reduction and native window checks pass, along with microphone/wire/timestamp and bundle checks. |
+| Windows Client | Both native applications and full runners pass at `622f780b`: direct 19 suites / 386 passes; broker 24 / 572 with five expected skips (three POSIX-only and two unavailable real-helper fixtures). Sixteen updater checks use process probes without installation. Protected service and worker fingerprints remain unchanged. |
+| UDP socket policy | Two real tests pass on each platform. Mac/Windows accept a 4 MiB request and preserve an existing 8 MiB buffer. Linux reports its actual clamped capacity; rejected requests retain a working socket. The exact locked `quinn-udp 0.5.16` source, licences and provenance are vendored with an opt-in feature. |
+| Linux Host | Production and complete test binaries link. Focused checks pass 123 cases with three kernel-UHID skips; 25 input/lifetime runs pass 107 each with those skips; 25 wrapped lifecycle runs pass 97 each without skips. Exact CUDA 8/10-bit GBR/NV12/P010 and all three Native10 normal/Clang sanitizer fixtures pass. GCC 14 remains the product compiler. |
+| Mac Host | Actual synthetic TLS/QUIC authentication/admission, display-lease restoration, three-peer sharing and cancellation pass; cancellation takes 0.01 seconds. Installer checks pass 47 cases; native configuration and 19 filesystem/configuration checks pass. Full privileged/installed Host qualification is separate. |
+| Linux controlled-loss/package gate | All six 900-frame matrices and ordinary-user transport/FFI pass at `0ca8fd41`. The candidate RPM passes all uninstalled package gates at `8911ad1d`, with the accepted test ELF unchanged. No installation or release promotion. |
+
+The focused Client evidence includes planner 55, sizing 13, layout 10,
+connectivity 65, Host choices six, clipboard 23, native keyboard 35 and QML ten.
+Qt input passes 27 cases with two Linux-only skips. Earlier pointer/input code
+also passes 25 repeats. These counts are regression evidence, not feature counts
+or installed-session acceptance.
+
+### Receive loss and controlled measurement
+
+The custom native listener omitted Kynet's canonical 4 MiB send-buffer bound.
+The unchanged 1,600,013-byte C ABI frame test fails at the old 1 MiB default and
+passes in both trust modes after repair, without changing payload, deadline or pacing.
+
+The complete native repeat exposed a separate receiver issue: one frame failed
+at 3% injected loss. A later unchanged run recovered all 900 frames but recorded
+34 endpoint kernel drops despite zero proxy drops. After the product's bounded
+receive request, another repeat still measured 76 endpoint drops under the OS
+clamp. Preserve those failures. They prove proxy-only counters were insufficient;
+they do not solely attribute the earlier frame failure or the historical deployed
+motion-loss issue to this path.
+
+The maintained gate now checks the three exact owned UDP sockets and reports
+frame/FEC metrics before rejecting kernel loss. The default non-root path stops
+before timed frames if effective receive capacity is below 4 MiB. The ordinary
+Linux clamp is 425,984 bytes; the prepared test sockets report 8,388,608 each. A separately
+reviewed fixture-only runner can use `SO_RCVBUFFORCE` on those three sockets,
+with only two selected test cases from one hashed ELF invoked with elevation. Cargo,
+compilation, packaging and Host build commands remain unprivileged. Runtime
+services are untouched. A fixed
+outer process timeout leaves protocol/frame/FEC deadlines unchanged.
+
+The final six VBR/CBR matrices recover all 5,400 frames with zero unrecovered
+symbols and zero owned kernel drops. All five phase/performance checks pass
+without changing bitrate, pacing, FEC or deadlines. The shipping-feature test ELF
+is SHA256 `b5f587dbc3961e29c937d6f56f8808ef5b8dd347869ea60585f9e6199d52a22b`.
+The ordinary-user transport/FFI gate and eight focused socket cases use that
+same ELF. Two mandatory Quinn constructor tests also pass with pinned Rust 1.99.1.
+Global receive limits/defaults, existing socket capacities, protected processes,
+timers, boot, GPU and configuration remain unchanged.
+No global receive setting was changed; the earlier ceiling proposal was previewed
+only and rejected before execution. No persistent privileges or sudoers changes.
+
+An earlier standalone Cargo invocation ran from the SSH home directory with
+`--manifest-path`, selecting Rust 1.99.0 instead of the source pin. Those focused
+results are investigation evidence only. Four incompatible unhashed Kynet/Kyproto
+outputs were recorded and quarantined; their replacements and the accepted
+shipping ELF verify Rust 1.99.1. The shipping runner already selected the source
+directory. Standalone native entry points now do so explicitly too: a manifest
+path selects the Cargo project, not rustup's directory toolchain. The repair used no broad cache
+purge or new target directory.
+
+The packager no longer copies the retired blanket `build/assets` tree. Explicit
+collaboration-helper, EDID and licence installs remain strict; behavioral staging
+checks accept a clean build, reject a missing required helper and exclude stale
+web assets. The ordinary-user package gate at `8911ad1d` passes manifest,
+private-binary, log-directory, collaboration, configuration, Wacom, display,
+UPnP, build-path and ghost-file checks. The local candidate is
+`plank-host-1.2.36-0.plank_1_4_18.1.el9.x86_64.rpm` (7,355,808 bytes), SHA256
+`441b506f7cb06e6dce4e1fd5c9845f3c1df6c79951c0abf17657dc746c4b1afd`.
+It is an uninstalled qualification artifact, not a published release. The
+accepted test ELF and protected/global state remain unchanged; temporary root
+scratch is removed. Timed trials were not repeated for this packaging-only fix.
+
+### Remaining acceptance
+
+Keep the native source/package results separate from installed streaming.
+The physical Linux desktop remains 24-bit; device-free Native10/CUDA tests do
+not prove live depth-30 X11 capture. Privileged Mac handoff remains unrun without
+a suitable test environment. Actual macOS 15/27 Client and 26.7/27 Host sessions,
+Windows streaming, display sleep/lid, shared input/tablets, Blender/Unreal
+immersive workflows, release soaks and Linux Client qualification remain open.
+No source-main promotion, installation or binary publication follows from these
+uninstalled checks. Hosted Actions remains disabled. Raw receipts stay in
+owner-private audit storage; technical evidence stays in the repositories.
+
+
+## 15 November: source promotion and release preparation
+
+The operator subsequently authorizes proper PR merges and deployment. Source
+integration is distinct from binary acceptance: [Host7](https://github.com/best-day-ever/fernweh-host-linux/pull/7)
+merges as `7cf682dc`, followed by [Client5](https://github.com/best-day-ever/fernweh-client/pull/5)
+as `95460128`. Their reviewed trees are preserved, including the named 1.2.37
+Client notes. [Parent6](https://github.com/best-day-ever/fernweh/pull/6) pins the
+actual published component merges. Shared version 1.2.37 is reserved; no release
+asset, installed product or feed is promoted by these source merges.
+
+Renewed configured Client checks pass Mac 884 and Windows 572 cases, with their
+recorded two Linux-only/five Windows broker skips and two socket cases each.
+The private Windows candidate also passes actual MSI identity, complete payload,
+service extraction and limited-user ACL gates. The private Linux candidate
+passes native source/input/lifecycle/transport/FFI and strict uninstalled RPM
+checks. Its runtime and exact shipping-feature test ELF match the accepted
+six matrices, so version/docs/staging-only changes do not trigger a timed rerun.
+The canonical input repeat selects 105 passes/three kernel-UHID skips; the prior
+expanded 107-pass audit additionally selected the CUDA-layout and retained-IDR
+scheduler regressions. No selection or threshold was weakened.
+
+Release preparation repairs two staging contracts. Windows no longer copies a
+licence from the removed h264bitstream library, while retaining the Client
+licence and strict new-output checks. Mac deployment previously failed on unused
+SQL drivers before its post-deployment cleanup could run. A copied deployment
+tool and private `qt.conf` now select a SQLite-only SQL view, preserving other
+plugin categories and original Qt paths. Twelve executed process/filesystem
+cases and real native deployment pass; 107 binaries meet closure/macOS 15 checks,
+and bundled offscreen QML/SQLite load successfully. Qualified Qt content remains
+unchanged and the exact scratch is removed. No dependency error is ignored.
+
+The UDP constructor hooks select the existing machine-wide shared Cargo target,
+preventing source-local artifacts on builders without a global target setting.
+Six executed hook cases preserve locked/offline/release/features, source cwd,
+two jobs and the mandatory two-test result. Actual native socket checks pass.
+The parent root suite reports 166 tests: 163 passes and three native-Linux staging
+skips on Mac. All seven staging/manifest cases pass on Linux. Sixteen collector
+cases pass after correcting an old padded-version fixture to use the canonical
+DMG identity; the production collector is unchanged.
+
+Final installers must be freshly built from merged main, with signatures,
+notarization where required, immutable provenance and exact hashes. Do not
+relabel a feature candidate as a main build. The installed-session/hardware
+acceptance listed above remains open before binary promotion. Source is ALPHA;
+these merges do not certify a new installed streaming release.

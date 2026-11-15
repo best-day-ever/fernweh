@@ -49,7 +49,11 @@ Put output and caches outside source. Choose absolute local paths for
 `PLANK_SOURCE_ROOT`, `PLANK_DEP_ROOT`, `PLANK_WORK_ROOT`, `PLANK_RUSTUP_ROOT`,
 `PLANK_CARGO_ROOT` and `PLANK_QT_ROOT`; no particular machine name is required.
 Set `PLANK_BUILD_BRANCH=community-review` (the package tools require lowercase
-kebab-case). Use Rust 1.89.0 and the repository lockfiles. Root CMake builds
+kebab-case). Use the [pinned Rust toolchain](../../rust-toolchain.toml) and
+repository lockfiles. `--manifest-path` selects a Cargo manifest, while rustup
+still selects its directory toolchain from the working directory. Enter the
+source checkout for ad hoc checks or select the pinned channel explicitly;
+the source entry scripts enter it before invoking Cargo. Root CMake builds
 qualification tools, not every product. Preserve the machine's shared Cargo
 cache/target policy rather than introducing a target directory per worktree.
 
@@ -84,7 +88,8 @@ Developer ID, notarization and package gates. See
 ## Windows Client
 
 Builder/runtime scope: Windows x64; Visual Studio2022 C++ tools/Windows SDK,
-Qt 6.10.2 `msvc2022_64`, Rust 1.89.0 with `x86_64-pc-windows-msvc`, Python 3 on PATH,
+Qt 6.10.2 `msvc2022_64`, the pinned Rust toolchain with
+`x86_64-pc-windows-msvc`, Python 3 on PATH,
 and PowerShell 5.1+. No WSL compiler or Linux Qt build substitutes for MSVC.
 Clone the pinned Client/transport dependencies, then run in PowerShell:
 
@@ -155,6 +160,11 @@ Full platform packages take substantial disk space/time; check free space first.
 For a native Rocky builder, use the `linux-host` role in the same bootstrap and
 package runbooks. GPU/session/Wacom acceptance runs on a dedicated test Host,
 not on a GPU-less package builder. Build does not install onto any workstation.
+Operating-system packages are provisioned separately, never by the build phase.
+Sanitizer checks normally use the pinned GCC toolset. A prequalified native
+Clang can be selected explicitly with `PLANK_NATIVE10_SANITIZER_CXX` when its
+sanitizer runtime is already present; this does not change the product compiler
+or omit the ASan/UBSan checks.
 
 ## macOS Host
 
@@ -169,7 +179,7 @@ unset PLANK_MACOS_SIGNING_IDENTITY PLANK_MACOS_INSTALLER_IDENTITY
 unset PLANK_MACOS_TEAM_ID PLANK_NOTARY_PROFILE
 source scripts/package/package-version.sh
 plank_load_package_version "$PLANK_SOURCE_ROOT"
-PLANK_MACOS_SOURCE_FIRST=1 bash scripts/build/build-macos-transport.sh \
+bash scripts/build/build-macos-transport.sh \
     "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/transport"
 PLANK_MACOS_HOST_VERSION="$PLANK_PACKAGE_VERSION" bash scripts/build/build-macos-host.sh \
     "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/host-build" \

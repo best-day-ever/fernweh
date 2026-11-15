@@ -79,7 +79,7 @@ class DependencyCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root, deps = Path(tmp) / 'source', Path(tmp) / 'deps'
             product = 'macos-host'
-            keys = {c: f'plank-{product}-{c}-v2-' + '1' * 64 for c in cache.COMPONENTS[product]}
+            keys = {c: f'plank-{product}-{c}-v3-' + '1' * 64 for c in cache.COMPONENTS[product]}
             for name in ('cargo/bin/rustup', 'rustup/settings.toml'):
                 path = deps / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,15 +102,16 @@ class DependencyCacheTests(unittest.TestCase):
 
     def test_bootstrap_executes_every_independent_recipe(self):
         source = (ROOT / 'scripts/ci/bootstrap.sh').read_text()
-        for name in ('rust', 'cargo', 'boost', 'host-ffmpeg', 'client-ffmpeg', 'client-sdl', 'macos-libraries', 'qt'):
+        for name in ('rust', 'cargo', 'boost', 'host-ffmpeg', 'client-ffmpeg', 'macos-libraries', 'qt'):
             self.assertIn(f'bash "$dependency_scripts/{name}.sh"', source)
         # Pin/build flags belong in the recipe hashed for the affected cache,
         # not an orchestration script shared by unrelated dependencies.
         for forbidden in ('curl ', 'cmake -', 'cargo fetch', 'aqt install-qt'):
             self.assertNotIn(forbidden, source)
         cargo = (ROOT / 'scripts/ci/dependencies/cargo.sh').read_text()
-        self.assertEqual(cargo.count('cargo fetch --locked'), 2)
-        self.assertIn('third_party/quinn-proto-0.11.17/Cargo.toml', cargo)
+        self.assertEqual(cargo.count('cargo fetch --locked'), 3)
+        self.assertIn('third_party/quinn-proto-0.11.19/Cargo.toml', cargo)
+        self.assertIn('third_party/quinn-udp-0.5.16/Cargo.toml', cargo)
 
     def test_platform_verification_is_not_bypassed(self):
         with patch.object(cache.platform, 'system', return_value='Darwin'), \

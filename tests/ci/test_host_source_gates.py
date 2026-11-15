@@ -7,6 +7,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class HostSourceGateTests(unittest.TestCase):
+    def test_native_build_does_not_install_operating_system_packages(self):
+        build = (ROOT / 'scripts/ci/build.sh').read_text()
+        self.assertNotRegex(build, r'(?m)^\s*(?:sudo\s+)?dnf\s+install\b')
+        self.assertIn('PLANK_NATIVE10_SANITIZER_CXX', build)
+        provisioning = (ROOT / 'scripts/ci/install-linux-deps.sh').read_text()
+        self.assertIn('gcc-toolset-14-libasan-devel', provisioning)
+        self.assertIn('gcc-toolset-14-libubsan-devel', provisioning)
+
     def test_host_input_gate_exercises_reservation_and_uhid_lifetimes(self):
         build = (ROOT / 'scripts/ci/test-linux-host-input.sh').read_text()
         fixture = (ROOT / 'tests/input/linux-recovery/CMakeLists.txt').read_text()
@@ -14,7 +22,8 @@ class HostSourceGateTests(unittest.TestCase):
         self.assertIn('"$fixture_build/input-recovery"', build)
         self.assertIn('"${HOST}/src/process.cpp"', fixture)
         self.assertIn('-Wl,--wrap=open', fixture)
-        self.assertIn('googletest libdisplaydevice', fixture)
+        self.assertIn('foreach(dependency libvirtualhid googletest)', fixture)
+        self.assertNotIn('libdisplaydevice', fixture)
 
     def test_host_input_fixture_links_header_only_boost_dependencies(self):
         build = (ROOT / 'scripts/ci/test-linux-host-input.sh').read_text()
@@ -26,6 +35,14 @@ class HostSourceGateTests(unittest.TestCase):
                 self.assertIn(dependency, links)
         self.assertIn("'/usr/(local/)?include/boost/'", build)
         self.assertIn('"$fixture_build/CMakeFiles/input-recovery.dir"', build)
+
+    def test_host_components_run_before_the_full_package_build(self):
+        build = (ROOT / 'scripts/ci/build.sh').read_text()
+        self.assertLess(build.index('scripts/ci/test-linux-host-input.sh'),
+                        build.index('scripts/package/build-host-rpm.sh'))
+        component = (ROOT / 'scripts/ci/test-linux-host-input.sh').read_text()
+        self.assertNotIn('CMakeCache.txt', component)
+        self.assertIn('PLANK_HOST_FFMPEG_ROOT', component)
 
     def test_macos_microphone_consumers_link_the_signing_requirement(self):
         for name in ('scripts/build/build-macos-host.sh',

@@ -1,5 +1,15 @@
 # PLANK encoding profile negotiation
 
+The C/Objective-C/C++ catalog in
+[`plank_encoding_profiles.h`](plank-transport/include/plank_encoding_profiles.h)
+is shared by the desktop Client, Linux Host and macOS Host. It owns append-only
+bookmark IDs, wire tuples, capture compatibility, explicit-mode limits and
+initial bitrates. It is product policy, not a hardware capability declaration:
+Hosts still probe their encoders and Clients still test the exact decoder format.
+Dynamic Match Client geometry has separate canvas limits, so the explicit
+bookmark limits do not constrain Retina desktop sizes. This consolidation does
+not change any stored ID, wire schema or negotiated format.
+
 Each PLANK workstation bookmark stores one capture source and one
 complete encoding profile. The profile fixes the encoder backend, codec,
 precision, chroma sampling, range, and color transform. The client advertises
@@ -20,6 +30,8 @@ backend or format.
 | NvFBC 8-bit | H.265 10-bit 4:2:0 NVENC | `nvenc-direct` | `0x0200` | 4:2:0 | 10 | Limited-range BT.709 YCbCr, sRGB transfer; 8-bit source up-converted |
 | Native X11/XShm 10-bit (Experimental) | H.264 10-bit 4:4:4 — x264 | `software-cuda` | `0x0008` | 4:4:4 | 10 | Identity GBR |
 | Native X11/XShm 10-bit (Experimental) | H.265 10-bit 4:4:4 NVENC | `nvenc-direct` | `0x0800` | 4:4:4 | 10 | Identity GBR |
+| ScreenCaptureKit | H.265 10-bit 4:2:0 | `videotoolbox` | `0x0200` | 4:2:0 | 10 | Full-range BT.709 YCbCr |
+| ScreenCaptureKit | H.265 10-bit 4:4:4 | `videotoolbox` | `0x0800` | 4:4:4 | 10 | Full-range BT.709 YCbCr |
 
 Identity GBR is full range with `matrix_coefficients=0`, `Y=G`, `U=B`, and
 `V=R`; no YCbCr matrix conversion is applied. Native X11/XShm 10-bit capture
@@ -81,8 +93,8 @@ is absent or when the direct NVENC HEVC Rext 10-bit 4:4:4 probe fails.
 
 Decoder choice is internal and profile-specific. The client attempts a real
 exact-format hardware test frame first, validates decoded bit depth, chroma
-geometry, full-range identity metadata, and renderer import, then falls back to
-FFmpeg software decoding of the same bookmark format. It never changes codec,
+geometry, full-range identity metadata, and renderer import. H.264 may fall back
+to FFmpeg software decoding of the same bookmark format; HEVC cannot. It never changes codec,
 depth, or chroma to make a hardware probe succeed. On the qualified Intel NUC:
 
 - H.264 4:4:4 profiles use software decode because the iHD VA-API driver does
@@ -92,6 +104,8 @@ depth, or chroma to make a hardware probe succeed. On the qualified Intel NUC:
 - H.265 10-bit 4:4:4 may use VA-API Main 4:4:4 10 with a Y410 surface imported
   as XR30.
 
-If an exact hardware path fails its test frame or import gate, the client uses
-the exact software decoder. If both exact paths fail, the connection fails
-with a clear unsupported-profile error.
+HEVC requires an exact hardware path on both desktop Clients. A failed test
+frame or import gate stops the connection with a clear hardware-decoding error;
+it does not silently start a software HEVC stream. H.264 retains exact-format
+software decoding when hardware cannot support the selected profile, including
+NVENC H.264. If neither permitted path works, the connection fails clearly.

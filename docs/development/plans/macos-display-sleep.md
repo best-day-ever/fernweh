@@ -49,8 +49,13 @@ capture stop. Existing authorization, topology-change, startup-timeout, teardown
 and owner-abandonment cases must all release it. Also cover unstarted owners and
 power-assertion creation failure.
 
-Hosted tests and a signed candidate are pending. Installed acceptance must
-verify reconnect from display sleep, custom/HiDPI resolution selection and a
+Upstream's signed run43119531407 qualified its source fb5cff4b, including
+37 wake/recovery scenarios, nine readiness cases and 26 session cases. Those
+upstream package and installation results do not qualify a Fernweh package.
+Fernweh's focused source-port evidence is recorded in its integration ledger.
+
+Fernweh installed acceptance remains pending. Verify reconnect from display
+sleep, custom/HiDPI resolution selection and a
 session exceeding the configured display idle timer, followed by disconnect
 with no remaining PLANK idle-display assertion. Preserve the user's desktop;
 do not induce logout/reboot or explicit sleep without authorization.

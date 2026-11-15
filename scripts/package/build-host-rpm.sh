@@ -133,7 +133,6 @@ install -D -m 0644 "$repo_dir/third_party/kyber-kymux/COPYING.md" \
 install -D -m 0644 "$repo_dir/packaging/README.md" \
   "$payload_dir/usr/share/doc/plank-host/README.md"
 mkdir -p "$payload_dir/usr/share/plank"
-cp -aL "$build_dir/assets/." "$payload_dir/usr/share/plank/"
 install -D -m 0644 "$repo_dir/apps/host/linux/src_assets/linux/assets/collaboration-ui.py" \
   "$payload_dir/usr/share/plank/collaboration-ui.py"
 
@@ -216,11 +215,10 @@ if rpm -qpl "$rpm_file" | rg -q '/etc/pam\.d/remote-desktop$|/usr/lib/sysusers\.
   exit 1
 fi
 if rpm -qpl "$rpm_file" | rg -q \
-  '/usr/share/plank/(apps\.json|box\.png|desktop-alt\.png|steam\.png)$'; then
+  '/usr/share/plank/(apps\.json|box\.png|desktop\.png|desktop-alt\.png|steam\.png)$'; then
   echo "host RPM still contains the removed application catalog or legacy artwork" >&2
   exit 1
 fi
-rpm -qpl "$rpm_file" | rg -q '/usr/share/plank/desktop\.png$'
 echo "host_rpm_fixed_desktop_gate=pass"
 for edid_index in 1 2 3 4; do
   rpm -qpl "$rpm_file" | rg -q "/usr/share/plank/display/virtual-${edid_index}\\.edid\$"
@@ -246,8 +244,8 @@ if rpm -qpl "$rpm_file" | rg -q '/virtual-[12]-.+\.edid$'; then
   echo "host RPM still contains preferred-mode-specific virtual EDIDs" >&2
   exit 1
 fi
-if rpm -qpl "$rpm_file" | rg -q '/etc/plank/host\.env$|/usr/share/plank/web/'; then
-  echo "host RPM still contains legacy environment configuration or Web UI assets" >&2
+if rpm -qpl "$rpm_file" | rg -q '/etc/plank/host\.env$|/usr/share/plank/(web/|shaders/|desktop\.png$)'; then
+  echo "host RPM still contains legacy configuration, Web UI or GL capture assets" >&2
   exit 1
 fi
 if rpm -qpl "$rpm_file" | rg -q '/usr/lib/systemd/user/plank-host\.service$'; then

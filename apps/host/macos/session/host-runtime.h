@@ -11,6 +11,8 @@
 // Factories permit non-posting/synthetic qualification without a second launch
 // implementation; the application supplies ScreenCapture and QuartzInput.
 @interface PLANKMacHostRuntime : NSObject
+// Optional administrator-owned policy. Configure before starting the listener.
+@property(copy) NSDictionary *metricsConfiguration;
 @property(copy) BOOL (^verifyBrokerAdmission)(NSString *token, NSString *subject,
                                             PLANKMacAccountIdentity *identity);
 // Configure before start, only after checking shared_desktop_user against the

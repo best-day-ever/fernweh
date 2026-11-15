@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -20,7 +21,7 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 with tempfile.TemporaryDirectory(prefix='plank-display-lease-') as directory:
     cert = fixture.create_identity(directory, root/'probes/macos/https-cert.cnf')
-    with subprocess.Popen([args.server, directory, 'display-lease'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True) as server:
+    with subprocess.Popen([args.server, directory, 'display-lease'], env={**os.environ, 'PLANK_TEST_DISPLAY_TRANSACTION':'lock'}, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True) as server:
         try:
             line = server.stdout.readline()
             port = int(re.search(r'macos_https_auth_ready port=(\d+)', line)[1])
@@ -37,10 +38,7 @@ with tempfile.TemporaryDirectory(prefix='plank-display-lease-') as directory:
             assert status == 200 and reply['capture']['width'] == 3840
             token, topology = fixture.authenticate(cert, port, 'synthetic', 'test')
             capture = topology['capture']
-            status, stream = post({'schema_version':6, 'clipboard':False, 'microphone':False, 'camera':False,
-                'capture_generation':topology['generation'], 'capture_id':capture['id'],
-                'width':capture['width'], 'height':capture['height'], 'encoding_mode':'hevc-10-420-videotoolbox',
-                'frame_rate':60, 'bitrate_kbps':50000, 'max_udp_payload_size':1200}, token, '/plank/launch')
+            status, stream = post(fixture.media_launch(topology), token, '/plank/launch')
             assert status == 200
             fingerprint = hashlib.sha256(Path(directory,'cert.der').read_bytes()).hexdigest()
             result = subprocess.run([args.receiver, fingerprint, '--no-media'], input=json.dumps(stream).encode(),

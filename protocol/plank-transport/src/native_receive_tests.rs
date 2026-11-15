@@ -345,11 +345,12 @@ fn endpoint(lane: Lane) -> PlankTransportNativeEndpoint {
     // points with queues filled by the production video/audio producer helpers.
     PlankTransportNativeEndpoint {
         config: EndpointConfig::Client {
+        setup_mode: false,
             remote_address: "127.0.0.1:28989".parse().unwrap(),
             server_name: "localhost".into(),
             certificate_sha256: None,
             session_token: "test-only".into(),
-            setup_mode: false,
+
             options: super::super::RuntimeOptions {
                 handshake_timeout: Duration::from_secs(5),
                 idle_timeout: Duration::from_secs(5),
@@ -376,8 +377,6 @@ fn push(lane: Lane, shared: &NativeShared, tag: u64) {
         Lane::Video => push_video_receive(
             shared,
             NativeVideoFrame {
-                #[cfg(feature = "sender-timing")]
-                enqueued_at: Instant::now(),
                 codec: VIDEO_CODEC_HEVC,
                 flags: VIDEO_FLAG_KEY,
                 frame_number: tag,

@@ -5,12 +5,18 @@
 #endif
 #include <assert.h>
 #include <string.h>
+#include <time.h>
 #import "fixed-capture.h"
 
 static CGDisplayReconfigurationCallBack observer;
 static unsigned registered;
 static BOOL available = YES, changeDuringRead, failRegistration;
-static unsigned copyCount;
+static unsigned copyCount, changeAtCopy;
+static uint64_t now = 1000000000;
+uint64_t clock_gettime_nsec_np(clockid_t clock) {
+    assert(clock == CLOCK_MONOTONIC);
+    return now;
+}
 static int fakeMode;
 static size_t width = 3840;
 static CGRect bounds = {{0, 0}, {1920, 1080}};
@@ -27,7 +33,8 @@ CGDirectDisplayID CGMainDisplayID(void) { return 42; }
 boolean_t CGDisplayIsActive(CGDirectDisplayID display) { return display == 42 && available; }
 CGDisplayModeRef CGDisplayCopyDisplayMode(CGDirectDisplayID display) {
     assert(display == 42);
-    if (changeDuringRead && ++copyCount == 2) observer(42, kCGDisplaySetModeFlag, NULL);
+    ++copyCount;
+    if (changeDuringRead && copyCount == changeAtCopy) observer(42, kCGDisplaySetModeFlag, NULL);
     return (CGDisplayModeRef)&fakeMode;
 }
 void CGDisplayModeRelease(CGDisplayModeRef mode) { assert(mode == (CGDisplayModeRef)&fakeMode); }
@@ -53,6 +60,13 @@ int main(int argc, const char **argv) {
         assert(capture && observer && registered == 1);
         NSDictionary *first = [capture snapshot];
         assert(first && [first isEqual:[capture snapshot]]);
+        assert(copyCount == 2);
+        for (unsigned i = 0; i < 1000; ++i) assert([capture snapshot] == first);
+        assert(copyCount == 2); // no WindowServer query for unchanged fast reads
+        now += 19000000;
+        assert([capture snapshot] == first && copyCount == 2);
+        now += 1000000;
+        assert([first isEqual:[capture snapshot]] && copyCount == 4); // no sliding expiry
         observer(42, kCGDisplayBeginConfigurationFlag, NULL);
         assert(![capture snapshot]);
         observer(42, kCGDisplaySetModeFlag, NULL);
@@ -65,11 +79,14 @@ int main(int argc, const char **argv) {
         NSDictionary *third = [capture snapshot];
         assert(third && ![third[@"generation"] isEqual:second[@"generation"]]);
         changeDuringRead = YES;
+        changeAtCopy = copyCount + 2;
+        now += 20000000;
         assert(![capture snapshot]);
         changeDuringRead = NO;
         NSDictionary *fourth = [capture snapshot];
         assert(fourth && ![fourth[@"generation"] isEqual:third[@"generation"]]);
         available = NO;
+        now += 20000000; // unnotified inactive display is caught at bounded refresh
         assert(![capture snapshot]);
         available = YES;
         assert(![[capture snapshot][@"generation"] isEqual:fourth[@"generation"]]);
@@ -105,8 +122,14 @@ int main(int argc, const char **argv) {
         // An unnotified geometry difference is still caught by the double read.
         NSDictionary *beforeWidth = [capture snapshot];
         width = 1920;
+        assert([capture snapshot] == beforeWidth);
+        now += 20000000;
         assert(![[capture snapshot][@"generation"] isEqual:beforeWidth[@"generation"]]);
         assert([PLANKMacFixedCapture new] && registered == 1);
+        capture.selectedDisplay = 99;
+        assert(![capture snapshot]); // never fall back from an inactive selection
+        capture.selectedDisplay = 42;
+        assert([capture snapshot]);
         NSDictionary *beforeProfile = [capture snapshot];
         capture.encodingMode = @"hevc-10-444-videotoolbox";
         NSDictionary *fullChroma = [capture snapshot];
@@ -115,6 +138,10 @@ int main(int argc, const char **argv) {
         assert([fullChroma isEqual:[capture snapshot]]);
         capture.encodingMode = @"hevc-10-420-videotoolbox";
         assert(![[capture snapshot][@"generation"] isEqual:fullChroma[@"generation"]]);
+        NSDictionary *beforeChangeBack = [capture snapshot];
+        capture.encodingMode = @"hevc-10-444-videotoolbox";
+        capture.encodingMode = @"hevc-10-420-videotoolbox";
+        assert(![[capture snapshot][@"generation"] isEqual:beforeChangeBack[@"generation"]]);
         capture.encodingMode = @"invalid";
         assert(![capture snapshot]);
         capture = nil;

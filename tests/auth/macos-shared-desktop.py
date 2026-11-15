@@ -47,11 +47,8 @@ with tempfile.TemporaryDirectory(prefix='plank-shared-desktop-') as directory:
                 return topology
             def launch(token, topology, hold):
                 capture = topology['capture']
-                status, stream = post({'schema_version':6, 'clipboard':False, 'microphone':False, 'camera':False,
-                    'capture_generation':topology['generation'], 'capture_id':capture['id'],
-                    'width':capture['width'], 'height':capture['height'],
-                    'encoding_mode':capture['encoding_profile']['encoding_mode'],
-                    'frame_rate':60, 'bitrate_kbps':50000, 'max_udp_payload_size':1200}, token, '/plank/launch')
+                status, stream = post(fixture.media_launch(topology,
+                    encoding_mode=capture['encoding_profile']['encoding_mode']), token, '/plank/launch')
                 assert status == 200, (status, stream)
                 child = subprocess.Popen([args.receiver, fingerprint, '--shared-no-media' if hold else '--no-media'],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

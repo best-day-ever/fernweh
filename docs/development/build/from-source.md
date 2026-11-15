@@ -29,7 +29,7 @@ The Windows Client has its own native build and MSI gates; a Linux/WSL build
 does not establish Windows acceptance. A Windows Host is not provided.
 
 The macOS Host uses Apple's system capture/encoding frameworks and the Rust
-transport. The private Qt/SDL/FFmpeg dependency stack is needed for the macOS
+transport. The private Qt/FFmpeg dependency stack is needed for the macOS
 Client, not for a Host-only build.
 
 ## Source and dependencies
@@ -69,7 +69,7 @@ unset PLANK_MACOS_TEAM_ID PLANK_NOTARY_PROFILE
 # Set source, dependency/cache and output paths as in the Mac runbooks.
 source "$PLANK_SOURCE_ROOT/scripts/package/package-version.sh"
 plank_load_package_version "$PLANK_SOURCE_ROOT"
-PLANK_MACOS_SOURCE_FIRST=1 bash "$PLANK_SOURCE_ROOT/scripts/build/build-macos-transport.sh" \
+bash "$PLANK_SOURCE_ROOT/scripts/build/build-macos-transport.sh" \
   "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/transport"
 PLANK_MACOS_HOST_VERSION="$PLANK_PACKAGE_VERSION" \
   bash "$PLANK_SOURCE_ROOT/scripts/build/build-macos-host.sh" \

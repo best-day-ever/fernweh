@@ -21,7 +21,7 @@ fi
 mkdir -p "$preview_build"
 [[ -z $(ls -A "$preview_build") ]]
 cd "$source_root"
-common=(-mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new
+common=(-O2 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -fobjc-arc -Wall -Wextra -Werror -Werror=unguarded-availability -Werror=unguarded-availability-new
     -Iapps/host/macos/auth -Iapps/host/macos/control -Iapps/host/macos/media -Iapps/host/macos/input -Iapps/host/macos/session -Itests/input -Iprotocol/plank-transport/include
     -framework Foundation -framework Security -framework SystemConfiguration -framework CoreFoundation
     -framework CoreGraphics -framework AppKit -framework Network -framework CoreMedia
@@ -43,6 +43,7 @@ xcrun clang "${common[@]}" -DPLANK_MAC_PREVIEW_TEST -DPLANK_SYNTHETIC_AUTH_TEST 
 xcrun clang "${common[@]}" probes/macos/preview-receive.m "$archive" -lpthread -lm \
     -o "$preview_build/preview-receive"
 if [[ ${4:-} = --synthetic-only ]]; then
+    python3 tests/auth/macos-display-cancellation.py --server "$preview_build/preview-synthetic"
     python3 tests/auth/macos-display-lease.py --server "$preview_build/preview-synthetic" --receiver "$preview_build/preview-receive"
     python3 tests/auth/macos-shared-desktop.py --server "$preview_build/preview-synthetic" --receiver "$preview_build/preview-receive"
     # Root is confined to synthetic loopback children and ephemeral identities;

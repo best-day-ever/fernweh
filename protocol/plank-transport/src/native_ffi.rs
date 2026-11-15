@@ -11,7 +11,7 @@ use super::{
 };
 use crate::rate_control::{PlankRateControllerFactory, TransportRatePolicy};
 use anyhow::{Context, Result, anyhow};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use kymux_types::{
     AVPacket, CodecPacket, CodecPacketHeader, DataPacket, InputPacket, MAX_DATA_PACKET_SIZE,
     MediaPacket, MediaPacketHeader,
@@ -51,11 +51,18 @@ const MAX_INPUT_PACKET_SIZE: usize = u16::MAX as usize;
 const MAX_FILE_CONTROL_PACKET_SIZE: usize = 64 * 1024 + 56;
 const MAX_FILE_DATA_PACKET_SIZE: usize = 256 * 1024 + 56 + 32;
 const VIDEO_METADATA_SIZE: usize = 16;
+// Keep the existing largest valid frame admissible, while bounding all queued
+// video to one maximum-size record (rather than 4/16 such records).
+const VIDEO_QUEUE_BYTE_CAPACITY: usize = MAX_VIDEO_FRAME_SIZE + VIDEO_METADATA_SIZE;
 const VIDEO_FLAG_KEY: u32 = 1;
 const VIDEO_CODEC_H264: u32 = u32::from_be_bytes(*b"H264");
 const VIDEO_CODEC_HEVC: u32 = u32::from_be_bytes(*b"HEVC");
 const AUDIO_CODEC_OPUS: u32 = u32::from_be_bytes(*b"OPUS");
 const CONNECTION_CLOSE_DRAIN: Duration = Duration::from_secs(1);
+
+#[cfg(test)]
+#[path = "native_video_tests.rs"]
+mod video_tests;
 
 #[cfg(test)]
 #[path = "native_data_tests.rs"]
@@ -85,9 +92,78 @@ mod microphone_lane;
 #[path = "native_camera.rs"]
 mod camera_lane;
 
-struct NativeVideoFrame {
+struct NativeVideoSubmission {
     #[cfg(feature = "sender-timing")]
     enqueued_at: Instant,
+    #[cfg(feature = "sender-timing")]
+    frame_number: u64,
+    codec: u32,
+    flags: u32,
+    pts: u64,
+    record: MediaPacket,
+}
+
+fn video_record(
+    number: u64,
+    latency: u16,
+    pts: u64,
+    key: bool,
+    payload: &[u8],
+) -> std::io::Result<MediaPacket> {
+    let mut metadata = [0u8; VIDEO_METADATA_SIZE];
+    metadata[..8].copy_from_slice(&number.to_be_bytes());
+    metadata[8..10].copy_from_slice(&latency.to_be_bytes());
+    MediaPacket::from_slices(
+        MediaPacketHeader {
+            is_config: false,
+            is_key: key,
+            pts,
+            size: 0,
+        },
+        &[&metadata, payload],
+    )
+}
+
+// Charges are retired only when the same item is removed under the queue lock.
+// Multiple older frames may be evicted by one large record; count every drop.
+struct VideoQueue<T> {
+    frames: VecDeque<(usize, T)>,
+    bytes: usize,
+}
+impl<T> Default for VideoQueue<T> {
+    fn default() -> Self {
+        Self {
+            frames: VecDeque::new(),
+            bytes: 0,
+        }
+    }
+}
+impl<T> VideoQueue<T> {
+    fn len(&self) -> usize {
+        self.frames.len()
+    }
+    fn front(&self) -> Option<&T> {
+        self.frames.front().map(|(_, value)| value)
+    }
+    fn pop_front(&mut self) -> Option<T> {
+        let (bytes, value) = self.frames.pop_front()?;
+        self.bytes -= bytes;
+        Some(value)
+    }
+    fn push_back(&mut self, value: T, bytes: usize, count_limit: usize) -> usize {
+        assert!(bytes <= VIDEO_QUEUE_BYTE_CAPACITY && count_limit > 0);
+        let mut dropped = 0;
+        while self.len() >= count_limit || bytes > VIDEO_QUEUE_BYTE_CAPACITY - self.bytes {
+            self.pop_front().expect("a full queue contains an item");
+            dropped += 1;
+        }
+        self.bytes += bytes;
+        self.frames.push_back((bytes, value));
+        dropped
+    }
+}
+
+struct NativeVideoFrame {
     codec: u32,
     flags: u32,
     frame_number: u64,
@@ -147,8 +223,8 @@ impl NativeDataQueue {
 
 #[derive(Default)]
 struct NativeQueues {
-    video_send: VecDeque<NativeVideoFrame>,
-    video_receive: VecDeque<NativeVideoFrame>,
+    video_send: VideoQueue<NativeVideoSubmission>,
+    video_receive: VideoQueue<NativeVideoFrame>,
     audio_send: VecDeque<NativeAudioPacket>,
     audio_receive: VecDeque<NativeAudioPacket>,
     input_send: VecDeque<NativeInputPacket>,
@@ -192,6 +268,44 @@ struct NativeStats {
     video_fec: Mutex<(u64, u64, u64)>,
 }
 
+impl NativeStats {
+    fn snapshot(&self) -> PlankTransportNativeStats {
+        let stats = self;
+        let fec = *stats.video_fec.lock().unwrap();
+        PlankTransportNativeStats {
+            struct_size: std::mem::size_of::<PlankTransportNativeStats>() as u32,
+            video_frames_sent: stats.video_frames_sent.load(Ordering::Relaxed),
+            video_bytes_sent: stats.video_bytes_sent.load(Ordering::Relaxed),
+            video_frames_received: stats.video_frames_received.load(Ordering::Relaxed),
+            video_bytes_received: stats.video_bytes_received.load(Ordering::Relaxed),
+            video_send_drops: stats.video_send_drops.load(Ordering::Relaxed),
+            video_receive_drops: stats.video_receive_drops.load(Ordering::Relaxed),
+            audio_packets_sent: stats.audio_packets_sent.load(Ordering::Relaxed),
+            audio_bytes_sent: stats.audio_bytes_sent.load(Ordering::Relaxed),
+            audio_packets_received: stats.audio_packets_received.load(Ordering::Relaxed),
+            audio_bytes_received: stats.audio_bytes_received.load(Ordering::Relaxed),
+            audio_send_drops: stats.audio_send_drops.load(Ordering::Relaxed),
+            audio_receive_drops: stats.audio_receive_drops.load(Ordering::Relaxed),
+            input_packets_sent: stats.input_packets_sent.load(Ordering::Relaxed),
+            input_packets_received: stats.input_packets_received.load(Ordering::Relaxed),
+            data_packets_sent: stats.data_packets_sent.load(Ordering::Relaxed),
+            data_packets_received: stats.data_packets_received.load(Ordering::Relaxed),
+            file_control_packets_sent: stats.file_control_packets_sent.load(Ordering::Relaxed),
+            file_control_packets_received: stats.file_control_packets_received.load(Ordering::Relaxed),
+            file_data_packets_sent: stats.file_data_packets_sent.load(Ordering::Relaxed),
+            file_data_bytes_sent: stats.file_data_bytes_sent.load(Ordering::Relaxed),
+            file_data_packets_received: stats.file_data_packets_received.load(Ordering::Relaxed),
+            file_data_bytes_received: stats.file_data_bytes_received.load(Ordering::Relaxed),
+            quic_rtt_us: stats.quic_rtt_us.load(Ordering::Relaxed),
+            quic_packets_lost: stats.quic_packets_lost.load(Ordering::Relaxed),
+            kyproto_packets_dropped: stats.kyproto_packets_dropped.load(Ordering::Relaxed),
+            video_fec_source_symbols: fec.0,
+            video_fec_source_symbols_missing: fec.1,
+            video_fec_source_symbols_unrecovered: fec.2,
+        }
+    }
+}
+
 struct NativeStatus {
     state: EndpointState,
     error: String,
@@ -223,13 +337,14 @@ struct NativeShared {
     audio_receive_changed: Condvar,
     input_receive_changed: Condvar,
     input_receive_space: tokio::sync::Notify,
-    data_receive_changed: Condvar,
     data_receive_space: tokio::sync::Notify,
+    data_receive_changed: Condvar,
     file_control_receive_changed: Condvar,
     file_control_receive_space: tokio::sync::Notify,
     file_data_receive_changed: Condvar,
     file_clipboard_enabled: bool,
     stats: NativeStats,
+    metrics: std::sync::OnceLock<Arc<crate::metrics::Reporter>>,
     rate_policy: Arc<TransportRatePolicy>,
     microphone: microphone_lane::Microphone,
     camera: camera_lane::Camera,
@@ -272,13 +387,14 @@ impl NativeShared {
             audio_receive_changed: Condvar::new(),
             input_receive_changed: Condvar::new(),
             input_receive_space: tokio::sync::Notify::new(),
-            data_receive_changed: Condvar::new(),
             data_receive_space: tokio::sync::Notify::new(),
+            data_receive_changed: Condvar::new(),
             file_control_receive_changed: Condvar::new(),
             file_control_receive_space: tokio::sync::Notify::new(),
             file_data_receive_changed: Condvar::new(),
             file_clipboard_enabled,
             stats: NativeStats::default(),
+            metrics: std::sync::OnceLock::new(),
             rate_policy: TransportRatePolicy::new(initial_video_bitrate_bps),
             microphone: microphone_lane::Microphone::default(),
             camera: camera_lane::Camera::default(),
@@ -348,7 +464,6 @@ impl NativeShared {
         self.file_data_receive_changed.notify_all();
         self.stop_notify.notify_waiters();
         self.peer_certificate_approved_notify.notify_waiters();
-        self.session_authorized_notify.notify_waiters();
         self.video_send_notify.notify_waiters();
         self.audio_send_notify.notify_waiters();
         self.input_send_notify.notify_waiters();
@@ -381,6 +496,7 @@ pub struct PlankTransportNativeAudioPacketInfo {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct PlankTransportNativeStats {
     pub struct_size: u32,
     pub video_frames_sent: u64,
@@ -453,16 +569,15 @@ async fn send_video(
             let trace_frame = sender_trace::Frame {
                 number: frame.frame_number,
                 key: frame.flags & VIDEO_FLAG_KEY != 0,
-                bytes: frame.payload.len(),
+                bytes: frame.record.payload.len() - VIDEO_METADATA_SIZE,
                 depth: _queue_depth,
                 wire_bps: shared.rate_policy.active_wire_bps(),
                 drops: shared.stats.video_send_drops.load(Ordering::Relaxed),
             };
-            let payload_size = frame.payload.len() as u64;
+            let payload_size = (frame.record.payload.len() - VIDEO_METADATA_SIZE) as u64;
             let submission = async {
                 if active_codec != Some(frame.codec) {
                     protocol
-                        .send
                         .send(AVPacket::Codec(CodecPacket {
                             header: CodecPacketHeader {
                                 codec: frame.codec,
@@ -476,37 +591,18 @@ async fn send_video(
                 let key = frame.flags & VIDEO_FLAG_KEY != 0;
                 if key {
                     protocol
-                        .send
-                        .send(AVPacket::Media(MediaPacket {
-                            header: MediaPacketHeader {
+                        .send(AVPacket::Media(MediaPacket::new(
+                            MediaPacketHeader {
                                 is_config: true,
                                 is_key: true,
                                 pts: frame.pts,
                                 size: 0,
                             },
-                            payload: Bytes::new(),
-                        }))
+                            Bytes::new(),
+                        )))
                         .await?;
                 }
-                let mut native_payload =
-                    BytesMut::with_capacity(VIDEO_METADATA_SIZE + frame.payload.len());
-                native_payload.put_u64(frame.frame_number);
-                native_payload.put_u16(frame.host_processing_latency);
-                native_payload.extend_from_slice(&[0; VIDEO_METADATA_SIZE - 10]);
-                native_payload.extend_from_slice(&frame.payload);
-                let native_payload = native_payload.freeze();
-                protocol
-                    .send
-                    .send(AVPacket::Media(MediaPacket {
-                        header: MediaPacketHeader {
-                            is_config: false,
-                            is_key: key,
-                            pts: frame.pts,
-                            size: native_payload.len() as u32,
-                        },
-                        payload: native_payload,
-                    }))
-                    .await?;
+                protocol.send(AVPacket::Media(frame.record)).await?;
                 Ok::<(), anyhow::Error>(())
             };
             #[cfg(feature = "sender-timing")]
@@ -550,7 +646,6 @@ async fn send_audio(
         if let Some(packet) = packet {
             if active_frame_samples != Some(packet.frame_samples) {
                 protocol
-                    .send
                     .send(AVPacket::Codec(CodecPacket {
                         header: CodecPacketHeader {
                             codec: AUDIO_CODEC_OPUS,
@@ -560,31 +655,29 @@ async fn send_audio(
                     }))
                     .await?;
                 protocol
-                    .send
-                    .send(AVPacket::Media(MediaPacket {
-                        header: MediaPacketHeader {
+                    .send(AVPacket::Media(MediaPacket::new(
+                        MediaPacketHeader {
                             is_config: true,
                             is_key: true,
                             pts: packet.pts,
                             size: 0,
                         },
-                        payload: Bytes::new(),
-                    }))
+                        Bytes::new(),
+                    )))
                     .await?;
                 active_frame_samples = Some(packet.frame_samples);
             }
             let payload_size = packet.payload.len() as u64;
             protocol
-                .send
-                .send(AVPacket::Media(MediaPacket {
-                    header: MediaPacketHeader {
+                .send(AVPacket::Media(MediaPacket::new(
+                    MediaPacketHeader {
                         is_config: false,
                         is_key: false,
                         pts: packet.pts,
                         size: packet.payload.len() as u32,
                     },
-                    payload: packet.payload,
-                }))
+                    packet.payload,
+                )))
                 .await?;
             shared
                 .stats
@@ -607,21 +700,16 @@ fn push_video_receive(shared: &NativeShared, frame: NativeVideoFrame) {
     let payload_size = frame.payload.len() as u64;
     let dropped = {
         let mut queues = shared.queues.lock().unwrap();
-        let dropped = if queues.video_receive.len() == VIDEO_RECEIVE_CAPACITY {
-            queues.video_receive.pop_front();
-            true
-        } else {
-            false
-        };
-        queues.video_receive.push_back(frame);
-        dropped
+        queues.video_receive.push_back(
+            frame,
+            payload_size as usize + VIDEO_METADATA_SIZE,
+            VIDEO_RECEIVE_CAPACITY,
+        )
     };
-    if dropped {
-        shared
-            .stats
-            .video_receive_drops
-            .fetch_add(1, Ordering::Relaxed);
-    }
+    shared
+        .stats
+        .video_receive_drops
+        .fetch_add(dropped as u64, Ordering::Relaxed);
     shared
         .stats
         .video_frames_received
@@ -638,12 +726,14 @@ async fn receive_video(
     mut protocol: kymux_types::VideoClientProtocol,
 ) -> Result<()> {
     let mut codec = 0;
-    while let Some(packet) = protocol.recv.recv().await? {
+    while let Some(packet) = protocol.recv().await? {
         match packet {
             AVPacket::Codec(packet) => codec = packet.header.codec,
             AVPacket::Media(packet) if !packet.header.is_config => {
-                if packet.payload.len() < VIDEO_METADATA_SIZE {
-                    return Err(anyhow!("native video frame metadata is truncated"));
+                if !(VIDEO_METADATA_SIZE + 1..=VIDEO_QUEUE_BYTE_CAPACITY)
+                    .contains(&packet.payload.len())
+                {
+                    return Err(anyhow!("native video frame size is invalid"));
                 }
                 let frame_number = u64::from_be_bytes(
                     packet.payload[..8]
@@ -655,8 +745,6 @@ async fn receive_video(
                 push_video_receive(
                     &shared,
                     NativeVideoFrame {
-                        #[cfg(feature = "sender-timing")]
-                        enqueued_at: Instant::now(),
                         codec,
                         flags: if packet.header.is_key {
                             VIDEO_FLAG_KEY
@@ -716,7 +804,7 @@ async fn receive_audio(
     mut protocol: kymux_types::AudioClientProtocol,
 ) -> Result<()> {
     let mut frame_samples = 0;
-    while let Some(packet) = protocol.recv.recv().await? {
+    while let Some(packet) = protocol.recv().await? {
         match packet {
             AVPacket::Codec(packet) => frame_samples = packet.header.frame_size,
             AVPacket::Media(packet) if !packet.header.is_config => push_audio_receive(
@@ -1052,11 +1140,11 @@ async fn hold_file_protocols(
     let Some(protocols) = protocols else {
         return std::future::pending::<Result<()>>().await;
     };
-    let mut control_send = Box::pin(send_file_control(shared.clone(), protocols.control.send));
+    let mut control_send = Box::pin(send_file_control(shared.clone(), protocols.control.0));
     let mut control_receive =
-        Box::pin(receive_file_control(shared.clone(), protocols.control.recv));
-    let mut data_send = Box::pin(send_file_data(shared.clone(), protocols.content.send));
-    let mut data_receive = Box::pin(receive_file_data(shared, protocols.content.recv));
+        Box::pin(receive_file_control(shared.clone(), protocols.control.1));
+    let mut data_send = Box::pin(send_file_data(shared.clone(), protocols.content.0));
+    let mut data_receive = Box::pin(receive_file_data(shared, protocols.content.1));
     tokio::select! {
         result = &mut control_send => active_lane_result(result, "native file control sender"),
         result = &mut control_receive => active_lane_result(result, "native file control receiver"),
@@ -1070,8 +1158,10 @@ async fn sample_stats(
     provider: kyproto::KyProtoStatsProvider,
 ) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut metrics = shared.metrics.get().cloned().map(crate::metrics::Sampler::new);
     loop {
-        interval.tick().await;
+        let scheduled = interval.tick().await;
         if shared.stop.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -1101,6 +1191,16 @@ async fn sample_stats(
                 .video_fec_source_symbols_unrecovered
                 .unwrap_or_default(),
         );
+        if let Some(metrics) = metrics.as_mut() {
+            let depths = shared.queues.try_lock().ok().map(|q| crate::metrics::QueueDepths {
+                video_send_frames: q.video_send.len() as u64, video_send_bytes: q.video_send.bytes as u64,
+                video_receive_frames: q.video_receive.len() as u64, video_receive_bytes: q.video_receive.bytes as u64,
+                audio_send_packets: q.audio_send.len() as u64, audio_receive_packets: q.audio_receive.len() as u64,
+                reliable_send_packets: q.data_send.packets.len() as u64, reliable_send_bytes: q.data_send.bytes as u64,
+                reliable_receive_packets: q.data_receive.packets.len() as u64, reliable_receive_bytes: q.data_receive.bytes as u64,
+            });
+            metrics.sample(shared.stats.snapshot(), depths, shared.rate_policy.requested_video_bps(), scheduled.into_std());
+        }
     }
 }
 
@@ -1114,9 +1214,9 @@ async fn hold_server(shared: Arc<NativeShared>, protocols: NativeServerProtocols
     let (connection, video, audio, input, data, files) = protocols.into_parts();
     let mut video = Box::pin(send_video(shared.clone(), video));
     let mut audio = Box::pin(send_audio(shared.clone(), audio));
-    let mut input = Box::pin(receive_input(shared.clone(), input.recv));
-    let mut data_send = Box::pin(send_data(shared.clone(), data.send));
-    let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
+    let mut input = Box::pin(receive_input(shared.clone(), input.1));
+    let mut data_send = Box::pin(send_data(shared.clone(), data.0));
+    let mut data_receive = Box::pin(receive_data(shared.clone(), data.1));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
     let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, false));
@@ -1157,9 +1257,9 @@ async fn hold_client(shared: Arc<NativeShared>, protocols: NativeClientProtocols
     }
     let mut video = Box::pin(receive_video(shared.clone(), video));
     let mut audio = Box::pin(receive_audio(shared.clone(), audio));
-    let mut input = Box::pin(send_input(shared.clone(), input.send));
-    let mut data_send = Box::pin(send_data(shared.clone(), data.send));
-    let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
+    let mut input = Box::pin(send_input(shared.clone(), input.0));
+    let mut data_send = Box::pin(send_data(shared.clone(), data.0));
+    let mut data_receive = Box::pin(receive_data(shared.clone(), data.1));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
     let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, true));
@@ -1186,8 +1286,8 @@ async fn hold_setup_server(
 ) -> Result<()> {
     let stats_provider = setup.connection().stats_provider();
     let (connection, data) = setup.into_parts();
-    let mut data_send = Box::pin(send_data(shared.clone(), data.send));
-    let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
+    let mut data_send = Box::pin(send_data(shared.clone(), data.0));
+    let mut data_receive = Box::pin(receive_data(shared.clone(), data.1));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
     shared.set_state(EndpointState::SetupReady);
 
@@ -1210,7 +1310,7 @@ async fn hold_setup_server(
         native::promote_setup_server(&connection, native_options(options)).await?;
     let mut video = Box::pin(send_video(shared.clone(), video));
     let mut audio = Box::pin(send_audio(shared.clone(), audio));
-    let mut input = Box::pin(receive_input(shared.clone(), input.recv));
+    let mut input = Box::pin(receive_input(shared.clone(), input.1));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, false));
     let mut camera = Box::pin(camera_lane::run(shared.clone(), &connection, false));
@@ -1250,8 +1350,8 @@ async fn hold_setup_client(
         }
     }
 
-    let mut data_send = Box::pin(send_data(shared.clone(), data.send));
-    let mut data_receive = Box::pin(receive_data(shared.clone(), data.recv));
+    let mut data_send = Box::pin(send_data(shared.clone(), data.0));
+    let mut data_receive = Box::pin(receive_data(shared.clone(), data.1));
     let mut stats = Box::pin(sample_stats(shared.clone(), stats_provider));
     shared.set_state(EndpointState::SetupReady);
     loop {
@@ -1273,7 +1373,7 @@ async fn hold_setup_client(
         native::promote_setup_client(&connection, native_options(options)).await?;
     let mut video = Box::pin(receive_video(shared.clone(), video));
     let mut audio = Box::pin(receive_audio(shared.clone(), audio));
-    let mut input = Box::pin(send_input(shared.clone(), input.send));
+    let mut input = Box::pin(send_input(shared.clone(), input.0));
     let mut file_protocols = Box::pin(hold_file_protocols(shared.clone(), files));
     let mut microphone = Box::pin(microphone_lane::run(shared.clone(), &connection, true));
     let mut camera = Box::pin(camera_lane::run(shared.clone(), &connection, true));
@@ -1619,10 +1719,7 @@ fn wait_for_state(shared: &NativeShared, timeout: Duration) -> EndpointState {
     let mut status = shared.status.lock().unwrap();
     while matches!(
         status.state,
-        EndpointState::Idle
-            | EndpointState::Starting
-            | EndpointState::PeerValidation
-            | EndpointState::SetupReady
+        EndpointState::Idle | EndpointState::Starting | EndpointState::PeerValidation
     ) {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -1746,13 +1843,11 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_create(
             Ok(config) => config,
             Err(_) => return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT,
         };
-        let (mode, peer_certificate_approval_required, setup_mode) = match &config {
-            EndpointConfig::Server { setup_mode, .. } => (1, false, *setup_mode),
+        let (mode, peer_certificate_approval_required) = match &config {
+            EndpointConfig::Server { .. } => (1, false),
             EndpointConfig::Client {
-                certificate_sha256,
-                setup_mode,
-                ..
-            } => (2, certificate_sha256.is_none(), *setup_mode),
+                certificate_sha256, ..
+            } => (2, certificate_sha256.is_none()),
         };
         let initial_video_bitrate_bps = match &config {
             EndpointConfig::Server { options, .. } | EndpointConfig::Client { options, .. } => {
@@ -1763,6 +1858,9 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_create(
             EndpointConfig::Server { options, .. } | EndpointConfig::Client { options, .. } => {
                 options.file_clipboard_enabled
             }
+        };
+        let setup_mode = match &config {
+            EndpointConfig::Server { setup_mode, .. } | EndpointConfig::Client { setup_mode, .. } => *setup_mode,
         };
         let endpoint = Box::new(PlankTransportNativeEndpoint {
             config,
@@ -1898,7 +1996,7 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_peer_certificate(
         }
         if !matches!(
             endpoint.shared.state(),
-            EndpointState::PeerValidation | EndpointState::SetupReady | EndpointState::Ready
+            EndpointState::PeerValidation | EndpointState::Ready
         ) {
             return PLANK_TRANSPORT_ERROR_INVALID_STATE;
         }
@@ -1957,30 +2055,6 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_approve_peer_certificat
 }
 
 /// # Safety
-/// `endpoint` must be a live setup endpoint returned by the create function.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn plank_transport_native_endpoint_authorize_session(
-    endpoint: *mut PlankTransportNativeEndpoint,
-) -> i32 {
-    catch_result(|| {
-        let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
-            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
-        };
-        if !endpoint.shared.setup_mode
-            || endpoint.shared.state() != EndpointState::SetupReady
-            || endpoint
-                .shared
-                .session_authorized
-                .swap(true, Ordering::AcqRel)
-        {
-            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
-        }
-        endpoint.shared.session_authorized_notify.notify_one();
-        PLANK_TRANSPORT_OK
-    })
-}
-
-/// # Safety
 /// All non-null pointers must remain valid for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plank_transport_native_video_send(
@@ -2009,31 +2083,41 @@ pub unsafe extern "C" fn plank_transport_native_video_send(
         if endpoint.shared.state() != EndpointState::Ready {
             return PLANK_TRANSPORT_ERROR_INVALID_STATE;
         }
-        let payload =
-            Bytes::copy_from_slice(unsafe { std::slice::from_raw_parts(payload, payload_size) });
-        let dropped = enqueue_replaceable(
-            &mut endpoint.shared.queues.lock().unwrap().video_send,
-            VIDEO_SEND_CAPACITY,
-            NativeVideoFrame {
+        let record = match video_record(
+            info.frame_number,
+            info.host_processing_latency,
+            info.pts,
+            info.flags & VIDEO_FLAG_KEY != 0,
+            unsafe { std::slice::from_raw_parts(payload, payload_size) },
+        ) {
+            Ok(record) => record,
+            Err(_) => return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT,
+        };
+        let size = record.payload.len() + kymux_types::av::AVPacketHeader::SERIALIZED_SIZE;
+        let dropped = endpoint.shared.queues.lock().unwrap().video_send.push_back(
+            NativeVideoSubmission {
                 #[cfg(feature = "sender-timing")]
                 enqueued_at: Instant::now(),
+                #[cfg(feature = "sender-timing")]
+                frame_number: info.frame_number,
                 codec: info.codec,
                 flags: info.flags,
-                frame_number: info.frame_number,
                 pts: info.pts,
-                host_processing_latency: info.host_processing_latency,
-                payload,
+                record,
             },
+            size,
+            VIDEO_SEND_CAPACITY,
         );
-        if dropped {
-            endpoint
-                .shared
-                .stats
-                .video_send_drops
-                .fetch_add(1, Ordering::Relaxed);
+        endpoint
+            .shared
+            .stats
+            .video_send_drops
+            .fetch_add(dropped as u64, Ordering::Relaxed);
+        if let Some(metrics) = endpoint.shared.metrics.get() {
+            metrics.host_video(info.host_processing_latency);
         }
         endpoint.shared.video_send_notify.notify_one();
-        if dropped {
+        if dropped != 0 {
             PLANK_TRANSPORT_DROPPED
         } else {
             PLANK_TRANSPORT_OK
@@ -2090,13 +2174,16 @@ pub unsafe extern "C" fn plank_transport_native_video_receive(
             &endpoint.shared.video_receive_changed,
             Duration::from_millis(timeout_ms.into()),
             |queues| {
-                claim_receive_front(
-                    &mut queues.video_receive,
-                    |frame| frame.payload.len(),
-                    payload,
-                    payload_capacity,
-                    payload_size_out,
-                )
+                let size = queues.video_receive.front()?.payload.len();
+                let result = validate_bytes_out(size, payload, payload_capacity, payload_size_out);
+                Some(if result == PLANK_TRANSPORT_OK {
+                    Ok(queues
+                        .video_receive
+                        .pop_front()
+                        .expect("validated frame remains locked"))
+                } else {
+                    Err(result)
+                })
             },
         ) else {
             return if endpoint.shared.state() == EndpointState::Failed {
@@ -2348,10 +2435,7 @@ pub unsafe extern "C" fn plank_transport_native_data_send(
         if payload.is_null() || !(1..=MAX_DATA_PACKET_SIZE).contains(&payload_size) {
             return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
         }
-        if !matches!(
-            endpoint.shared.state(),
-            EndpointState::SetupReady | EndpointState::Ready
-        ) {
+        if !matches!(endpoint.shared.state(), EndpointState::Ready) {
             return PLANK_TRANSPORT_ERROR_INVALID_STATE;
         }
         let mut queues = endpoint.shared.queues.lock().unwrap();
@@ -2641,6 +2725,55 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_stats(
     })
 }
 
+/// # Safety
+/// Endpoint and configuration strings must remain readable during this call.
+/// An output handle, if requested, must later be destroyed exactly once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_metrics_configure(
+    endpoint: *mut PlankTransportNativeEndpoint,
+    config: *const crate::metrics::PlankMetricsConfig,
+    handle_out: *mut *mut crate::metrics::PlankMetricsHandle,
+) -> i32 {
+    catch_result(|| {
+        if !handle_out.is_null() { unsafe { *handle_out = std::ptr::null_mut(); } }
+        let (Some(endpoint), Some(config)) = (unsafe { endpoint.as_ref() }, unsafe { config.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        let Ok(reporter) = (unsafe { crate::metrics::Reporter::create(config, endpoint.mode == 1) }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        let lifecycle = endpoint.worker.lock().unwrap();
+        if endpoint.shared.state() != EndpointState::Idle || endpoint.shared.metrics.set(reporter.clone()).is_err() {
+            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+        }
+        if !handle_out.is_null() {
+            unsafe { *handle_out = Box::into_raw(Box::new(crate::metrics::PlankMetricsHandle(reporter.clone()))); }
+        }
+        drop(lifecycle);
+        reporter.event("created");
+        PLANK_TRANSPORT_OK
+    })
+}
+
+/// # Safety
+/// Endpoint and info strings must remain live during this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_metrics_stream_info(
+    endpoint: *mut PlankTransportNativeEndpoint,
+    info: *const crate::metrics::PlankMetricsStreamInfo,
+) -> i32 {
+    catch_result(|| {
+        let (Some(endpoint), Some(info)) = (unsafe { endpoint.as_ref() }, unsafe { info.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        let Some(reporter) = endpoint.shared.metrics.get() else { return PLANK_TRANSPORT_OK; };
+        match unsafe { reporter.stream_info(info) } {
+            Ok(()) => PLANK_TRANSPORT_OK,
+            Err(()) => PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT,
+        }
+    })
+}
+
 fn stop_endpoint(endpoint: &PlankTransportNativeEndpoint) -> i32 {
     let mut worker_slot = endpoint.worker.lock().unwrap();
     let state = endpoint.shared.state();
@@ -2655,10 +2788,16 @@ fn stop_endpoint(endpoint: &PlankTransportNativeEndpoint) -> i32 {
         && worker.join().is_err()
     {
         endpoint.shared.fail("native KyProto worker panicked");
+        drop(worker_slot);
+        if let Some(metrics) = endpoint.shared.metrics.get() { metrics.finish(true); }
         return PLANK_TRANSPORT_ERROR_PANIC;
     }
     if endpoint.shared.state() != EndpointState::Failed {
         endpoint.shared.set_state(EndpointState::Stopped);
+    }
+    drop(worker_slot);
+    if let Some(metrics) = endpoint.shared.metrics.get() {
+        metrics.finish(endpoint.shared.state() == EndpointState::Failed);
     }
     #[cfg(feature = "sender-timing")]
     endpoint.shared.sender_trace.flush();
@@ -2719,4 +2858,27 @@ pub unsafe extern "C" fn plank_transport_native_endpoint_last_error(
         }
     }
     required
+}
+
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plank_transport_native_endpoint_authorize_session(
+    endpoint: *mut PlankTransportNativeEndpoint,
+) -> i32 {
+    catch_result(|| {
+        let Some(endpoint) = (unsafe { endpoint.as_ref() }) else {
+            return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
+        };
+        if !endpoint.shared.setup_mode
+            || endpoint.shared.state() != EndpointState::SetupReady
+            || endpoint
+                .shared
+                .session_authorized
+                .swap(true, Ordering::AcqRel)
+        {
+            return PLANK_TRANSPORT_ERROR_INVALID_STATE;
+        }
+        endpoint.shared.session_authorized_notify.notify_one();
+        PLANK_TRANSPORT_OK
+    })
 }

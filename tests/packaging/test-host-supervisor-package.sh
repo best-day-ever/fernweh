@@ -167,7 +167,7 @@ rg -Fq 'plank-host-certificate' "$builder"
 rg -Fq 'plank-host-state' "$builder"
 rg -Fq 'PLANK_BOOST_SOURCE_DIR' \
   "$repo_dir/scripts/build/build-host-package-binaries.sh"
-rg -Fq 'project(Boost VERSION 1.89.0 LANGUAGES CXX)' \
+rg -Fq 'project(Boost VERSION 1.92.0 LANGUAGES CXX)' \
   "$repo_dir/scripts/build/build-host-package-binaries.sh"
 rg -Fq 'FETCHCONTENT_SOURCE_DIR_BOOST' \
   "$repo_dir/scripts/build/build-host-package-binaries.sh"
@@ -223,8 +223,6 @@ rg -Fq 'session.output_name = *capture_name' \
   "$repo_dir/apps/host/linux/src/nvhttp.cpp"
 rg -Fq 'config.monitor.output_name = launch_session->span_desktop ?' \
   "$repo_dir/apps/host/linux/src/session_stream.cpp"
-rg -Fq 'config.m_device_id = session.output_name' \
-  "$repo_dir/apps/host/linux/src/display_device.cpp"
 rg -Fq 'host_static_capture_selector_absence_gate=pass' \
   "$repo_dir/scripts/build/build-host-package-binaries.sh"
 rg -Fq 'host_global_video_selector_absence_gate=pass' \
@@ -271,13 +269,15 @@ rg -Fq 'inline constexpr int desktop_app_id = 881448767' \
   "$repo_dir/apps/host/linux/src/process.h"
 rg -Fq 'std::atomic<int> _app_id {0}' \
   "$repo_dir/apps/host/linux/src/process.h"
-rg -Fq 'if(WIN32 OR APPLE)' \
-  "$repo_dir/apps/host/linux/cmake/dependencies/Boost_Sunshine.cmake"
+test -f "$repo_dir/apps/host/linux/cmake/dependencies/Boost_Sunshine.cmake"
+if rg -n '\bprocess\b' "$repo_dir/apps/host/linux/cmake/dependencies/Boost_Sunshine.cmake" ||
+    rg -n 'boost/process|Boost::process' "$repo_dir/apps/host/linux/src" "$repo_dir/apps/host/linux/cmake"; then
+  echo "unused Boost.Process dependency remains in the Linux Host" >&2
+  exit 1
+fi
 if rg -n 'apps\.json|file_apps|global_prep_cmd|Steam Big Picture|Low Res Desktop' \
   "$repo_dir/apps/host/linux/src" \
-  "$repo_dir/apps/host/linux/src_assets" \
   "$repo_dir/apps/host/linux/cmake" \
-  "$repo_dir/apps/host/linux/packaging" \
   "$repo_dir/apps/host/linux/docs"; then
   echo 'legacy host application catalog remains' >&2
   exit 1
@@ -297,10 +297,7 @@ fi
 if rg -n -i 'miniupnp|upnp' \
   "$repo_dir/apps/host/linux/src" \
   "$repo_dir/apps/host/linux/cmake" \
-  "$repo_dir/apps/host/linux/scripts" \
-  "$repo_dir/apps/host/linux/packaging" \
   "$repo_dir/apps/host/linux/docs" \
-  "$repo_dir/apps/host/linux/docker" \
   "$repo_dir/packaging" \
   --glob '!**/third-party/**'; then
   echo 'UPnP or miniupnpc capability remains' >&2

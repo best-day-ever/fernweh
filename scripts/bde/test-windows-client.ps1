@@ -10,9 +10,30 @@ if (!$vsRoot) { throw 'MSVC x64 tools are required' }
 $env:PATH = "$QtRoot\bin;$SourceRoot\apps\client\libs\windows\lib\x64;$env:PATH"
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:PLANK_REPO_ROOT = $SourceRoot
+$env:PLANK_CLIENT_SOURCE = Join-Path $SourceRoot 'apps/client'
+# Use the same MSVC environment and shared Cargo target as the native builder.
+$udpDirectory = Join-Path $BuildDir 'quinn-udp'
+[void](New-Item -ItemType Directory -Force -Path $udpDirectory)
+$udpRunner = Join-Path $udpDirectory 'test.cmd'
+$udpLog = Join-Path $udpDirectory 'results.log'
+$udpCommand = '@echo off' + "`r`n" +
+    'call "' + $vsRoot + '\VC\Auxiliary\Build\vcvars64.bat" >nul' + "`r`n" +
+    'if errorlevel 1 exit /b 1' + "`r`n" +
+    'cd /d "' + $SourceRoot + '"' + "`r`n" +
+    'if errorlevel 1 exit /b 1' + "`r`n" +
+    'set CARGO_BUILD_JOBS=2' + "`r`n" +
+    'cargo test --target-dir "%USERPROFILE%\.cargo\shared-target" --locked --offline --release --manifest-path "' + $SourceRoot + '\third_party\quinn-udp-0.5.16\Cargo.toml" --features plank-bounded-receive-buffer --test tests plank_receive_buffer -- --nocapture >"' + $udpLog + '" 2>&1' + "`r`n" +
+    'exit /b %ERRORLEVEL%' + "`r`n"
+[IO.File]::WriteAllText($udpRunner, $udpCommand, [Text.Encoding]::ASCII)
+cmd /c $udpRunner
+if ($LASTEXITCODE) { Get-Content $udpLog -Tail 30; throw 'QUIC UDP socket tests failed' }
+Get-Content $udpLog
+if (!(Select-String -Path $udpLog -SimpleMatch 'test result: ok. 2 passed;')) {
+    throw 'QUIC UDP socket regressions did not run both required tests'
+}
 # The clipboard suites use the test process's Windows clipboard, so they run
 # sequentially. Run on a builder desktop without personal clipboard contents.
-foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'sessionhotkeys', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
+foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'hostchoices', 'sessionhotkeys', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'windowsresources', 'sdlmicrophone', 'mediafeatures', 'qtdisplaylayout', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
     if ($env:FERNWEH_BROKER_ENABLED -ne '1' -and $suite -in @('fernwehupdater', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker')) {
         continue
     }

@@ -164,6 +164,8 @@ Path(os.environ['TEST_ARGS']).write_text(json.dumps(sys.argv[1:]))
                     # Isolated stubs: no sudo, package scripts, compiler or Git state changes.
                     for command in ('sudo', 'git'):
                         executable(base / 'bin' / command, '#!/bin/bash\nexit 0\n')
+                    executable(base / 'cargo' / 'bin' / 'cargo',
+                               '#!/bin/bash\nprintf "test result: ok. 2 passed; 0 failed;\\n"\n')
                     env = dict(os.environ, PLANK_SOURCE_ROOT=str(source),
                                PLANK_WORK_ROOT=str(base / 'work'), PLANK_CARGO_ROOT=str(base / 'cargo'),
                                PLANK_RUSTUP_ROOT=str(base / 'rustup'), PLANK_CI_SIGNED=signed,
@@ -173,10 +175,11 @@ Path(os.environ['TEST_ARGS']).write_text(json.dumps(sys.argv[1:]))
                     result = subprocess.run(['bash', str(ROOT / 'scripts/ci/build.sh'), 'macos-host'],
                                             env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
+                    version = '1.2.02-test-host' + ('-macos27.0' if target == '27.0' else '')
                     self.assertEqual(record.read_text().splitlines(),
                                      ['transport:' + target,
                                       ('package:' if signed == 'true' else 'assembly:') + target +
-                                      ':1.2.02-test-host-macos' + target])
+                                      ':' + version])
 
 
 if __name__ == '__main__':

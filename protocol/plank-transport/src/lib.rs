@@ -19,13 +19,14 @@ pub mod camera;
 pub mod camera_encoded;
 mod camera_record;
 pub mod microphone;
+pub mod metrics;
 pub mod native;
 pub mod native_ffi;
 pub mod rate_control;
 
 pub const PROTOCOL_MAGIC: [u8; 4] = *b"DSM1";
 pub const PROTOCOL_VERSION: u16 = 8;
-pub const ABI_VERSION: u32 = 14;
+pub const ABI_VERSION: u32 = 15;
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS: u32 = 10_000;
 const DEFAULT_IDLE_TIMEOUT_MS: u32 = 10_000;
@@ -2021,7 +2022,7 @@ mod tests {
 
     #[test]
     fn public_header_abi_values_are_stable() {
-        assert_eq!(plank_transport_abi_version(), 14);
+        assert_eq!(plank_transport_abi_version(), 15);
         assert_eq!(EndpointState::Idle as u32, 1);
         assert_eq!(EndpointState::PeerValidation as u32, 3);
         assert_eq!(EndpointState::SetupReady as u32, 4);

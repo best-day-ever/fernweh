@@ -9,7 +9,9 @@ Probe signing/installation remains documented in `probes/macos/README.md`.
 
 The standard Host package supports macOS26.7 and newer, with
 `PLANK_MACOS_HOST_MIN_OS=26.7` selected by default.
-SDK 27, Rust 1.89 and the exact transport/dependency pins remain required. The
+Standard package filenames and visible versions omit a `macos26.7` suffix;
+the minimum OS remains in the app/installer metadata and artifact manifest.
+SDK 27 and the exact Rust/transport/dependency pins remain required. The
 same setting must be used for the transport archive, Host, component tests and
 PKG. Application, camera extension, audio-driver and installer minimums follow
 that selected target. A 27.0 candidate comparison remains available; see the
@@ -34,9 +36,9 @@ the app payload at `/Applications/PLANK Host.app` and three system launchd
 entries. Bash pre/post-install scripts create administrator configuration,
 private identity and administrator-readable system logs. Private state is not a
 payload and survives uninstall.
-The PKG contains a signed native Installer Requirements pane, loaded only for
-the installation wizard. It is not installed with the product and introduces
-no persistent helper or installation service.
+The PKG uses the standard Installer pages. It contains no custom Installer
+plug-in or early external-program check that would trigger the extra
+"This package will run a program" consent prompt.
 Prepare/validate persistent state and logs in preinstall, before worker shutdown.
 The .82 real install found root-owned logs changed to directory0744/files0644;
 the postinstall-only strict mode check stopped after replacing the app. The
@@ -80,15 +82,13 @@ Do not generate a separate uninstall PKG. `macos_pkg_gate=pass` does not prove i
 permission continuity, reboot or streaming acceptance. No `installer -pkg`
 invocation is part of the build. Do not publish a rejected/pending artifact.
 
-The normal graphical workflow is to open the Host PKG. A native Requirements
-page follows Introduction and runs read-only `fdesetup isactive` through
-Foundation's process API. Continue stays disabled while checking, when FileVault
-is enabled/busy, or when verification fails. The page explains the remote-access
-requirement, points to Settings and offers Check Again. The check has a five-second
-deadline and stops its child when the page closes. Late results from retired
-checks cannot enable Continue. No FileVault setting is changed automatically.
-The preinstall script rechecks before modifying state or stopping services,
-including command-line installations and changes since the initial check.
+The normal graphical workflow is to open the Host PKG. Introduction explains
+that FileVault must be off for remote access after a restart. After the user
+clicks Install and authorizes installation, the preinstall script runs read-only
+`fdesetup status` before modifying state or stopping services. Installation
+requires a successful query confirming FileVault off; enabled, transitioning,
+unknown or failed status aborts with a diagnostic in Installer Log. This also
+protects command-line installations. No FileVault setting is changed automatically.
 After installation, open PLANK Host in Applications for privacy setup.
 Uninstall with the installed
 script (administrator authorization is required):
@@ -113,6 +113,16 @@ to Developer ID transition; that is not proof that TCC grants survive. Test the
 transition with the user available for permissions. Do not widen the signed
 worker-to-worker XPC requirement to compensate for a packaging/signing change.
 
+The shared `/Library/Application Support` parent may be root:admin mode0775
+after another product's installer runs. The native configuration walker permits
+that exact ancestor only when opening PLANK's canonical system state, and the
+PKG/uninstaller preflight permits the same root:admin0775 parent. Neither changes
+the shared directory. PLANK-owned directories/files keep their existing strict
+ownership/mode checks; symlinks, wrong owners/groups and world-writable parents
+remain rejected. `configuration-files.h` and `pkg-common.sh` both enforce this
+boundary, with native policy and shell/installer fixtures. An error now names the
+rejected directory rather than leaving only a generic desktop-provisioning exit.
+
 There is no custom rollback database or growing set of old application copies.
 On installation failure, inspect Installer Log and rerun the signed installer;
 existing configuration and keys are not overwritten. Do not claim macOS Installer
@@ -121,20 +131,15 @@ tests mocked launchd lifecycle without privileges; `--filesystem` additionally
 requires root and creates/removes an isolated fixture under
 `/Library/Application Support`, without touching product services or files.
 These are developer qualification commands, not operator instructions.
-`python3 tests/packaging/test-macos-installer-preflight.py` checks page order and
-rejects the deprecated external-script option. The Mac build compiles the pane
-with deprecated-API diagnostics treated as errors, exercises its actual lifecycle
-against harmless child processes, and loads the generated bundle without opening
-Installer or executing FileVault commands. Finished-PKG checks verify the embedded
-page order, signature and loadability. The pane uses public AppKit/Foundation and
-InstallerPlugins interfaces; no distribution JavaScript or private registry status
-heuristic remains. The native bundle is signed before productbuild/notarization.
-
-Actual Installer presentation remains a separate gate. Apple has acknowledged
-[plug-in loading failures](https://developer.apple.com/forums/thread/842811) in
-26.7/27 and suggested retesting 27.2 beta 4. Direct bundle loading does not prove
-Installer's own extraction/loading path works. Test the identical signed PKG's
-Requirements page on supported systems; do not disable signing checks as a workaround.
+`python3 tests/packaging/test-macos-installer-preflight.py` executes the production
+preinstall against fixture commands and verifies that every rejected FileVault
+state stops before state preparation or service shutdown. It also rejects early
+distribution scripts and Installer plug-ins. The finished-PKG check verifies
+their absence and the exact packaged preinstall safeguard, without executing
+installation scripts or changing FileVault. Actual Installer presentation remains
+a separate gate: open the signed PKG and confirm the standard wizard appears
+without the extra executable-preflight warning. Signing/notarization and the
+normal administrator authorization remain required.
 For command-line signature requirements, `codesign -R` needs a leading `=` for
 inline requirement text; otherwise it treats the expression as a filename.
 After this validation-command error, recheck the already signed binary and
@@ -279,8 +284,8 @@ LoginWindow-only agent as well as the designated user's Aqua agent. It never
 logs out or reboots for testing. See `macos-session-lifecycle.md` for its
 role-private identity files, restart policy and remaining live acceptance gates.
 ABI-13 candidates must rebuild the transport archive; never link an ABI-12
-archive to the larger stats header. Preserve accepted .57's
-`PLANK_MACOS_SOURCE_FIRST=1` feature selection during that rebuild.
+archive to the larger stats header. Source-first video FEC is now shared and
+unconditional; no platform-specific feature selection is needed.
 
 Use `scripts/build/build-macos-host.sh SOURCE EMPTY_OUTPUT RETAINED_TRANSPORT_ARCHIVE`
 on the dedicated Mac. Set `PLANK_MACOS_HOST_VERSION` explicitly, for example
@@ -525,14 +530,18 @@ commands for a current candidate. The qualified source-first path below retains
 ordinary single-datagram submission. The application datagram pacer is now
 deleted, not merely bypassed.
 
-For source-first FEC qualification, use `PLANK_MACOS_SOURCE_FIRST=1`.
-This includes sender timing and enables source-first packet submission. The repair count and library's
-repair encoder remain unchanged. The runner additionally checks byte-identical
-source packets against the retained RaptorQ library, multi-block/sub-block
-padding, recovery at 0/5/10/20% omitted sources, and preparation timing. The
-timing test is synthetic CPU preparation, not a network/performance gate.
-RaptorQ 2 changes repair IDs and the native QUIC protocol identifier; matching
-Host and Client packages are required. See the native transport contract.
+Source-first video FEC is the only sender implementation on every platform.
+The Mac builder selects `PLANK_MACOS_SENDER_TIMING=1` only to retain the existing
+bounded opt-in timing trace. The repair count and library's repair encoder
+remain unchanged. The shared runner checks byte-identical source/repair packets,
+multi-block/sub-block padding, loss/reordering, and preparation timing, followed
+by real encrypted loopback/recovery tests. The strict three controlled-loss
+performance matrices run on the authorized development Mac using the exact
+hosted test executable and shipping features; follow the release runbook.
+Hosted workers failed this new timing test with the accepted baseline too.
+The preparation timing is CPU-only, and neither test replaces installed session
+acceptance. This refactor retains the current RaptorQ 2/native wire generation;
+receiving Clients need no update for this Host sender change.
 
 All Host builds submit directly to Quinn, whose packet scheduler caps paced
 traffic at the encoder peak (bounded to 1.5 times the selected target) times 1.4
@@ -560,7 +569,7 @@ Run the feature's bounded-window/context-isolation tests plus both C loopbacks,
 and check the feature-disabled build. See HANDOFF for exact diagnostic artifacts.
 
 The first integration build reuses `protocol/plank-transport` and its exact
-Kymux/Quinn sources, Cargo lockfile and Rust 1.89.0. No networking policy change
+Kymux/Quinn sources, Cargo lockfile and Rust 1.99.1. No networking policy change
 or macOS-specific transport replacement is implied. Passing this build is not
 proof of an authenticated Client connection or media playback.
 
@@ -581,12 +590,12 @@ export PLANK_CANONICAL_ROOT="$HOME/dev/plank"
 export PLANK_DEP_ROOT="$HOME/Library/Caches/plank-build"
 export PLANK_WORK_ROOT="$PLANK_DEP_ROOT/work"
 export PLANK_CARGO_ROOT="$PLANK_DEP_ROOT/cargo"
-export PLANK_RUSTUP_ROOT="$PLANK_DEP_ROOT/rustup-1.89.0"
+export PLANK_RUSTUP_ROOT="$PLANK_DEP_ROOT/rustup-1.99.1"
 ```
 
 Bootstrap Rust once using the official `rustup-init` Apple Silicon binary and
-its SHA-256 file, verifying the digest before execution. Use rustup 1.28.2,
-`--profile minimal --default-toolchain 1.89.0 --no-modify-path -y` with the above
+its SHA-256 file, verifying the digest before execution. Use rustup 1.29.2,
+`--profile minimal --default-toolchain 1.99.1 --no-modify-path -y` with the above
 Cargo/Rustup directories. Do not edit shell startup files or install as root.
 Official source/verification procedure:
 [Rustup manual installation](https://rust-lang.github.io/rustup/installation/other.html).
@@ -1030,13 +1039,10 @@ link qualification remains separate; these are not hardware acceptance tests.
 Do not run an old Client against a new common-c header/library: service flags
 are an explicit internal struct contract, with no old-ABI inference.
 
-For an uninstalled full-GUI startup diagnostic on linux-client-builder, keep isolated
-XDG config/state/cache/runtime directories and use both
-`QT_QPA_PLATFORM=offscreen` and `SDL_VIDEODRIVER=offscreen`. The SDL `dummy`
-driver is not a substitute: both the unchanged 1.0.34 binary and the Mac-profile
-build crash at `PlVkRenderer::initialize` when its Vulkan loader is unavailable.
-The ordinary package `--version` check does not enter that renderer path.
-Bound full-GUI probes with `timeout --kill-after=2s 8s` because the application's
-SDL signal handler can consume SIGTERM without exiting its idle Qt main loop.
-This diagnostic does not qualify compositor behavior, decoder hardware, visual
-layout or session teardown; those need the actual hardware-test target.
+For an uninstalled Client startup diagnostic on a hosted Ubuntu builder, keep
+isolated XDG config/state/cache/runtime directories and use
+`QT_QPA_PLATFORM=offscreen`. The Client has no SDL runtime or SDL video-driver
+setting. The package `--version` check establishes Qt startup and runtime
+dependency closure, not streaming. Bound full-GUI probes with
+`timeout --kill-after=2s 8s`; compositor behavior, decoder hardware, visual layout
+and session teardown require the dedicated suites and hardware-test target.

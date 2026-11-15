@@ -6,6 +6,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include <signal.h>
+#include <stdatomic.h>
 #ifdef PLANK_MAC_PREVIEW_TEST
 #import "host-runtime.h"
 #import "screen-capture.h"
@@ -84,8 +85,8 @@ int main(int argc, const char *argv[]) {
         if (certificate) CFRelease(certificate);
         if (!identity) { puts("macos_https_identity_create=failed"); return 2; }
 #ifdef PLANK_SYNTHETIC_AUTH_TEST
-        __block BOOL scopeActive = YES;
-        PLANKMacGraphicalSnapshot snapshot = ^{ return (PLANKMacGraphicalIdentity){scopeActive, 1, {123, {1}}, PLANKMacScopeDesktop}; };
+        __block atomic_bool scopeActive = true;
+        PLANKMacGraphicalSnapshot snapshot = ^{ return (PLANKMacGraphicalIdentity){atomic_load(&scopeActive), 1, {123, {1}}, PLANKMacScopeDesktop}; };
 #else
         PLANKMacGraphicalSnapshot snapshot = ^{ return [authority snapshot]; };
 #endif
@@ -136,13 +137,34 @@ int main(int argc, const char *argv[]) {
             }];
 #ifdef PLANK_SYNTHETIC_AUTH_TEST
         runtime.sharedDesktop = argc == 3 && !strcmp(argv[2], "shared-desktop");
+        __weak PLANKMacHostRuntime *weakRuntime = runtime;
+        NSString *displayProbe = NSProcessInfo.processInfo.environment[@"PLANK_TEST_DISPLAY_TRANSACTION"];
+        BOOL (^lockAvailable)(void) = ^BOOL {
+            if (!displayProbe) return YES;
+            dispatch_semaphore_t acquired = dispatch_semaphore_create(0);
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                // Exercise the actual admission lock from another queue while
+                // the real runtime invokes its slow display provider.
+                BOOL rejected = ![weakRuntime startOnPort:0 ready:^(uint16_t port) { (void)port; } failed:nil];
+                if (rejected) dispatch_semaphore_signal(acquired);
+            });
+            return dispatch_semaphore_wait(acquired, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0;
+        };
         runtime.releaseDisplay = ^BOOL {
+            if (!lockAvailable()) { puts("display_lock_held_during_restore=1"); fflush(stdout); return NO; }
             desktopWidth = 1920; desktopHeight = 1080; desktopScale = 1;
             puts("macos_display_released"); fflush(stdout); return YES;
         };
         runtime.prepareDisplay = ^BOOL(unsigned width, unsigned height, unsigned scale, NSString *mode, BOOL (^valid)(void)) {
             if (!valid() || !((width == 1920 && height == 1080) || (width == 3840 && height == 2160) ||
                               (width == 3420 && height == 2214))) return NO;
+            if (!lockAvailable()) return NO;
+            if ([displayProbe isEqual:@"cancel"]) {
+                [[NSData data] writeToFile:[directory stringByAppendingPathComponent:@"display-entered"] atomically:YES];
+                while (valid()) usleep(10000);
+                puts("display_cancelled_without_lock_wait=1"); fflush(stdout);
+                return NO;
+            }
             desktopWidth = width; desktopHeight = height; desktopScale = scale;
             encodingMode = mode;
             return valid();
@@ -205,6 +227,17 @@ int main(int argc, const char *argv[]) {
         dispatch_source_t termination = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGTERM, 0, dispatch_get_main_queue());
         dispatch_source_set_event_handler(termination, stop);
         dispatch_resume(termination);
+#ifdef PLANK_SYNTHETIC_AUTH_TEST
+        // Test-only retirement while HTTPS is still reachable. No production
+        // signal handler, network command or real graphical mutation is added.
+        signal(SIGUSR1, SIG_IGN);
+        dispatch_source_t retirement = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR1, 0, dispatch_get_main_queue());
+        dispatch_source_set_event_handler(retirement, ^{
+            atomic_store(&scopeActive, false);
+            puts("macos_https_auth_retired=1"); fflush(stdout);
+        });
+        dispatch_resume(retirement);
+#endif
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, fixtureLifetime * NSEC_PER_SEC), dispatch_get_main_queue(), stop);
         // Aqua notifications and the authority watcher require the main run loop.
         [[NSRunLoop mainRunLoop] run];

@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 
 rem BDE Windows client build from a complete PLANK checkout.
-rem Requires MSVC 2022 Build Tools, Rust 1.89.0, Qt 6.10.2 msvc2022_64,
+rem Requires MSVC 2022 Build Tools, Rust 1.99.1, Qt 6.10.2 msvc2022_64,
 rem and the pinned Windows dependency archive under apps\client\libs\windows.
 rem The native PLANK transport is mandatory. Set PLANK_WINDOWS_RELEASE_BUILD=1
 rem for the unmodified release version; packaging and signing are separate.
@@ -47,11 +47,11 @@ call "%VS_ROOT%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
 
 set "PATH=%PLANK_QT_ROOT%\bin;%PATH%"
-set "CARGO_TARGET_DIR=%PLANK_WINDOWS_BUILD_DIR%\cargo-target"
+set "CARGO_TARGET_DIR=%USERPROFILE%\.cargo\shared-target"
 if not exist "%PLANK_WINDOWS_BUILD_DIR%\qmake" mkdir "%PLANK_WINDOWS_BUILD_DIR%\qmake"
 if errorlevel 1 exit /b 1
 
-cargo +1.89.0 build --locked --release --target x86_64-pc-windows-msvc --manifest-path "%PLANK_SOURCE_ROOT%\protocol\plank-transport\Cargo.toml"
+cargo +1.99.1 build --locked --release --target x86_64-pc-windows-msvc --manifest-path "%PLANK_SOURCE_ROOT%\protocol\plank-transport\Cargo.toml"
 if errorlevel 1 exit /b 1
 set "PLANK_TRANSPORT_LIBRARY=%CARGO_TARGET_DIR%\x86_64-pc-windows-msvc\release\plank_transport.lib"
 if not exist "%PLANK_TRANSPORT_LIBRARY%" (

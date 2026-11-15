@@ -13,7 +13,7 @@ PATCH = Path('apps/client/app/deploy/linux/ffmpeg-patches/0001-hevc-enable-hwacc
 
 
 class BootstrapInputs(unittest.TestCase):
-    def run_bootstrap(self, with_patch):
+    def run_bootstrap(self, with_patch, valid_source=True):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             script = base / 'source/scripts/build/build-client-ffmpeg.sh'
@@ -25,10 +25,23 @@ class BootstrapInputs(unittest.TestCase):
                 destination = base / 'source' / PATCH
                 destination.parent.mkdir(parents=True)
                 shutil.copyfile(ROOT / PATCH, destination)
+            checker = base / 'source/scripts/test/check-client-ffmpeg-identity.py'
+            checker.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT / 'scripts/test/check-client-ffmpeg-identity.py', checker)
             work = base / 'deps'
-            source = work / 'ffmpeg-9.0.1'
+            source = work / 'ffmpeg-9.0.2'
             source.mkdir(parents=True)
-            (work / 'ffmpeg-9.0.1.tar.xz').touch()
+            # Minimal parsed source for the real post-patch validator. This
+            # fixture checks bootstrap paths; exact patch application has its
+            # own source and decode gates.
+            hevc = source / 'libavcodec/hevc/hevcdec.c'
+            hevc.parent.mkdir(parents=True)
+            hevc.write_text('static enum AVPixelFormat get_format(void) {\n'
+                'switch (format) {\n'
+                + ('case AV_PIX_FMT_GBRP: case AV_PIX_FMT_YUV444P: break;\n'
+                   'case AV_PIX_FMT_GBRP10: case AV_PIX_FMT_YUV444P10: break;\n'
+                   if valid_source else '') + '} }\n')
+            (work / 'ffmpeg-9.0.2.tar.xz').touch()
             configure = source / 'configure'
             configure.write_text('#!/bin/sh\nexit 37\n')
             configure.chmod(0o755)
@@ -47,7 +60,7 @@ class BootstrapInputs(unittest.TestCase):
                     'print(Path(sys.argv[3]).resolve())\n',
                 'patch': '#!/bin/sh\ncat >/dev/null\nexit 0\n',
                 'sha256sum': '#!/usr/bin/env python3\nimport hashlib,pathlib,sys\ns=sys.stdin.read()\n'
-                    'if "ffmpeg-9.0.1.tar.xz" not in s:\n'
+                    'if "ffmpeg-9.0.2.tar.xz" not in s:\n'
                     ' expected, name = s.strip().split(maxsplit=1)\n'
                     ' actual = hashlib.sha256(pathlib.Path(name.lstrip(" *")).read_bytes()).hexdigest()\n'
                     ' sys.exit(0 if actual == expected else 1)\n',
@@ -65,6 +78,11 @@ class BootstrapInputs(unittest.TestCase):
         result = self.run_bootstrap(True)
         self.assertEqual(result.returncode, 37, result.stderr)
         self.assertIn('client_ffmpeg_identity_gbr_patch_gate=pass', result.stdout)
+
+    def test_post_patch_source_validation_stops_bootstrap(self):
+        result = self.run_bootstrap(True, valid_source=False)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('hardware aliases', result.stderr)
 
     def test_missing_tracked_patch_stops_bootstrap(self):
         result = self.run_bootstrap(False)

@@ -45,9 +45,9 @@ async fn reliable_data_backpressure_recovers_both_receivers() {
             let (client_connection, _client_video, _client_audio, _client_input, client_data, _, _) =
                 client.unwrap().into_parts();
             let (mut send, recv) = if receiving_host {
-                (client_data.send, host_data.recv)
+                (client_data.0, host_data.1)
             } else {
-                (host_data.send, client_data.recv)
+                (host_data.0, client_data.1)
             };
             let mut endpoint = endpoint(EndpointState::Ready);
             let shared = endpoint.shared.clone();

@@ -30,7 +30,8 @@ class CollectionTests(unittest.TestCase):
 
     def arguments(self, branch='main', content=b'fixture'):
         suffix = '' if branch == 'main' else '-' + branch
-        package = self.root / ('BDE-fernweh_1.2.3' + suffix + '_arm64.dmg')
+        version = (self.root / 'packaging/VERSION').read_text().strip()
+        package = self.root / ('BDE-fernweh_' + version + suffix + '_arm64.dmg')
         package.write_bytes(content)
         return SimpleNamespace(source_root=self.root, source_commit='HEAD', package=package,
             product='client', platform='macos', architecture='arm64', target_os='macos-27',
@@ -76,9 +77,9 @@ class CollectionTests(unittest.TestCase):
                     first = subprocess.check_output(command, text=True)
                     self.assertEqual(subprocess.check_output(command, text=True), first)
                 self.assertEqual({p.name for p in (output / 'candidates').iterdir()},
-                                 {'1.2.3-test-host-macos26.7', '1.2.3-test-host-macos27.0'})
+                                 {'1.2.3-test-host', '1.2.3-test-host-macos27.0'})
                 for target in order:
-                    version = '1.2.3-test-host-macos' + target
+                    version = '1.2.3-test-host' + ('-macos27.0' if target == '27.0' else '')
                     directory = output / 'candidates' / version
                     filename = 'plank-host_' + version + '_arm64.pkg'
                     package = directory / 'macos' / filename
@@ -127,11 +128,10 @@ class CollectionTests(unittest.TestCase):
         args.target_os = 'macos-27.0'
         with self.assertRaisesRegex(ValueError, 'filename disagrees'):
             MODULE.collect(args)
-        args.package = args.package.rename(self.root / 'plank-host_1.2.3-test-host_arm64.pkg')
-        for target in ('macos-26.7', 'macos-27.0'):
-            args.target_os = target
-            with self.assertRaisesRegex(ValueError, 'filename disagrees'):
-                MODULE.collect(args)
+        args.package = args.package.rename(self.root / 'plank-host_1.2.3-test-host-macos27.0_arm64.pkg')
+        args.target_os = 'macos-26.7'
+        with self.assertRaisesRegex(ValueError, 'filename disagrees'):
+            MODULE.collect(args)
         self.assertFalse((self.root / 'artifacts').exists())
 
     def test_host_mainline_and_default_target_identity(self):
@@ -140,7 +140,7 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.splitlines(), ['1.2.3', 'main', '1.2.3', '1.2.3', '1'])
         self.assertEqual(self.host_version('test-host').stdout.splitlines(),
-                         ['1.2.3-test-host-macos26.7', 'test-host', '1.2.3', '1.2.3', '0.test_host.1'])
+                         ['1.2.3-test-host', 'test-host', '1.2.3', '1.2.3', '0.test_host.1'])
         # Original 27-only release manifests remain valid during transfer.
         for target_os in ('macos-26.7', 'macos-27', 'macos-27.0'):
             args = self.host_arguments('26.7', 'main')
@@ -270,7 +270,6 @@ class CollectionTests(unittest.TestCase):
                 'version-test', str(ROOT / 'scripts/package/package-version.sh'), branch, str(self.root)], text=True)
             self.assertEqual(values.splitlines(), [version, '1.2.00'])
             args = self.arguments(branch)
-            args.package = args.package.rename(args.package.with_name('plank-client_' + version + '_arm64.dmg'))
             MODULE.collect(args)
             channel = 'releases' if branch == 'main' else 'candidates'
             directory = self.root / 'artifacts/packages' / channel / version

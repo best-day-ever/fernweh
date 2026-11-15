@@ -48,7 +48,6 @@ foreach ($library in $libraries) {
 }
 
 Copy-Item (Join-Path $sourceRoot 'apps/client/LICENSE') (Join-Path $OutputDir 'LICENSE.txt')
-Copy-Item (Join-Path $sourceRoot 'apps/client/h264bitstream/LICENSE') (Join-Path $OutputDir 'h264bitstream-LICENSE.txt')
 
 if ($ReleaseCandidate) {
 @'

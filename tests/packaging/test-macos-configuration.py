@@ -37,6 +37,7 @@ class Configuration(unittest.TestCase):
         result = subprocess.run([BINARY, mode, str(self.config), str(self.state),
             str(CLIENT_TEMPLATE if mode == "client" else HOST_TEMPLATE)], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode == 0, success, result.stderr)
+        return result
 
     def legacy(self, **changes):
         values = dict(Address="0.0.0.0", Port=29999, Name="Example workstation", UUID=self.uuid)
@@ -231,6 +232,23 @@ class Configuration(unittest.TestCase):
         self.config.chmod(0o755)
         self.invoke()
 
+    def test_other_writable_ancestors_rejected_with_diagnostic(self):
+        parent = self.root / "Application Support"
+        parent.mkdir(mode=0o755)
+        self.state = parent / "PLANK"
+        self.invoke()
+        before = self.snapshot()
+        for mode in (0o775, 0o777, 0o1777):
+            parent.chmod(mode)
+            for operation in ("host-check", "host-prepare", "host-finish"):
+                result = self.invoke(operation, success=False)
+                self.assertIn("PLANK configuration directory rejected:", result.stderr)
+                self.assertIn(str(parent), result.stderr)
+            self.assertEqual(parent.stat().st_mode & 0o7777, mode)
+            self.assertEqual(self.snapshot(), before)
+        parent.chmod(0o755)
+        self.invoke("host-check")
+
     def test_symlink_files_and_parents_rejected(self):
         outside = self.root / "outside"
         outside.write_bytes(b"unchanged")
@@ -262,6 +280,8 @@ class Configuration(unittest.TestCase):
             updated = path.read_bytes()
             self.assertIn(b"internet_check_interval_seconds = 15", updated)
             self.assertIn(b"# Maximum wait", updated)
+            self.assertIn(b"metrics_enabled = false", updated)
+            self.assertIn(b"# Optional PLANK session metrics", updated)
             if custom:
                 self.assertIn(b"port=30001\n", updated)
                 self.assertTrue(updated.startswith(b"# private administrator additions\n[network]\n"))
@@ -281,7 +301,19 @@ class Configuration(unittest.TestCase):
         self.assertIn(b"internet_check_enabled=false\n", updated)
         self.assertNotIn(b"internet_check_enabled = true", updated)
         self.assertIn(b"internet_check_hosts=192.0.2.1\n", updated)
-        self.assertTrue(updated.endswith(b"[authentication]\nremember_username=true\n"))
+        self.assertIn(b"[authentication]\nremember_username=true\n", updated)
+        self.invoke("client")
+        self.assertEqual(path.read_bytes(), updated)
+
+    def test_client_metrics_preserves_explicit_policy(self):
+        self.invoke("client")
+        path = self.config / "client.conf"
+        path.write_bytes(b"[metrics]\nmetrics_enabled=true\nmetrics_port=30002\n")
+        self.invoke("client")
+        updated = path.read_bytes()
+        self.assertIn(b"metrics_enabled=true\nmetrics_port=30002\n", updated)
+        self.assertNotIn(b"metrics_enabled = false", updated)
+        self.assertIn(b"metrics_interval_seconds = 1", updated)
         self.invoke("client")
         self.assertEqual(path.read_bytes(), updated)
 

@@ -51,3 +51,35 @@ to the coordinated upgrade above. Hosted Actions remain disabled; validation is 
 repositories are now public after the authorized history audit recorded in
 [the publication receipt](review.md). The integration branches remain unfinished.
 No binaries are published.
+
+
+## 15 November continuation
+
+Current main and the coordinated frontend/dependency work are now reconciled
+in the candidate. Qt display/clipboard/shared-view parity, Windows adapters,
+Native10 compiler layout, optional metrics/configuration and native build
+isolation have concrete repairs and regressions. The custom native listener
+retains the canonical bounded datagram burst capacity. Native Mac/Windows builds
+and the exact per-platform results are recorded in the
+[continued review receipt](review.md#15-november-coordinated-plank-1418-integration).
+
+The final six controlled-loss matrices now pass all 5,400 frames with zero
+unrecovered symbols and zero owned kernel drops; their thresholds are unchanged.
+Earlier failures remain recorded. The ordinary-user transport/FFI and uninstalled
+RPM gates pass after a narrow obsolete asset-copy repair. Installed/hardware
+acceptance is separate. The remaining-integration table above records the
+14 November baseline,
+not the current list of unresolved source repairs. See the maintained
+[candidate status](plank-1.4.18-candidate.md) before promotion.
+
+
+## Authorized source promotion
+
+The operator subsequently requests proper PR merges and deployment. Host7 and
+Client5 are merged with preserved history; parent6 carries their actual merge
+commits and the final packaging repairs. Source/native package checks are the
+source-promotion boundary. Fresh mainline installers and installed/hardware
+acceptance remain required before binary publication and rollout; the earlier
+candidate bytes are never relabelled as main builds. See the current
+[release gates](plank-1.4.18-candidate.md) and
+[source promotion receipt](review.md#15-november-source-promotion-and-release-preparation).

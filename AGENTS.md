@@ -99,7 +99,8 @@ the current checkout.
 The qualified default client video profile is H.264 High 10 4:4:4 identity.
 Decoder selection is internal, not a user preference: test exact-format
 hardware decoding first, then fall back to the FFmpeg software path for the
-same selected bookmark profile. A hardware path is acceptable only after a
+same selected bookmark profile. This applies to H.264 and HEVC independently
+of the Host encoder backend. A hardware path is acceptable only after a
 real profile-specific test frame proves the requested codec profile, bit depth,
 chroma sampling, range, and identity mapping. On the qualified Intel NUC, HEVC
 Rext 10-bit 4:4:4 identity is hardware-decoded through VA-API to a Y410 surface
@@ -108,6 +109,13 @@ not supported by that VA-API implementation and therefore uses the exact-format
 FFmpeg software path. Never silently substitute H.264 High 8 4:4:4, 4:2:0,
 another codec, or any other profile. If neither exact hardware nor exact
 software decoding works, fail the connection clearly.
+
+Intel NUC Gen11 (Tiger Lake) is not qualified Client hardware. The operator
+excluded it after repeated video-engine GPU hangs in full sessions; isolated
+decode and GPU-sampling checks passed, so the underlying cause remains unresolved.
+Do not use Gen11 for release acceptance or resume that investigation without
+operator direction. This is a hardware qualification policy, not a runtime
+generation blacklist. See `docs/hardware/intel-nuc-client-qualification.md`.
 
 The Linux Host's NVENC 4:2:0 bandwidth profiles (`h264-8-420-nvenc` H.264
 High 8-bit, `hevc-10-420-nvenc` HEVC Main10; limited-range BT.709 with the
@@ -154,7 +162,7 @@ sanitizer, compositor, launcher and package-upgrade gates and the resulting DEB.
 There is no separate Qt product or experimental configuration namespace.
 Preserve existing bookmarks, Host trust, administrator policy and log paths.
 The operator authorized merging the macOS Qt/Metal session frontend into main;
-Mac playback retains SDL/CoreAudio. Keep platform-specific rendering and audio
+Mac playback and microphone capture use native Core Audio. Keep platform-specific rendering and audio
 backends separate while sharing the Qt session controls. Installed Mac session
 acceptance and remaining parity work are still required before release; see
 `docs/development/plans/macos-qt-session.plan`.
@@ -162,6 +170,13 @@ Do not ask the operator to repair VM prerequisites or distribute a standalone
 probe as the Client.
 Hosted tests do not replace exact-candidate hardware/session acceptance. Read
 HANDOFF and the private notes for current test-target availability and results.
+
+Mac transport performance qualification runs on the authorized development Mac,
+using the exact GitHub-built test executable with the Host's shipping features.
+The operator moved the unchanged 150 Mbps/three-matrix timing gate there after
+hosted workers failed it with both the accepted baseline and candidate. Keep
+functional/package checks on GitHub and all loss/latency thresholds unchanged;
+see the release runbook's native transport qualification section.
 
 The workflows in `.github/workflows/build.yml` also authorize disposable
 GitHub-hosted builders for the same target OS/toolchain contracts: Rocky 9.7
@@ -173,7 +188,7 @@ until the hosted replacements pass their clean-build gates.
 
 - Build Host binaries and RPMs only on the Linux Host builder (Rocky Linux 9.7).
 - Build Client binaries and DEBs only on the Linux Client builder (Ubuntu
-  26.04), using Qt 6.10.2 and the pinned private FFmpeg 9.0.1 tree.
+  26.04), using Qt 6.10.2 and the pinned private FFmpeg 9.0.2 tree.
 - Install Host candidates and run NVIDIA/display/input hardware qualification
   on the authorized hardware test Host; do not compile release packages there.
 - Install Client candidates and run interactive video/audio/input/Wacom tests
@@ -205,6 +220,15 @@ not copy old prepared trees. The Linux Host and Client builders are the canonica
 package builders. The hardware test Host and Development NUC are installation and
 hardware-test targets, not fallback build machines.
 
+For Native10 component experiments, use the hosted `linux-native10-tests` job
+before a full Host candidate build. It runs exact production-header fixtures
+and exports hardware probes without the full media dependencies. It does not
+replace package or installed-stream acceptance. The Linux Host compiler-output
+cache is separate from prepared dependencies: preserve clean source/build trees,
+per-object compiler/header/flag validation, fresh linking/tests, trusted-success
+cache saves and the full CUDA architecture set. Do not reuse candidate build
+trees or cached installers. See the build runbook for qualification status.
+
 Use clean Git worktrees as source snapshots. Reuse the prepared, Git-ignored
 host and client FFmpeg trees; creating a worktree does not recreate those build
 inputs. Every product dependency patch is a required, reproducible build
@@ -215,7 +239,7 @@ source. Never rely on an old builder tree having been patched manually. On
 the Linux Client builder, redirect every current Linux client submodule
 to its retained local canonical repository before the first submodule update:
 qmdnsengine and common-c. Common-c has no recursive Linux dependencies.
-h264bitstream is vendored, libsoundio is removed, and the Windows/macOS
+The unused H.264 SPS rewriter and libsoundio are removed; the Windows/macOS
 prebuilts repository is not a Linux candidate input. Do not restore the stale
 submodule list or redownload already-present dependencies for each clean
 worktree. When a
@@ -256,7 +280,7 @@ Use a Host-builder-local build directory under `$PLANK_WORK_ROOT`. Host
 packaging defaults to eight build jobs; override it only with a positive
 `PLANK_BUILD_JOBS` value after
 considering local CPU, memory, and storage behavior. Pass the retained exact
-Boost 1.89.0 source through `PLANK_BOOST_SOURCE_DIR` as documented in
+Boost 1.92.0 source through `PLANK_BOOST_SOURCE_DIR` as documented in
 the release build runbook; a clean candidate must not download Boost again.
 Keep final packages in the version/platform catalog under `artifacts/packages/`.
 Use `scripts/package/collect-package.py` (called by package builders) to retain
@@ -315,6 +339,12 @@ Follow the established style and formatter of the upstream Sunshine or Moonlight
 Every protocol change requires host and client tests, updated version/feature negotiation, and compatible test vectors. Add focused tests under the matching `tests/<subsystem>/` directory. Validate security failures as well as success paths. Hardware-sensitive work must exercise `docs/development/acceptance-criteria.md`, including packet loss, 10-bit pixel checks, session cleanup, and real Wacom events.
 
 ## Commit & Pull Request Guidelines
+
+Before deleting a merged or superseded branch, check its contributor-testing
+role, workflow approval registry and live signing-environment policies. A branch
+can remain operationally required after its code reaches main. Retain approved
+contributor test branches until the operator explicitly retires that workflow;
+merge ancestry or patch equivalence alone is not sufficient for deletion.
 
 The root and both maintained forks have usable PLANK history. Follow
 their established short, imperative subjects with an optional subsystem prefix,

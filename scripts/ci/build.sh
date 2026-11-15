@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 role=${1:?product role required}
+cd "${PLANK_SOURCE_ROOT:?}"
 export CARGO_HOME="$PLANK_CARGO_ROOT" RUSTUP_HOME="$PLANK_RUSTUP_ROOT"
 export PATH="$CARGO_HOME/bin:$PATH"
 export CARGO_NET_OFFLINE=true
 python3 "$PLANK_SOURCE_ROOT/tests/network/test_datagram_sender.py"
+if [[ $role != macos-client ]]; then
+  mkdir -p "$PLANK_WORK_ROOT"
+  CARGO_BUILD_JOBS=2 cargo test --target-dir "$HOME/.cargo/shared-target" --locked --offline --release \
+    --manifest-path "$PLANK_SOURCE_ROOT/third_party/quinn-udp-0.5.16/Cargo.toml" \
+    --features plank-bounded-receive-buffer --test tests plank_receive_buffer -- --nocapture \
+    2>&1 | tee "$PLANK_WORK_ROOT/quinn-udp-sockets.log"
+  grep -q 'test result: ok. 2 passed;' "$PLANK_WORK_ROOT/quinn-udp-sockets.log"
+fi
 case $role in
   linux-host)
     bash "$PLANK_SOURCE_ROOT/tests/protocol/test-occupancy-indicator.sh"
@@ -14,17 +23,22 @@ case $role in
       bash "$PLANK_SOURCE_ROOT/apps/host/linux/tests/clipboard/run-file-recovery.sh"
     export PLANK_HOST_FFMPEG_BUILD="$PLANK_SOURCE_ROOT/apps/host/linux/third-party/build-deps/build"
     export PLANK_HOST_FFMPEG_ROOT="$PLANK_DEP_ROOT/host-ffmpeg"
-    export PLANK_BOOST_SOURCE_DIR="$PLANK_DEP_ROOT/boost-1.89.0"
+    export PLANK_BOOST_SOURCE_DIR="$PLANK_DEP_ROOT/boost-1.92.0"
+    # OS packages belong to disposable-builder provisioning, never this build
+    # phase, which is also used by the native workstation builder.
+    python3 "$PLANK_SOURCE_ROOT/tests/packaging/test-host-build-version.py"
+    CXX="${PLANK_NATIVE10_SANITIZER_CXX:-/opt/rh/gcc-toolset-14/root/usr/bin/g++}" PLANK_NATIVE10_SANITIZERS=1 \
+      bash "$PLANK_SOURCE_ROOT/scripts/test/test-linux-native10.sh" "$PLANK_WORK_ROOT/native10-sanitizers"
+    bash "$PLANK_SOURCE_ROOT/scripts/test/build-linux-native10-probes.sh" "$PLANK_ARTIFACT_ROOT/qualification/native10"
     mkdir -p "$PLANK_SOURCE_ROOT/apps/host/linux/cmake-build-ffmpeg-x264rgb-install" "$PLANK_WORK_ROOT/tmp"
     ln -s "$PLANK_HOST_FFMPEG_ROOT" "$PLANK_SOURCE_ROOT/apps/host/linux/cmake-build-ffmpeg-x264rgb-install/ffmpeg"
-    TMPDIR="$PLANK_WORK_ROOT/tmp" bash "$PLANK_SOURCE_ROOT/scripts/package/build-host-rpm.sh" "$PLANK_WORK_ROOT/host-build" "$PLANK_WORK_ROOT/host-package"
     bash "$PLANK_SOURCE_ROOT/scripts/ci/test-linux-host-input.sh" "$PLANK_WORK_ROOT/host-build"
+    TMPDIR="$PLANK_WORK_ROOT/tmp" bash "$PLANK_SOURCE_ROOT/scripts/package/build-host-rpm.sh" "$PLANK_WORK_ROOT/host-build" "$PLANK_WORK_ROOT/host-package"
     ;;
   linux-client)
     python3 "$PLANK_SOURCE_ROOT/tests/packaging/test-client-policy-upgrade.py"
     source "$PLANK_SOURCE_ROOT/scripts/package/client-package-identity.sh"
     plank_client_package_identity
-    export PLANK_CLIENT_SDL_WORK="$PLANK_DEP_ROOT/client-sdl"
     # Qualify and build the exact ordinary Client once, then package that binary.
     bash "$PLANK_SOURCE_ROOT/scripts/ci/test-qt-session.sh"
     bash "$PLANK_SOURCE_ROOT/scripts/package/build-client-deb.sh" \
@@ -37,7 +51,7 @@ case $role in
     # Isolated installer filesystem fixture only; never install the product or
     # start its services on a builder. This also checks administrator log access.
     sudo -n /bin/bash "$PLANK_SOURCE_ROOT/tests/packaging/macos-pkg-scripts.sh" --filesystem
-    PLANK_MACOS_SOURCE_FIRST=1 bash "$PLANK_SOURCE_ROOT/scripts/build/build-macos-transport.sh" "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/transport"
+    PLANK_MACOS_SENDER_TIMING=1 bash "$PLANK_SOURCE_ROOT/scripts/build/build-macos-transport.sh" "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/transport"
     if [[ ${PLANK_CI_SIGNED:-false} = true ]]; then
       bash "$PLANK_SOURCE_ROOT/scripts/package/build-macos-host-pkg.sh" "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/host-package" "$PLANK_WORK_ROOT/transport/release/libplank_transport.a"
     else
