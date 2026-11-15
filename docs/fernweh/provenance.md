@@ -4,8 +4,8 @@ Fernweh keeps upstream PLANK history and the maintained BDE enhancement history.
 The review is seeded from the exact commits in [source-manifest.json](source-manifest.json).
 Client and Linux Host stay separate Git submodules; the Mac Host, broker and
 transport stay in the parent. Public dependency URLs and their gitlinks remain
-intact. New review changes are private; no original BDE repository is renamed,
-rewritten, made private/public or deployed by this preparation.
+intact. The original BDE repositories are separate: they are not renamed, rewritten,
+republished or deployed as part of Fernweh source publication.
 
 The manifest records **import** commits and comparison merge bases; the parent
 Git tree records the final Client/Host gitlinks. A later upstream observation

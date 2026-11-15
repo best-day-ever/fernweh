@@ -49,15 +49,13 @@ capture stop. Existing authorization, topology-change, startup-timeout, teardown
 and owner-abandonment cases must all release it. Also cover unstarted owners and
 power-assertion creation failure.
 
-Signed run43119531407 passed the final source fb5cff4b: 37 wake/recovery
-scenarios, nine physical/headless readiness cases, and 26 real-QUIC/synthetic
-capture session cases. Full Host and package checks, signing, notarization,
-stapling and Gatekeeper passed. The operator authorized installation and service
-restart on the affected Mac; installed version and binary hash match, HTTPS
-returns 200, and post-start logs show successful resolution preparation. The
-console, WindowServer, configuration, machine keys and boot time are unchanged.
+Upstream's signed run43119531407 qualified its source fb5cff4b, including
+37 wake/recovery scenarios, nine readiness cases and 26 session cases. Those
+upstream package and installation results do not qualify a Fernweh package.
+Fernweh's focused source-port evidence is recorded in its integration ledger.
 
-Interactive acceptance remains pending. Verify reconnect from display sleep, custom/HiDPI resolution selection and a
+Fernweh installed acceptance remains pending. Verify reconnect from display
+sleep, custom/HiDPI resolution selection and a
 session exceeding the configured display idle timer, followed by disconnect
 with no remaining PLANK idle-display assertion. Preserve the user's desktop;
 do not induce logout/reboot or explicit sleep without authorization.

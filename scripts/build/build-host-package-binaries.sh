@@ -101,7 +101,7 @@ CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offlin
   --manifest-path "$repo_dir/third_party/quinn-proto-0.11.19/Cargo.toml" \
   --features plank-telemetry \
   --lib tests::plank_telemetry_snapshot_is_owned_and_preserves_queue_counters -- --exact
-rg -q '^#define PLANK_TRANSPORT_ABI_VERSION 14u$' \
+rg -q '^#define PLANK_TRANSPORT_ABI_VERSION 15u$' \
   "${plank_transport_dir}/include/plank_transport.h" || {
   echo "host requires PLANK transport ABI 14" >&2
   exit 1

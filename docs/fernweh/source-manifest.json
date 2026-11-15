@@ -1,8 +1,8 @@
 {
   "format_version": 1,
   "prepared_on": "2026-11-13",
-  "status": "private-source-review",
-  "source_fork_note": "Preserved Git ancestry; independent private repositories, not GitHub public-fork network members.",
+  "status": "public-source",
+  "source_fork_note": "Preserved Git ancestry; independent public source repositories, not GitHub native-fork network members.",
   "components": [
     {
       "path": ".",
@@ -20,7 +20,7 @@
       "import_commit": "1f5167e9bcfff6a726cfd1071f4ad114c93495e7",
       "upstream": "https://github.com/instinctual/plank-client",
       "comparison_merge_base": "7edb5c3b1d50765afeca2d93c9dca6293d54606c",
-      "review_commit": "19adb7e8247da99f5dbe5c2e99e4f5b3d0560bb7"
+      "review_commit": "98378b998ebaae376a412ac1acc1754cc6f1309f"
     },
     {
       "path": "apps/host/linux",
@@ -29,7 +29,7 @@
       "import_commit": "fb3a689618093e345908945a90cf226d93cc67d7",
       "upstream": "https://github.com/instinctual/plank-host-linux",
       "comparison_merge_base": "65dc0f1be60fe78d0457364f83813118c70bc8a8",
-      "review_commit": "cc51fa3e965706cef016d2498d16649fe9c5ee96"
+      "review_commit": "663cc6ae2b044ed30468fb1a66468679c3de5ba4"
     },
     {
       "path": "third_party/kyber-kymux",
@@ -39,8 +39,18 @@
     {
       "path": "apps/client/moonlight-common-c/moonlight-common-c",
       "repository": "https://github.com/best-day-ever/plank-common-c",
-      "pinned_commit": "7660c2cae7ee315b6eae47e35c93efe4d32672b9"
+      "pinned_commit": "bc38a07b47beaf598d41131a415ee63629ea6e6f"
     }
   ],
-  "review_updated_on": "2026-11-14"
+  "review_updated_on": "2026-11-14",
+  "integration_ledger": "docs/fernweh/upstream-integration-2026-11-14.md",
+  "published_on": "2026-11-14",
+  "additional_review_repositories": [
+    {
+      "repository": "https://github.com/best-day-ever/fernweh-common-c",
+      "review_commit": "9ade59ab32f88c0724c06710afe05237337d336d",
+      "purpose": "Preserved input source for the draft coordinated upgrade; not the current Client main pin."
+    }
+  ],
+  "publication_receipt": "docs/fernweh/review.md"
 }

@@ -1,13 +1,13 @@
 # Develop Fernweh
 
-Fernweh is ALPHA. This private community-source preparation does not change
+Fernweh is ALPHA. Source publication does not change
 an installed app, service, release feed or BDE deployment pin. Use isolated
 builders/test machines for integration and ask the operator only when the task
 requires additional access or a real deployment decision.
 
 ## Repository and component workflow
 
-| Source | Review repository | Integration branch | Upstream |
+| Source | Repository | Integration branch | Upstream |
 | --- | --- | --- | --- |
 | Parent, broker, Mac Host, transport, packaging | `best-day-ever/fernweh` | `main` | `instinctual/plank` |
 | `apps/client` | `best-day-ever/fernweh-client` | `main` | `instinctual/plank-client` |
@@ -27,7 +27,12 @@ focused branches rooted at current upstream. Do not push to instinctual as part
 of routine downstream development.
 
 Use [the enhancement map](enhancements.md) to find ownership, then inspect live
-source. `scripts/agent/graph` is optional local code navigation; it and BDE's
+source. The [change catalogue](change-catalogue.md) records individual additions
+and repairs; the [review index](merged-history.md) records original PRs. When
+maintaining these, inspect implementation commits inside each PR and current
+platform scope. Credit a completed port as a product addition while retaining
+credit for its inherited foundation; do not copy stale upstream future-product
+wording or equate commit/PR counts with feature counts. `scripts/agent/graph` is optional local code navigation; it and BDE's
 memory service are not build dependencies. Public examples use reserved DNS/IP
 values. Store machine inventories and credentials outside Git. The original
 BDE repositories remain separate and keep their own deployment workflow.
@@ -85,10 +90,10 @@ submodule histories independently; the root checker does not scan through a
 gitlink. Run `git diff --check` in each changed repository. If a change reaches
 bde-linux, also run its `scripts/check.sh`; portal changes require its pytest gate.
 
-GitHub Actions is disabled on the private review repositories. Inherited
+GitHub Actions is disabled on the Fernweh repositories. Inherited
 workflows are retained as source references; do not describe their mere presence
-as a passing CI result. Enabling hosted builds later requires private-submodule
-access and explicit signing setup, or public repositories after publication.
+as a passing CI result. Enabling hosted builds requires a separate review of untrusted-PR permissions
+and explicit signing setup.
 This preparation relies on local checks and does not consume hosted build minutes.
 
 Record exact source SHAs, the actual commands/results and unrun platform/session

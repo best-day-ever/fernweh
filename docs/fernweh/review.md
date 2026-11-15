@@ -1,4 +1,4 @@
-# Private review status
+# Source review and publication record
 
 Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE
 Fernweh as an enhanced PLANK fork. No new release version, binary asset, feed
@@ -12,8 +12,8 @@ publication, installed app or service deployment is part of this task.
   and [broker/Host integration](broker.md).
 - [Claude/Codex development](development.md), [upstream contribution workflow](upstreaming.md)
   and [ancestry/license provenance](provenance.md).
-- The parent `.gitmodules` pins private Fernweh components. Existing public
-  nested dependencies remain unchanged.
+- The parent `.gitmodules` pins Fernweh component repositories. Existing
+  public nested dependencies retain their provenance.
 
 ## Verification receipt
 
@@ -61,9 +61,11 @@ Cross-platform product builds, signed installers and live streaming are not
 implied by source/configuration tests. Existing BDE release notes retain their
 original scope and do not qualify bytes built from this repository.
 
-## Before public visibility
+## Initial publication requirements (historical)
 
-Keep all three maintained repositories private until Finn explicitly approves.
+The initial preparation required keeping maintained repositories private until
+Finn explicitly approved publication. That authorization was given on 14 November;
+the subsequent audit is recorded below. The original requirements were:
 Review the full reachable histories and hosting metadata for secrets and private
 operational information, including binary screenshots and every maintained
 submodule; current-tree checks are insufficient. Verify license notices and
@@ -128,3 +130,166 @@ of cited included implementations pass; PNG metadata, SVG syntax, shell syntax,
 changed-content privacy and whitespace checks pass. The bde-linux repository
 gate passes with its existing lint advisories. Product builds were not repeated
 for this documentation-only change.
+
+
+## 14 November: source merges and focused upstream repairs
+
+The original immersive chain is merged in its five BDE component/parent PRs;
+parent `54ee7b9c` pins the actual merged Client and Host revisions. Private
+Fernweh Client PR3 / Host PR4 integrate those changes while preserving broker
+configuration and the prior fork fixes. Client PR4 adds retiring-session retries;
+Host PR5 adds coalesced NVENC refresh requests, request/audio bounds, mapped-key
+cleanup and non-finite pen rejection. Current component review SHAs are recorded
+in the manifest. Merge commits remain intact.
+
+The parent backports reliable-data backpressure without changing its transport
+versions, plus PLANK 1.4.18 Mac display wake / incomplete-first-setup recovery.
+Transport unit/wire results: 72+6 pass. Encrypted functional connections: 11 pass,
+including reliable bursts in both directions, sharing, authorization,
+cancellation, microphone and camera. Mac wake recovery: 37 checks; readiness: 378
+checks across 9 cases; authenticated topology/retry/timeout checks pass. The
+changed Mac Session compiles with SDK 27 and deployment target 15.0; its existing
+bounded/continuous/status reconnect policy fixture passes. These focused ports
+have not been built into a new signed package or deployed.
+
+The standard Mac packaging script still selects the SDL frontend. The merged
+immersive source currently requires the Mac Qt frontend and Linux X11 Host;
+turning it on in the standard build requires display/clipboard/sharing parity.
+Installed Blender/Unreal acceptance is still open. The wholesale 1.4.18 upgrade
+remains an unfinished private integration branch. The
+[integration ledger](upstream-integration-2026-11-14.md) lists its blockers and
+release coverage; this receipt does not claim that every upstream change landed.
+
+Generic default-branch dependency proposals that discard PLANK native input were
+rejected. The GoogleTest proposal was a verified 1.17.0→1.14.0 downgrade and was
+rejected. The upload-artifact 7.0.2 SHA matches its official tag. A fourth private
+repository, `fernweh-common-c`, preserves the combined input-library source for
+the future coordinated upgrade; its 8 C tests pass. Current focused builds retain
+the earlier native library pin. All review repositories remain private, hosted
+Actions are disabled, and no binary, feed, fleet pin or runtime service changes.
+
+The native Linux Host builds successfully: 106 focused cases pass, with 3 kernel
+UHID cases skipped. The two HTTPS regressions pass separately with an ephemeral
+loopback TLS identity. A shuffled 25-run input/pointer/context/scheduler repeat
+passes 54 cases per run, with 2 UHID skips per run. The Mac preview gate reaches
+real TLS/QUIC display-lease recovery and three-peer shared-desktop checks; its
+administrator-only handoff fixture then stops because this runner has no
+passwordless sudo. That remaining fixture is not reported as passed. Privacy,
+local Markdown targets and 13 build-configuration regressions pass.
+
+## 14 November: developer documentation and publication audit
+
+Finn authorized publication after checking Git and its history. The README now
+uses developer-oriented descriptions and includes knocking/owner consent,
+view/control roles, multi-user sharing, independent workstation sessions,
+presence, files/folders, clipboard grants and recovery, support policies and
+smaller reliability fixes. [The implementation map](enhancements.md) provides
+source/contract boundaries; [the history index](merged-history.md) verifies
+232 original merged reviews by reachable merge/source-head ancestry, plus
+10 post-import Fernweh reviews. Imports/releases/tests are labeled as such,
+not counted as distinct downstream features. Existing real QML screenshots
+retain their fictional-data provenance.
+
+Publication audit scope: `fernweh`, `fernweh-client`, `fernweh-host-linux` and
+`fernweh-common-c`, including advertised branches/tags and PR head/merge refs.
+Each repository was audited separately; gitlinks do not substitute for scanning
+the nested histories. Inherited public dependencies retain their pinned sources.
+The native-input repository main supports the unfinished coordinated upgrade;
+it is not the current Client main pin.
+
+- Gitleaks **8.30.1**, default rules plus the repository SSH-password rule,
+  all-history patches, no baseline/local ignore suppression, and inline allow
+  comments ignored. Reports were redacted and retained outside Git.
+- An independent object pass scanned every reachable blob, commit message and
+  annotated-tag object: **11,770 commit objects and 34,679 blob objects** across
+  the four repositories, approximately **1.67 GB** of content. It also checked
+  credential literals/URLs, private-key markers, LFS pointers, private filenames
+  and documentation/deployment identifier heuristics. No LFS pointers were found.
+- The seven historical patch findings resolve to Client loopback TLS test-key
+  material and a synthetic GSSAPI token, inherited Sunshine test/pairing/demo
+  keys, and a placeholder curl authentication example. The object pass sees
+  repeated versions of the same material; three additional Sourcegraph-rule
+  hits are audit-generated object SHA markers, not source credentials. No broad
+  test-directory allowlist was introduced.
+- Identifier findings were reviewed as synthetic network/RP validation tests,
+  inherited software-version strings, canonical address ranges and upstream
+  Docker/configuration examples. No unresolved operational inventory finding
+  remains in the publication scope.
+- Binary inventory and provenance were checked. Client historical libraries,
+  translations and shaders and Host fonts/images are inherited upstream objects;
+  downstream Client icons/screenshots, Host EDID fixture and parent media were
+  reviewed separately. Screenshot accounts/hosts are fictional or loopback data.
+- GitHub-visible PR/issue bodies, comments and release metadata passed separate
+  secret and privacy scans. Authenticated API-only temporary clone credentials
+  were excluded from that public-metadata input. The repositories have no wiki,
+  release assets or Actions artifacts. Hosted Actions remain disabled.
+
+No unresolved credential findings remain in the reviewed scope. This audit does
+not change runtime trust, claim new hardware qualification or certify a new
+binary release. Private reports, source excerpts and credentials are not
+published. Visibility changes and final anonymous-access verification are
+recorded below after execution.
+
+
+### Publication completed
+
+On 14 November 2026 all four repositories were changed to public:
+[Fernweh](https://github.com/best-day-ever/fernweh),
+[Client](https://github.com/best-day-ever/fernweh-client),
+[Linux Host](https://github.com/best-day-ever/fernweh-host-linux), and
+[native input](https://github.com/best-day-ever/fernweh-common-c).
+Fresh unauthenticated API reads confirmed each public repository and exact
+reviewed commit. Actions remain disabled; merge commits remain enabled and
+squash/rebase disabled. No original BDE repository was republished or rewritten.
+
+Client [PR6](https://github.com/best-day-ever/fernweh-client/pull/6) and Host
+[PR8](https://github.com/best-day-ever/fernweh-host-linux/pull/8) update their
+public-status README/agent text only. Parent gitlinks advance to those merges,
+`98378b99` and `663cc6ae`; product source is unchanged. Their changed-content,
+commit privacy and whitespace checks pass. The complete-history snapshot above
+precedes these documentation-only commits; subsequent additions pass the
+same privacy checks.
+
+The actual GitHub-rendered README passes 1440px/390px, light/dark checks: three
+images load, local jump links resolve and article content does not overflow.
+Desktop/mobile renders were visually reviewed. Local documentation checks pass
+139 links/anchors; all 232 original review source commits are verified ancestors
+of the recorded component source. The bde-linux repository gate passes with its
+existing lint advisories. Product builds were not repeated for documentation.
+
+### Historical automation records
+
+Disabled Actions does not imply an empty run history. A final inventory found
+12 archived **Dependabot update** runs: six parent, three Client and three Linux
+Host; native input has none. All 12 run/job records and downloadable log archives
+were reviewed with Gitleaks 8.30.1 (archive traversal enabled), with zero findings.
+A separate deployment-identifier check of the archived logs also has zero
+matches. These are dependency-update records, not product build qualification.
+There are still no Actions artifacts, and Actions remain disabled. Private
+copies of the raw records/logs stay with the external publication audit.
+
+## 14 November: Windows port credit and implementation catalogue
+
+The README now identifies the Windows Client port as a first-class downstream
+addition, using Moonlight Qt's Windows foundation. Original Client `57932ae7`
+adds native MSVC transport/build integration, DPAPI broker storage and graphics/
+display changes; parent `97ff1875` adds build/dependency/staging scripts and
+`6471486a` adds the WiX MSI. Current platform, contribution and source-build guides
+no longer call the implemented Windows Client future work.
+
+The [detailed catalogue](change-catalogue.md) and JSON evidence separate 191
+change records across 15 areas with 262 implementation references. This includes
+the original optional Mac normalized-pen adapter and smaller fixes inside PRs.
+The source walk covers 611 non-merge commits outside recorded upstream tips;
+it includes docs/tests/imports/repeated patches and is not a feature count or
+an authorship claim. The existing 232-review index remains complementary.
+
+Validation: all 262 source references are ancestors of the recorded snapshots;
+232 original review references and local documentation links/anchors pass. Representative
+port/enrollment/rendering changes were inspected in source. Actual GitHub
+README renders pass desktop/mobile and light/dark checks; the catalogue renders
+all 15 tables on mobile with resolved anchors and no article overflow. Images
+load and the desktop/mobile pages were visually checked. Privacy, commit and
+whitespace checks pass; the bde-linux repository gate passes with existing
+lint advisories. Product builds are not repeated for this documentation-only
+change. No product source, dependency pin, workflow setting or binary changes.

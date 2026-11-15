@@ -20,10 +20,15 @@ FILES = """/usr/lib/modules-load.d/plank.conf
 /etc/plank/host.conf
 /etc/logrotate.d/plank-host
 /etc/pam.d/plank-host
+/etc/pam.d/plank-remote
+/usr/lib64/security/pam_plank_handoff.so
+/usr/share/plank/collaboration-ui.py
 /usr/lib/udev/rules.d/70-plank-host-wacom.rules
 /usr/share/X11/xorg.conf.d/90-plank-virtual-wacom.conf
 /usr/share/plank/display/virtual-1.edid
 /usr/share/plank/display/virtual-2.edid
+/usr/share/plank/display/virtual-3.edid
+/usr/share/plank/display/virtual-4.edid
 """
 LOG_DIRECTORY = '/var/log/plank drwx------ root root'
 
@@ -42,8 +47,8 @@ package_version=fixture
 rpm() {
   case "$1" in
     -qpl) printf '%s' "$TEST_RPM_FILES" ;;
-    -qpR) printf '%s\\n' 'libX11.so.6()(64bit)' 'logrotate' ;;
-    -qp) printf '%s\\n' "$TEST_RPM_LOG_DIRECTORY" ;;
+    -qpR) printf '%s\\n' 'libX11.so.6()(64bit)' 'logrotate' 'python3-gobject' 'gtk3' ;;
+    -qp) printf '%s\\n' "$TEST_RPM_LOG_DIRECTORY" '/usr/share/plank/collaboration-ui.py -rw-r--r-- root root' ;;
     *) return 2 ;;
   esac
 }
@@ -71,7 +76,7 @@ readelf() { printf '%s\\n' 'Shared library: libX11.so.6'; }
         self.assertNotEqual(self.check_manifest(FILES.replace(
             '/usr/share/plank/display/virtual-2.edid\n', '')).returncode, 0)
         self.assertNotEqual(self.check_manifest(
-            FILES + '/usr/share/plank/display/virtual-3.edid\n').returncode, 0)
+            FILES + '/usr/share/plank/display/virtual-5.edid\n').returncode, 0)
 
     def test_private_log_directory_is_required(self):
         self.assertNotEqual(self.check_manifest(log_directory='').returncode, 0)

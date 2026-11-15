@@ -4,11 +4,11 @@
 > instinctual/PLANK. Read `docs/fernweh/development.md` for current repositories,
 > configuration and verification, and `docs/fernweh/upstreaming.md` when preparing
 > a contribution. The inherited guidance below defines media/security contracts;
-> `HANDOFF.md` describes upstream history, not this private review's release status.
+> `HANDOFF.md` describes upstream history, not this fork's release status.
 > No BDE infrastructure, memory server, signing account or credentials are required
 > for source development. Repository skills live in `.agents/skills/` (Codex) and
-> `.claude/skills/` (Claude Code). Keep the review repositories private until Finn
-> explicitly authorizes publication. Creating this fork does not authorize deployment.
+> `.claude/skills/` (Claude Code). Repository visibility is recorded in `docs/fernweh/review.md`.
+> Publication does not authorize deployment or upstream submissions.
 
 ## Mac Client compatibility scope
 
@@ -40,7 +40,7 @@ and next test. The layout is:
 
 - `apps/host/linux/` — RHEL/Rocky host, capture, encoding, authentication, and input helpers.
 - `apps/host/macos/` — native macOS Host and platform integration.
-- `apps/client/` — shared Linux/macOS client, decoding, presentation, and login UI.
+- `apps/client/` — shared Linux/macOS/Windows client, decoding, presentation, and login UI.
 - `protocol/` — shared schemas, feature negotiation, and test vectors.
 - `packaging/<product>/<os>/` — platform installation metadata and integration.
 - `tests/` — authentication, color, network, Wacom, and end-to-end suites.
@@ -98,10 +98,9 @@ the current checkout.
 
 The qualified default client video profile is H.264 High 10 4:4:4 identity.
 Decoder selection is internal, not a user preference: test exact-format
-hardware decoding first. H.264 may fall back to the FFmpeg software path for the
-same selected bookmark profile; HEVC requires hardware decoding and must fail
-clearly if the exact hardware path cannot initialize. Apply this by codec,
-not by Host encoder backend. A hardware path is acceptable only after a
+hardware decoding first, then fall back to the FFmpeg software path for the
+same selected bookmark profile. This applies to H.264 and HEVC independently
+of the Host encoder backend. A hardware path is acceptable only after a
 real profile-specific test frame proves the requested codec profile, bit depth,
 chroma sampling, range, and identity mapping. On the qualified Intel NUC, HEVC
 Rext 10-bit 4:4:4 identity is hardware-decoded through VA-API to a Y410 surface
@@ -109,7 +108,7 @@ and presented through the EGL Y410/XR30 identity path. H.264 High 10 4:4:4 is
 not supported by that VA-API implementation and therefore uses the exact-format
 FFmpeg software path. Never silently substitute H.264 High 8 4:4:4, 4:2:0,
 another codec, or any other profile. If neither exact hardware nor exact
-software decoding works for an eligible H.264 profile, fail the connection clearly.
+software decoding works, fail the connection clearly.
 
 Intel NUC Gen11 (Tiger Lake) is not qualified Client hardware. The operator
 excluded it after repeated video-engine GPU hangs in full sessions; isolated

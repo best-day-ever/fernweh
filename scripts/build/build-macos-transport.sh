@@ -54,32 +54,30 @@ cargo +1.99.1 test --target-dir "$shared_target_dir" --locked --offline --releas
 cargo +1.99.1 test --target-dir "$shared_target_dir" --locked --offline --release \
     --manifest-path third_party/quinn-proto-0.11.19/Cargo.toml \
     --lib tests::plank_pacing_cap_bounds_encrypted_datagram_bursts -- --exact
-if [[ ${PLANK_MACOS_SOURCE_FIRST:-0} == 1 ]]; then
-    # Dependency unit tests are not run by the root Cargo test command.
-    # Compile the production helper/tests against this exact archive's rlib.
-    # The shared target may contain rlibs from other Rust toolchains. Cargo's
-    # artifact record identifies the rlib built with this pinned toolchain.
-    fec_rlib=$(python3 - "$transport_build/cargo-build.jsonl" <<'PY'
+# Dependency unit tests are not run by the root Cargo test command.
+# Compile the production helper/tests against this exact archive's rlib.
+# The shared target may contain rlibs from other Rust toolchains. Cargo's
+# artifact record identifies the rlib built with this pinned toolchain.
+fec_rlib=$(python3 - "$transport_build/cargo-build.jsonl" <<'PY'
 import json
 import sys
 
 matches = []
 with open(sys.argv[1], encoding="utf-8") as records:
-    for line in records:
-        record = json.loads(line)
-        if record.get("reason") == "compiler-artifact" and record["target"]["name"] == "raptorq":
-            matches.extend(path for path in record["filenames"] if path.endswith(".rlib"))
+for line in records:
+    record = json.loads(line)
+    if record.get("reason") == "compiler-artifact" and record["target"]["name"] == "raptorq":
+        matches.extend(path for path in record["filenames"] if path.endswith(".rlib"))
 if len(matches) != 1:
-    raise SystemExit("Expected one raptorq rlib from this Cargo build")
+raise SystemExit("Expected one raptorq rlib from this Cargo build")
 print(matches[0])
 PY
 )
-    test -f "$fec_rlib"
-    rustc +1.99.1 --edition=2024 --test -O tests/protocol/source-first-fec.rs \
-        -L "dependency=$shared_target_dir/release/deps" --extern "raptorq=$fec_rlib" \
-        -o "$transport_build/source-first-test"
-    "$transport_build/source-first-test" --nocapture --test-threads=1
-fi
+test -f "$fec_rlib"
+rustc +1.99.1 --edition=2024 --test -O tests/protocol/source-first-fec.rs \
+    -L "dependency=$shared_target_dir/release/deps" --extern "raptorq=$fec_rlib" \
+    -o "$transport_build/source-first-test"
+"$transport_build/source-first-test" --nocapture --test-threads=1
 install -m 0644 "$shared_target_dir/release/libplank_transport.a" "$transport_build/release/libplank_transport.a"
 # Keep deterministic parser/state, source/repair and reliable-lane checks on
 # the hosted builder. The unchanged strict loss/performance matrix is separately

@@ -25,11 +25,10 @@ See [all feature and deployment settings](configuration.md).
 
 ## Clone and prepare
 
-Private review requires access to `fernweh`, `fernweh-client` and
-`fernweh-host-linux`. Authenticate Git separately, never through a token in a URL.
+Clone the source and initialize only the selected product. Public source clones
+need no GitHub account or maintainer credentials. Never put a token in a URL.
 
 ```sh
-gh auth setup-git
 git clone --recurse-submodules=no https://github.com/best-day-ever/fernweh.git
 cd fernweh
 # Client builders:

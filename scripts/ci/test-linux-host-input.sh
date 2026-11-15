@@ -10,7 +10,7 @@ if [[ ! $test_build_jobs =~ ^[12]$ ]]; then
   echo 'PLANK_TEST_BUILD_JOBS must be 1 or 2' >&2
   exit 2
 fi
-ffmpeg_dir=$(sed -n 's/^FFMPEG_PREPARED_BINARIES:[^=]*=//p' "$host_build/CMakeCache.txt")
+ffmpeg_dir=${PLANK_HOST_FFMPEG_ROOT:?prepared Host FFmpeg root required}
 test -f "$ffmpeg_dir/include/libavutil/pixfmt.h"
 test -f "$ffmpeg_dir/lib/libavcodec.a"
 source "$root/scripts/package/package-version.sh"

@@ -9,6 +9,10 @@ next integration work. It does not merge upstream, change a submodule pin or
 qualify a new executable. Findings below come from the actual diffs and both
 current source trees, not just commit subjects.
 
+Subsequent focused ports and remaining work are recorded in the
+[integration ledger](upstream-integration-2026-11-14.md). This comparison describes
+the earlier pins below.
+
 ## Exact comparison
 
 Upstream `main` was freshly fetched from GitHub for all three components.

@@ -1,259 +1,297 @@
 <p align="center">
-  <img src="docs/fernweh/media/fernweh-banner.svg" alt="Fernweh — your workstation, wherever you work" width="100%">
+  <img src="docs/fernweh/media/fernweh-banner.svg" alt="Fernweh — PLANK client, host and optional broker" width="100%">
 </p>
 
 <h1 align="center">BDE Fernweh</h1>
 
 <p align="center">
-  <strong>A PLANK fork shaped by everyday creative work.</strong><br>
-  Thoughtful display matching, studio access, collaboration and fixes for the moments that interrupt a session.
+  A source fork of <a href="https://github.com/instinctual/plank">PLANK</a> with a Windows Client port, desktop collaboration,
+  display profiles, file transfer and an optional access broker.
 </p>
 
 <p align="center">
-  <a href="#your-displays-matched">Display matcher</a> ·
-  <a href="#creative-input-with-an-escape-route">Creative input</a> ·
-  <a href="#the-fixes-that-make-a-difference">Bug fixes</a> ·
-  <a href="docs/fernweh/build.md">Build it</a> ·
-  <a href="#built-on-plank-built-to-give-back">Upstream &amp; contributing</a>
+  <a href="#changes-from-plank">Changes</a> ·
+  <a href="#display-configuration">Screenshots</a> ·
+  <a href="docs/fernweh/build.md">Build</a> ·
+  <a href="docs/fernweh/change-catalogue.md">Change catalogue</a> ·
+  <a href="docs/fernweh/enhancements.md">Implementation map</a> ·
+  <a href="docs/fernweh/merged-history.md">Merged history</a> ·
+  <a href="docs/fernweh/upstreaming.md">Contribute upstream</a>
 </p>
 
-> **ALPHA · private review · build from source**<br>
-> Build the executables you need. The Client is **direct-only by default**; broker support is a build-time opt-in. These repositories remain private while we prepare them for community review.
+> **ALPHA · build from source**<br>
+> Build the Client, Host and services you need. The Client defaults to
+> `FERNWEH_BROKER_ENABLED=0`; broker support is a compile-time option.
+> Platform support and installed-session qualification are tracked separately.
 
-## Why Fernweh?
+## Relationship to PLANK
 
-We use remote workstations for demanding creative applications. That means
-mixed-resolution displays, drawing tablets, keyboard shortcuts, long sessions
-and reconnecting to a desktop that already has work open.
+Fernweh preserves PLANK's Git history and component licenses. PLANK supplies the
+media pipeline, exact-format color profiles, encrypted QUIC transport, audio,
+OS account authentication, basic display selection, text clipboard and tablet
+forwarding. The changes below are downstream additions or repairs to those
+systems. This is an independent project, without an upstream endorsement.
 
-[PLANK](https://github.com/instinctual/plank) provides the foundation: remote
-video and audio, exact-format color profiles, workstation authentication, input
-and encrypted QUIC transport. Fernweh builds on that work with our studio
-workflows and a growing set of display, input and session-recovery improvements.
+The [change catalogue](docs/fernweh/change-catalogue.md) breaks the work down into
+individual additions, fixes, build changes and upstream ports, with implementation
+commits. The [implementation map](docs/fernweh/enhancements.md) documents behavior,
+protocols, source files, original reviews and platform limits. The
+[merged-history index](docs/fernweh/merged-history.md) covers the smaller fixes,
+follow-up regressions, build changes and upstream imports as well as major features.
 
-<table>
-  <tr>
-    <td width="50%" valign="top"><strong>Your desk, translated</strong><br>Choose which screens participate, preview the remote layout and save it for the next time you connect.</td>
-    <td width="50%" valign="top"><strong>Creative tools stay familiar</strong><br>Forward Mac shortcuts, keep pointer placement aligned across displays and retain local disconnect controls.</td>
-  </tr>
-  <tr>
-    <td valign="top"><strong>One workstation or a studio</strong><br>Connect directly, or add our optional self-hosted broker for sign-in, workstation discovery and outside access.</td>
-    <td valign="top"><strong>Work worth sharing</strong><br>Preserved PLANK history, documented fixes and component-sized contributions that can travel back upstream.</td>
-  </tr>
-</table>
+## Changes from PLANK
 
-## Your displays, matched
+### Windows Client port
 
-**See what your remote desktop will look like before connecting.** The display
-matcher shows your local monitors alongside the workstation layout, including
-which outputs are physical and which are virtual.
+**Fernweh brought up the Windows x64 Client for the PLANK stack.** The port
+builds on Moonlight Qt's Windows foundation and wires in PLANK's native Rust
+transport and Fernweh's client behavior. It is an implemented ALPHA product,
+with native MSVC build/staging scripts and WiX MSI packaging.
+
+The initial port added native-transport linking and fail-fast library checks,
+Windows graphics/build compatibility, display discovery and DPAPI-protected
+broker session storage. Later work added:
+
+- Broker password/OTP sign-in, persisted nonexportable device keys and signed
+  remembered-session requests, with authentication-generation isolation.
+- Unicode text clipboard, Explorer file/folder transfer, Windows Wacom raw HID
+  and Windows Ink pen fallback.
+- Stable monitor selection across Qt/SDL scaling, and native Internet/ICMP
+  reachability checks.
+- Independent Windows update feeds, MSI identity/integrity validation, native
+  installer-path normalization, SYSTEM access and standard-user/UAC repairs.
+- Lost-keyframe recovery, nonblocking DXGI presentation, frame-pacer lifetime
+  fixes and accepted-presentation clock/latency accounting.
+
+The [Windows implementation history](docs/fernweh/change-catalogue.md#windows-client-port-and-native-integration)
+starts with the original Client port and packaging commits, rather than treating
+Windows as an installer adaptation. Current source builds and installed package
+acceptance remain separate; the retained Windows MSI tooling is ALPHA/unsigned.
+
+### Other downstream areas
+
+| Area | Added or extended in Fernweh |
+| --- | --- |
+| Access and identity | Optional FreeIPA broker, HBAC discovery, OTP/passkey sign-in, device-bound sessions, enrollment and reasoned authentication failures |
+| Shared desktops | Owner-consent knocking, view/control roles, permission suspension/revocation, optional support policies and per-participant input ownership |
+| Client sessions | Independent workstation windows, connected-person presence, explicit local controls and updater/session coordination |
+| Files and clipboard | Bidirectional files/folders, Mac file picker, Windows native adapters, separate account grants and transfer/ownership recovery |
+| Displays | Saved monitor sets, per-workstation profiles, physical/virtual backing, packed capture, primary selection, Retina/notch geometry and Apply/Keep lifecycle |
+| Input | Mac immersive keyboard, negotiated immersive mouse, first-click/coordinate repairs, a Mac normalized-pen adapter, Wacom startup and Windows tablet adapters |
+| Shared Mac Hosts | Signed broker admission, concurrent desktop streams/audio taps, stable Host TLS identity and broker-aware display matching |
+| Capture and transport | NVENC bandwidth profiles, CUDA/NVENC lifetime fixes, idle capture suppression, bounded pacing and shared-listener isolation |
+| Recovery | Greeter/VT handoff, retained display snapshots, first-login modesets, stale callback/lease races and Windows video recovery |
+| Packaging and diagnostics | Mac distribution integration, native Windows/MSI gates, optional managed updates and bounded startup/termination diagnostics |
+
+These areas contain many separate fixes. The [detailed catalogue](docs/fernweh/change-catalogue.md)
+keeps those implementation records visible; the [review index](docs/fernweh/merged-history.md)
+also includes release coordination, tests and upstream imports.
+
+### Desktop sharing and join requests (knocking)
+
+- An authenticated guest can request access to an occupied Linux desktop. The
+  owner receives a consent window and can **Decline**, allow **View only**, or
+  **Allow interaction**. Pending requests expire; no response grants no access.
+- The owner can change a participant's permission or revoke access. Guest input
+  is suspended before security controls become interactive, preventing another
+  controller from approving requests or changing permissions.
+- Each participant has an independent transport connection and relay lease.
+  Leaving one session does not disconnect other participants. Guests inherit the
+  owner's capture and display layout; joining cannot modeset the workstation.
+- Host policy can allow authenticated workstation users to join automatically,
+  restrict joining by group, or exempt a support group from consent. Optional
+  **Unlock and join** rechecks the desktop identity and relocks after support
+  leaves. These are separate administrator-controlled permissions.
+- Shared input preserves drag ownership, hands the mouse over after inactivity,
+  releases departing participants' held input and displays the active remote
+  desktop pointer. There is one OS pointer, not one named pointer per person.
+
+Guest clipboard, files, pen/raw HID, microphone and camera forwarding are denied.
+Linux consent-based collaboration and broker-admitted shared Mac hosts have
+separate contracts; do not infer the same consent UI on the Mac Host.
+[Collaboration protocol](protocol/collaboration.md) ·
+[Mac admission](protocol/macos-broker-admission.md)
+
+### Multiple workstation sessions and presence
+
+The Client can keep independent windows connected to different workstations.
+Broker-enabled Clients publish per-stream presence with expiring heartbeats so
+workstation cards show connected people. Occupancy and presence are advisory;
+Host authentication and desktop policy still decide admission. Updates wait for
+other Client windows and active sessions to close.
+[Source and original PRs](docs/fernweh/enhancements.md#multiple-sessions-and-presence)
+
+### File transfer and clipboard synchronization
+
+- **Bidirectional files and folders:** Finder/Explorer copy and remote paste, or
+  the Mac session toolbar's **Files…** picker. The picker preserves the local
+  clipboard. Transfer state reports sending, receiving, completion and failure.
+- **Separate text/file permissions:** Host policy and authenticated account
+  groups can narrow each capability independently. File transfer is negotiated
+  and default-off in Host policy; direct access does not require the broker.
+- **Transfer lifecycle:** streamed manifests, bounded queues, range reads,
+  integrity checks and staged completion. Collision handling, cancellation,
+  silent-peer deadlines and queue backpressure prevent stranded transfers.
+- **Text clipboard repairs:** preserve newer local clipboard ownership, isolate
+  inbound/outbound generations, retry busy Windows clipboards and unsent chunks,
+  avoid echoing received files, and defer paste until content is ready.
+
+Basic text sync is inherited from PLANK. Fernweh adds the file protocol, Windows
+adapters, per-user policy and downstream ownership/recovery work. Current file
+adapters cover Mac/Windows Clients with the Linux X11 Host; this is not a claim
+of equivalent file transfer on every Client/Host pair. Links, special files,
+resource forks and extended attributes are outside the file protocol.
+[File protocol](protocol/clipboard-files-v2.md) ·
+[Text protocol](protocol/clipboard-sync.md) ·
+[Platform details](docs/fernweh/enhancements.md#files-and-clipboard)
+
+### Display profiles and session controls
+
+The display planner adds saved monitor-set profiles, per-workstation overrides,
+per-screen participation, primary selection, physical/virtual backing and exact
+pixels versus Retina text-size choices. Advanced configuration supports explicit
+sizes, coordinates and snapping. Mac SDL sessions retain separate monitor
+windows and cross-screen dragging. Screen changes offer **Apply** or **Keep**
+with session-scoped dismissal and normal toolbar hiding.
+
+Other Client changes include per-profile bitrate controls, reserved local
+session shortcuts, Mac immersive keyboard capture, Windows clipboard/tablet
+adapters and stream-window close handling.
+[Display configuration](#display-configuration) ·
+[Input details](docs/fernweh/enhancements.md#input-and-local-session-controls)
+
+### Immersive mouse
+
+The merged Mac Qt Client → Linux X11 Host path adds session-scoped, unaccelerated
+relative pixel movement for applications such as Blender and Unreal. A toolbar
+action and **Ctrl+Alt+Shift+M** enter or release capture; completion is ordered
+before returning to absolute pointing. Focus, reconnect, layout and tablet
+transitions cancel capture. Shared guests cannot claim it.
+
+**The standard Mac package builder still selects SDL.** Enabling immersive mouse
+in that build requires the Qt frontend's display/clipboard/sharing parity work.
+Installed Blender/Unreal acceptance remains open. See the
+[integration ledger](docs/fernweh/upstream-integration-2026-11-14.md).
+
+### Optional broker, relay and authentication
+
+The broker provides FreeIPA/Kerberos integration, password+OTP and passkey
+sign-in, enrollment, device-bound remembered sessions, workstation discovery,
+HBAC enforcement and direct/relay route selection. WAN participants receive
+independent scoped TCP/UDP relay leases; media encryption terminates at the Host.
+Shared Mac Hosts use explicitly configured signed admission without requiring
+IPA enrollment of the Mac's OS account.
+
+Managed updates and bounded diagnostics are optional deployment capabilities.
+Generic builds have no operator broker endpoint, trusted broker key or enabled
+updater. Broker code, account UI and helpers are excluded when
+`FERNWEH_BROKER_ENABLED=0`. [Broker integration](docs/fernweh/broker.md)
+
+## Reliability changes
+
+This is a subsystem index; the linked source map and history contain the
+individual fixes and follow-ups.
+
+| Area | Included changes |
+| --- | --- |
+| Linux capture/teardown | Preserve CUDA context lifetime, destroy NVENC on its owning thread and drain conversion work before borrowed frames are released. Retry the specific transient NvFBC recreation failure during login modesets. |
+| Display lifecycle | Keep the original layout snapshot through failed restoration/service stop; restore primary output; preserve native boot geometry separately from remote carrier timings; retry empty inventories and incomplete setup. |
+| Connection recovery | Bound worker/topology admission retries; preserve submitted display plans; renew relay leases before preparation; reject stale replies from prior connection generations. |
+| Shared sessions | Isolate guest disconnects, reuse the fixed UDP listener safely, preserve owner display leases, bound grants, release held input and fix stale-lock observations after support unlock. |
+| Windows video | Retry lost keyframe recovery, avoid presentation/pacer lock stalls and release discarded hardware frames outside the lock. |
+| Transport pacing | Bound sender bursts using bitrate/encoder headroom while allowing delayed wakeups to make progress; preserve FIFO and cancellation under reliable-data backpressure. |
+| Input | Preserve first click, map pointer coordinates to drawable geometry, restore Mac Wacom startup, keep the first X11 wheel notch and reject non-finite pen coordinates. |
+| Clipboard/files | Repair capability advertisement, large-manifest backpressure, crossed offers, deferred paste, cancellation, stale ownership and malformed/silent peers. |
+| Installer/updater | Normalize Windows MSI paths, validate package identity/size/hash, repair standard-user/UAC/service access and clean failed downloads. |
+| Diagnostics | Preserve the first termination cause and distinguish startup, window, decoder, receipt and renderer progress in opt-in bounded reports. |
+
+Exact 60 Hz virtual timings, several tablet/reconnect improvements and the recent
+request/audio/backpressure fixes originated upstream. The
+[source map](docs/fernweh/enhancements.md) distinguishes those imports from our
+changes; this table does not assign every underlying subsystem to Fernweh.
+
+## Display configuration
 
 <p align="center">
-  <img src="docs/fernweh/media/display-matcher.png" alt="Fernweh display matcher: a 4K studio screen and an exact-size virtual MacBook screen participate; a portrait display stays local" width="920">
+  <img src="docs/fernweh/media/display-matcher.png" alt="Fernweh display planner overview with participating screens, remote backing and primary selection" width="920">
 </p>
 
-<p align="center"><em>Actual Fernweh interface rendered on macOS with sample display data. No live workstation or account is shown.</em></p>
-
-- **Use the screens you want.** Keep a spare monitor local, choose the remote
-  primary and open one fullscreen window per participating screen.
-- **Choose pixels or comfortable text.** Select exact pixels, a Retina
-  “looks like” size, a preset or a supported custom size. The planner checks
-  Host capabilities and decoder limits.
-- **Remember each desk.** Save a profile for a particular monitor set, globally
-  or for an individual workstation.
-- **Handle changes deliberately.** When screens change during a session, review
-  the proposed layout or keep the current one. The notice follows normal
-  toolbar hiding, and Keep remembers that arrangement for the session.
-
-### Need more control?
-
-The advanced view lets you place displays by hand with snapping, enter exact
-sizes and coordinates, choose physical or virtual backing, and select native
-pixels or scale-to-fit presentation.
+<p align="center"><em>Actual Client QML on macOS with fictional monitor data.</em></p>
 
 <p align="center">
-  <img src="docs/fernweh/media/display-advanced.png" alt="Advanced display setup with draggable screen positions, exact width and height fields, output backing choices and presentation controls" width="920">
+  <img src="docs/fernweh/media/display-advanced.png" alt="Advanced display setup with explicit dimensions, positions, backing and presentation choices" width="920">
 </p>
 
-<p align="center"><em>The same sample desk in the real advanced view. <a href="docs/fernweh/media/README.md">Capture source and reproduction</a>.</em></p>
+<p align="center"><em><a href="docs/fernweh/media/README.md">Capture source and reproduction</a>. These captures demonstrate the interface, not a live streaming qualification.</em></p>
 
-Display selection and Client matching also exist in PLANK. Our additions include
-this profile-based workflow, mixed physical/virtual arrangements, per-monitor
-windows and the downstream layout/recovery fixes described below. Available
-layouts still depend on the Host and Client combination.
+## Build selected components
 
-## Creative input, with an escape route
-
-### Included: immersive keyboard and more dependable pointing
-
-On macOS, **immersive keyboard mode** forwards ordinary shortcuts to the focused
-remote desktop, including Option-Tab as remote Alt-Tab. It is useful when
-working in Blender and other shortcut-heavy creative applications. Enable it
-in Settings for your next connection; macOS Accessibility permission is
-required and protected system shortcuts remain local.
-
-The input work also covers first-click handling, pointer mapping through
-letterboxing and multiple display windows, cross-screen dragging, and Linux
-scroll-wheel device handling. Tablet paths remain platform-specific; see the
-[feature and source map](docs/fernweh/enhancements.md).
-
-| Local control | Shortcut |
+| Deployment | Components |
 | --- | --- |
-| Disconnect the focused session | **Ctrl + Alt + Shift + Q** |
-| Show or hide the session toolbar | **Ctrl + Alt + Shift + T** |
-| Leave immersive keyboard mode for this session | **Ctrl + Alt + Shift + Z** |
-
-On Mac, use **Control + Option + Shift**. Disconnect and toolbar controls remain
-local during immersive keyboard capture, including while reconnecting.
-
-### In development: immersive mouse for Blender and similar tools
-
-Applications that hide or wrap the pointer need more than ordinary desktop
-pointing. Our **immersive mouse** work adds an explicit session toggle for
-continuous relative movement, with a toolbar action and
-**Ctrl + Alt + Shift + M** to enter or release capture. It is designed for tools
-such as Blender and Unreal, rather than an application-specific workaround.
-
-**This feature is not in this repository's pinned build yet.** The implementation
-is under review in [Client PR #78](https://github.com/best-day-ever/plank-client/pull/78)
-and [integration PR #137](https://github.com/best-day-ever/plank/pull/137), with
-matching protocol/Host work. Its initial target is a Linux X11 Host. We will
-move it into the included list when those components are integrated and checked.
-
-## The fixes that make a difference
-
-Remote access needs to survive the transitions around the work, too. These are
-specific repairs carried by this fork, with their original implementation notes.
-
-| When something went wrong | What we changed |
-| --- | --- |
-| A fresh Linux login or display modeset could crash a media worker during encoder recreation | Keep direct NVENC teardown on its CUDA context thread, retain each session's context and drain conversion work before releasing borrowed frames. [Encoder lifetime](docs/releases/1.2.30.md) |
-| A layout change could leave recovery ownership behind, overlap boot displays or return the remaining window to the wrong screen | Retain the original layout until exact restoration succeeds, retry inventory publication, use native boot dimensions independently of the 60 Hz carrier and place the remaining window on the selected primary. [Display recovery](docs/releases/1.1.047.md) |
-| Windows could forget a disabled monitor when starting a stream | Use stable Windows display identities and account for Qt/SDL scaling differences instead of rebuilding incompatible monitor keys. [Source and regression](docs/fernweh/enhancements.md#windows-display-selection) |
-| A Windows stream could remain black after a lost recovery keyframe response | Retry recovery while delta frames continue; keep presentation nonblocking and release discarded hardware frames outside the pacer lock. [Video recovery](docs/releases/1.2.33.md) |
-| Screen-change notices could linger or reappear after choosing Keep | Honor the ask-on-change preference, separate observed and applied geometry, remember Keep, and restore normal toolbar idle hiding. [Screen-change repair](docs/fernweh/enhancements.md#screen-change-notices) |
-| A low selected bitrate could still allow large sender bursts | Derive a bounded packet-pacing ceiling from the selected bitrate and encoder peak, with scheduler headroom for ordinary wakeup delays. [Pacing](docs/releases/1.2.32.md) |
-
-These are scoped fixes, not a promise that every crash or network freeze is
-solved. The [enhancement map](docs/fernweh/enhancements.md) links implementation
-commits and regression coverage. Exact 60 Hz virtual timings themselves are
-inherited PLANK work; we credit that separately from our layout corrections.
-
-## Studio access, when you want it
-
-For a studio deployment, Fernweh adds an optional broker around the same remote
-workstation core:
-
-- **Sign in with FreeIPA password + OTP or a passkey.** Device-bound sessions
-  and onboarding support everyday access after initial enrollment.
-- **Find authorized workstations.** Workstation lists follow explicit directory
-  access policy, with desktop handoff/recovery and separately authorized sharing.
-- **Connect inside or outside the office.** Use a direct office connection or
-  a scoped TCP/UDP relay lease. Media remains encrypted to the Host.
-- **Share an existing desktop deliberately.** Presence, joining and control
-  sharing follow the collaboration/admission contracts.
-- **Enable managed updates and diagnostics if needed.** Both have explicit
-  deployment policy; diagnostics collection is opt-in.
-
-The broker currently integrates with **FreeIPA/Kerberos**. Broker admission,
-file clipboard and collaboration require the matching Fernweh components;
-support varies by platform. Start with the [integration guide](docs/fernweh/broker.md).
-
-## Build exactly what you need
-
-You choose the executables and features for your deployment. **A direct Client
-and Host do not need the broker or a directory service.**
-
-| You want… | Build… |
-| --- | --- |
-| Direct workstation access over a reachable LAN/VPN/admin-managed route | A Client with the default `FERNWEH_BROKER_ENABLED=0`, plus a compatible Host |
-| Studio sign-in, workstation discovery and brokered access | A Client with `FERNWEH_BROKER_ENABLED=1`, compatible Hosts and the broker; add the relay helper for relay access |
-| Only one side of an existing setup | Just that Client, Host or broker component |
+| Direct LAN/VPN/admin-routed access | Client (`FERNWEH_BROKER_ENABLED=0`) and compatible Host |
+| Brokered access | Client (`FERNWEH_BROKER_ENABLED=1`), compatible Host, broker; relay helper if needed |
+| Existing compatible deployment | Build only the executable you need |
 
 ```sh
-gh auth setup-git
 git clone --recurse-submodules=no https://github.com/best-day-ever/fernweh.git
 cd fernweh
 
-# Initialize only the Client and shared transport for a Client build.
+# Client build inputs. Initialize Host dependencies only for a Host build.
 git submodule update --init --recursive apps/client third_party/kyber-kymux
-
-# The default. Broker backends, account UI and helpers are omitted.
 export FERNWEH_BROKER_ENABLED=0
-# Continue with your platform's build guide below.
+# Continue with your platform guide.
 ```
 
-For a broker-enabled build, set `FERNWEH_BROKER_ENABLED=1` before building.
-The endpoint, public TLS pins, passkey RP ID and update opt-in are deployment
-variables. Generic builds contain no BDE endpoint or default trusted broker key.
-Secrets remain outside Git. A disabled build ignores inherited broker settings.
+Set `FERNWEH_BROKER_ENABLED=1` to compile broker support. Endpoint, public TLS
+pins, passkey RP ID and updater opt-in are [build variables](docs/fernweh/configuration.md).
+Service/directory settings are runtime configuration; credentials stay outside
+Git. Use pinned submodule commits rather than moving branch tips.
 
-**[Choose your components](docs/fernweh/build.md#choose-your-components)** ·
-**[All build variables](docs/fernweh/configuration.md)** ·
-**[Broker and Host integration](docs/fernweh/broker.md)**
-
-### Platforms
-
-| Product | Target | Build instructions |
+| Product | Target | Instructions |
 | --- | --- | --- |
-| macOS Client | Apple Silicon, macOS 15+; SDK 27+ builder | [Build Client](docs/fernweh/build.md#macos-client) |
-| Windows Client | x64, MSVC 2022, Qt 6.10.2; ALPHA MSI tooling | [Build Client](docs/fernweh/build.md#windows-client) |
-| Linux Client | Ubuntu 26.04 x86-64, Qt/Wayland | [Build Client](docs/fernweh/build.md#linux-client) |
-| Linux Host | Rocky 9.7 x86-64, NVIDIA/X11 | [Build Host](docs/fernweh/build.md#linux-host) |
-| macOS Host | Apple Silicon, macOS 26.7+; SDK 27+ builder | [Build Host](docs/fernweh/build.md#macos-host) |
-| Broker / relay | Rocky 9.7 x86-64, Rust | [Build services](docs/fernweh/broker.md) |
+| macOS Client | Apple Silicon, macOS 15+; SDK 27+ builder | [Build](docs/fernweh/build.md#macos-client) |
+| Windows Client | x64, MSVC 2022, Qt 6.10.2; ALPHA MSI | [Build](docs/fernweh/build.md#windows-client) |
+| Linux Client | Ubuntu 26.04 x86-64, Qt/Wayland | [Build](docs/fernweh/build.md#linux-client) |
+| Linux Host | Rocky 9.7 x86-64, NVIDIA/X11 | [Build](docs/fernweh/build.md#linux-host) |
+| macOS Host | Apple Silicon, macOS 26.7+; SDK 27+ builder | [Build](docs/fernweh/build.md#macos-host) |
+| Broker / relay | Rocky 9.7 x86-64, Rust | [Integration and build](docs/fernweh/broker.md) |
 
-Private review access is currently needed for the parent, Client and Linux Host
-repositories. Use the pinned submodule commits. Linux Host builds initialize
-`apps/host/linux` instead of the Client. There is no Windows Host or mobile
-product in this review. See [platform boundaries](docs/development/platforms.md)
-for color, capture, audio, tablet and display support.
+No Windows Host or mobile product is provided. This repository distributes
+source, not new binaries. [Platform boundaries](docs/development/platforms.md)
+and the [verification receipt](docs/fernweh/review.md) record exact coverage;
+compilation does not establish installed-session or hardware acceptance.
 
-## Built on PLANK. Built to give back.
+## Upstream integration and contributions
 
-We want this work to be useful beyond our studio. PLANK's media, color, input
-and transport work is the foundation, and we preserve its history and notices.
-Fernweh is an independent downstream project, without an upstream endorsement.
+Reviewed upstream references and comparison bases are pinned in the
+[source manifest](docs/fernweh/source-manifest.json). Independent repairs from
+PLANK through **1.4.18** are integrated, including queued NVENC refreshes,
+retiring-session retries, bounded control requests, cancellable Linux audio,
+reliable-data backpressure and Mac display-wake recovery.
 
-**We also check what upstream has improved.** Our
-[14 November 2026 comparison](docs/fernweh/upstream-review-2026-11-14.md) found
-useful fixes not yet integrated here: retained NVENC keyframe requests, retrying
-while a previous Host session retires, reliable-data backpressure and Mac
-display-wake/installer improvements. Fernweh's studio features and fixes do not
-make it universally ahead of current PLANK.
+The broader Qt/frontend/dependency upgrade remains in draft PRs. It must retain
+Fernweh display profiles, sharing, file clipboard and Windows support, and pass
+its remaining native/platform gates. **This fork is not a completed or qualified
+PLANK 1.4.18 upgrade.** The [integration ledger](docs/fernweh/upstream-integration-2026-11-14.md)
+records both integrated work and remaining gaps.
 
-The [upstreaming guide](docs/fernweh/upstreaming.md) explains how to extract a
-small fix, test it against current PLANK and preserve original authorship.
-The full FreeIPA broker is an optional subsystem; a focused bug fix should not
-require it. Public submissions and repository publication follow review.
+Use the [upstreaming guide](docs/fernweh/upstreaming.md) to extract a focused
+change against current PLANK, preserve authorship and test it without the broker.
+No upstream PR or acceptance is implied by publishing this source fork.
 
-### For contributors, Claude Code and Codex
-
-| Start here | What it covers |
+| Contributor entry point | Purpose |
 | --- | --- |
-| [Contributing](CONTRIBUTING.md) | Project scope, changes and review |
-| [Development guide](docs/fernweh/development.md) | Component ownership, builds and validation |
-| [Shared development skill](.agents/skills/fernweh-development/SKILL.md) | Repository workflow for Codex and Claude Code |
-| [Feature and source map](docs/fernweh/enhancements.md) | Included changes, source evidence and upstream contribution units |
-| [Upstream comparison](docs/fernweh/upstream-review-2026-11-14.md) | Current gaps, overlap and recommended integration order |
-
-### Review status
-
-Both direct-only and broker-enabled Mac Client developer builds have passed
-their recorded checks. This source review supplies no binaries; native
-Windows/Linux builds, installed-session acceptance and publication review remain
-separate gates. The [verification receipt](docs/fernweh/review.md) records exact
-commits, checks and remaining work. Historical BDE/PLANK release notes describe
-their original sources and packages.
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Scope and review expectations |
+| [Development guide](docs/fernweh/development.md) | Component ownership and verification |
+| [Codex skill](.agents/skills/fernweh-development/SKILL.md) / [Claude Code skill](.claude/skills/fernweh-development/SKILL.md) | Shared repository workflow |
+| [Change catalogue](docs/fernweh/change-catalogue.md) | Individual additions, fixes and implementation evidence |
+| [Implementation map](docs/fernweh/enhancements.md) | Feature behavior, source and original PRs |
+| [Merged history](docs/fernweh/merged-history.md) | Detailed review/commit index |
 
 ## Credits and licenses
 
-Thank you to the [PLANK contributors](https://github.com/instinctual/plank),
-[Sunshine](https://github.com/LizardByte/Sunshine),
-[Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt), Kyber/Kymux,
-Quinn, Qt, SDL, FFmpeg and the other communities this project depends on.
-
-Component licenses and copyrights remain in place. The Client and Linux Host
-retain their GPLv3 license texts; the broker and shared transport declare
-AGPL-3.0-or-later. Dependencies carry their own terms. See
-[licensing and provenance](docs/fernweh/provenance.md).
+PLANK, Sunshine, Moonlight Qt, Kyber/Kymux, Quinn, Qt, SDL, FFmpeg and their
+contributors provide the foundations. Copyright and license notices remain in
+place: the Client and Linux Host retain GPLv3 license texts; broker and shared
+transport declare AGPL-3.0-or-later. Dependencies have their own terms.
+[Licensing and provenance](docs/fernweh/provenance.md)
