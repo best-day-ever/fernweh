@@ -34,6 +34,7 @@ def privileged_test_command(binary, test, fixture):
         raise ValueError('Only the two exact loopback tests and four fixture inputs are allowed')
     return ['sudo', '-n', '--', '/usr/bin/env', '-i',
             *(name + '=' + fixture[name] for name in sorted(FIXTURE_ENV)),
+            '/usr/bin/timeout', '--signal=TERM', '--kill-after=10s', '120s',
             str(binary), '--ignored', '--exact', test, '--nocapture', '--test-threads=1']
 
 def qualify(binary, configuration, expected):

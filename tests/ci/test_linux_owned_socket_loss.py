@@ -30,6 +30,7 @@ class OwnedSocketRunnerTests(unittest.TestCase):
         self.digest = hashlib.sha256(self.binary.read_bytes()).hexdigest()
         self.commands = []
         self.fail_test = False
+        self.failure_code = 101
         self.bad_copy = False
         self.missing_test = False
     def command(self, command):
@@ -45,7 +46,7 @@ class OwnedSocketRunnerTests(unittest.TestCase):
             Path(command[command.index('-out') + 1]).write_bytes(b'DER-fixture')
         if '/usr/bin/env' in command:
             if self.fail_test:
-                raise subprocess.CalledProcessError(101, command, output='preserved failing fixture evidence')
+                raise subprocess.CalledProcessError(self.failure_code, command, output='preserved failing fixture evidence')
             return 'fec_loss_owned_udp_kernel_drops=0 owned_kernel_loss_free=true\nfec_loss_matrix_frames=900 source=220500 missing=1 unrecovered=0\ntest result: ok. 1 passed;\n'
         return ''
     def qualify(self):
@@ -59,6 +60,7 @@ class OwnedSocketRunnerTests(unittest.TestCase):
         for command in elevated:
             self.assertEqual(command[:5], ['sudo', '-n', '--', '/usr/bin/env', '-i'])
             self.assertEqual({argument.split('=', 1)[0] for argument in command[5:9]}, runner.FIXTURE_ENV)
+            self.assertEqual(command[9:13], ['/usr/bin/timeout', '--signal=TERM', '--kill-after=10s', '120s'])
             self.assertNotIn('cargo', command)
             self.assertIn('/tmp/plank-owned-loss.ABCDef12/loopback-test', command)
         self.assertIn('/usr/bin/rm', self.commands[-2])
@@ -75,6 +77,15 @@ class OwnedSocketRunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.qualify()
         self.assertEqual(self.commands, [])
+    def test_outer_timeout_stops_without_retry_and_cleans_root_copy(self):
+        self.fail_test = True
+        self.failure_code = 124
+        with self.assertRaises(subprocess.CalledProcessError) as result:
+            self.qualify()
+        self.assertEqual(result.exception.returncode, 124)
+        self.assertEqual(sum('/usr/bin/env' in command for command in self.commands), 1)
+        self.assertIn('/usr/bin/rm', self.commands[-2])
+        self.assertIn('/usr/bin/rmdir', self.commands[-1])
     def test_rejects_other_tests_and_extra_environment(self):
         fixture = {name: 'fixture' for name in runner.FIXTURE_ENV}
         with self.assertRaises(ValueError):
