@@ -63,8 +63,11 @@ retains the canonical bounded datagram burst capacity. Native Mac/Windows builds
 and the exact per-platform results are recorded in the
 [continued review receipt](review.md#15-november-coordinated-plank-1418-integration).
 
-The package/loss gate remains open after an intermittent failed native loss
-trial; retain its evidence and thresholds. Installed/hardware acceptance is
-separate. The remaining-integration table above records the14November baseline,
+The final six controlled-loss matrices now pass all 5,400 frames with zero
+unrecovered symbols and zero owned kernel drops; their thresholds are unchanged.
+Earlier failures remain recorded. The ordinary-user transport/FFI and uninstalled
+RPM gates pass after a narrow obsolete asset-copy repair. Installed/hardware
+acceptance is separate. The remaining-integration table above records the
+14 November baseline,
 not the current list of unresolved source repairs. See the maintained
 [candidate status](plank-1.4.18-candidate.md) before promotion.

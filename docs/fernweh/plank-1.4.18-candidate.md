@@ -32,8 +32,11 @@ separate gates. No release, installer feed or deployment pin is changed.
   startup and installer configuration follow the optional-settings contract.
 - Native build phases do not install operating-system packages. Dependency
   provisioning belongs to disposable build environments. Tests select the exact
-  Cargo artifact from the shared target rather than guessing from cached files. The custom listener uses the same canonical bounded
-  datagram burst capacity as generic peers, preserving large keyframes and FEC.
+  Cargo artifact from the shared target rather than guessing from cached files.
+  The custom listener uses the same canonical bounded datagram burst capacity
+  as generic peers. A bounded receive-buffer request preserves larger existing
+  buffers and tolerates OS clamps/rejections. Standalone native entry points
+  select the source directory so rustup uses its pinned toolchain.
 
 ## Verification and remaining gates
 
@@ -42,9 +45,13 @@ The [integration ledger](upstream-integration-2026-11-14.md) and
 The draft reviews are [parent6](https://github.com/best-day-ever/fernweh/pull/6),
 [Client5](https://github.com/best-day-ever/fernweh-client/pull/5), and
 [Linux Host7](https://github.com/best-day-ever/fernweh-host-linux/pull/7).
-Both Client profiles pass their complete native Mac and Windows gates. Linux
-package/loss qualification remains open after a failed repeat and measured
-endpoint receive-buffer loss; retain its evidence and thresholds before promotion.
+Both Client profiles pass their complete native Mac and Windows gates. All six
+Linux controlled-loss matrices pass 900 frames each, with zero unrecovered FEC
+symbols and zero drops on the three owned UDP sockets. Test-only per-socket
+preparation leaves global receive settings unchanged. Earlier failed trials
+remain recorded. Transport/FFI and all uninstalled RPM package checks pass. The
+obsolete blanket asset-copy step is removed while required resources remain
+strict. No package is installed or promoted.
 
 Installed streaming is still separate: macOS15/27 Client and26.7/27 Host sessions,
 Windows streaming, shared control/tablets and Blender/Unreal immersive workflows
