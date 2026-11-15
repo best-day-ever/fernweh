@@ -3,6 +3,8 @@
 set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 target_dir=${1:?Usage: run-source-first-fec.sh CARGO_TARGET_DIR}
+target_dir=$(cd -- "$target_dir" && pwd)
+cd "$repo_root"
 test_tmp=$(mktemp -d "$target_dir/source-first-fec.XXXXXX")
 trap 'rm -rf -- "$test_tmp"' EXIT
 features=()

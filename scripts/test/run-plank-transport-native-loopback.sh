@@ -12,6 +12,7 @@ esac
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 crate_dir="$repo_root/protocol/plank-transport"
+cd "$repo_root"
 test_tmp=$(mktemp -d /tmp/plank-native-kyproto.XXXXXX)
 trap 'rm -rf -- "$test_tmp"' EXIT
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 role=${1:?product role required}
+cd "${PLANK_SOURCE_ROOT:?}"
 export CARGO_HOME="$PLANK_CARGO_ROOT" RUSTUP_HOME="$PLANK_RUSTUP_ROOT"
 export PATH="$CARGO_HOME/bin:$PATH"
 export CARGO_NET_OFFLINE=true

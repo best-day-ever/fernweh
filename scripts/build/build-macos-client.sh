@@ -4,6 +4,7 @@ set -euo pipefail
 [[ $# == 2 && $1 == /* && $2 == /* ]] || { echo 'usage: build-macos-client.sh SOURCE BUILD' >&2; exit 2; }
 source_root=$1
 build=$2
+cd "$source_root"
 : "${PLANK_MAC_CLIENT_DEPS:?}"
 : "${PLANK_QT_ROOT:?}"
 : "${PLANK_RUSTUP_ROOT:?}"
