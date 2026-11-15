@@ -293,3 +293,55 @@ load and the desktop/mobile pages were visually checked. Privacy, commit and
 whitespace checks pass; the bde-linux repository gate passes with existing
 lint advisories. Product builds are not repeated for this documentation-only
 change. No product source, dependency pin, workflow setting or binary changes.
+
+
+## 15 November: coordinated PLANK 1.4.18 integration
+
+The candidate merges current Fernweh main into all components with merge
+ancestry preserved. The source checkpoint is parent `31e186d6`, Client
+`d7c5155c` and Linux Host `503fc870`. Reviews remain
+[parent6](https://github.com/best-day-ever/fernweh/pull/6),
+[Client5](https://github.com/best-day-ever/fernweh-client/pull/5), and
+[Host7](https://github.com/best-day-ever/fernweh-host-linux/pull/7).
+No release/feed, installed product or deployment pin changes.
+
+The Qt owner now retains saved monitor selection, planner primary/crops and
+backing, shared views, Apply/Keep and cancellation. Clipboard callbacks retain
+focus, generation, permission and adapter lifetime without SDL polling. Add/Edit
+bookmarks use stable layout values and discovered Host policy. Native local
+Q/T shortcuts precede the bounded remote queue; queued actions recheck focus,
+capture and lifetime. Toolbar pin and idle-hide behavior remain intact. Windows
+keeps its SDL decoder/pacer, D3D resources, lifecycle and microphone adapter.
+Narrow launcher toolbars shorten version text while preserving complete status.
+
+Linux capture shares one C++/NVCC metadata definition and retains CUDA APIs.
+The custom native listener now uses Kynet's existing bounded4MiB datagram burst
+capacity. The unchanged1,600,013-byte C ABI regression fails at the omitted1MiB
+default and passes in both trust modes after the repair, without changing
+payload, deadline or pacing. Native builds do not provision OS packages; FEC
+checks select Cargo's actual linked artifact from the shared target.
+
+Mac Host display work runs outside the admission lock, preserving the first
+shared owner's workspace until final drain. Optional metrics remain off and
+configuration/startup/installer checks retain their filesystem boundaries.
+
+| Gate | Evidence and boundary |
+| --- | --- |
+| Parent/protocol | Root147 checks;88 transport unit +6 wire;47 selected protocol/encrypted functional and4 source-first FEC cases;8 declaration-header checks; actual Quinn paths regression passes. |
+| Linux Host | Native production/test binaries link;123 focused cases/3 kernel-UHID skips;25 input/lifetime repeats of107 cases/3 skips;25 wrapped lifecycle repeats of97/0 skips. Exact CUDA8/10-bit GBR/NV12/P010 and all three Native10 normal/Clang sanitizer fixtures pass. |
+| Linux package/loss | Earlier three150Mbps loss trials pass900frames each with no unrecovered frames. A final repeat loses one non-CBR frame during3% loss. A separate unchanged diagnostic recovers900/900frames but records34 endpoint kernel receive-buffer drops despite zero proxy drops. This proves an unmeasured loss path, without attributing the earlier failure solely to it. Full package qualification remains open; no RPM is promoted. |
+| Mac Client | Both full builders pass at parent3547e2b5/Clientd7c5155c: direct42QtTest invocations/701passes and broker46/884passes, each with two Linux-only skips. They include actual Qt/Metal8/10-bit identity/BT.709/crop/overlay/reduction and native window checks, shared suites, microphone/wire/timestamp and bundle checks. Native keyboard35, Qt input27/two Linux-only skips, QML10, planner55, sizing13, layout10, clipboard23 and broker129 cases pass. |
+| Windows Client | Both applications and full runners pass at31e186d6/Clientd7c5155c: direct19suites/386passes; broker24suites/572passes and five expected skips (three POSIX-only/two unavailable real-helper fixtures). Six Host-choice, SDL microphone12, media negotiation5 and shader resources7 cases pass. Sixteen updater checks use process probes without installation. Native service/process fingerprints stay unchanged. |
+| Mac Host | Actual synthetic TLS/QUIC authentication/admission, display-lease restoration, three-peer sharing and cancellation pass; cancellation takes0.01s. Installer47, native configuration and19 filesystem/configuration checks pass. This is not a full privileged/installed Host qualification. |
+
+Fresh upstream still has Client `121ed3eb` and Host `c71333d7`; parent `4a1c1046`
+adds only HANDOFF housekeeping after the reviewed baseline. No additional
+product series is imported by this continuation.
+
+The physical Linux desktop remains24-bit; device-free Native10 and CUDA checks
+do not establish live depth30 capture. Privileged Mac handoff remains unrun
+without a suitable sudo test environment. Installed macOS15/27 Client and26.7/27
+Host sessions, Windows streaming, display sleep/lid, shared input/tablets and
+Blender/Unreal immersive workflows remain actual acceptance work. Keep the
+[candidate](plank-1.4.18-candidate.md) in draft; compilation and synthetic tests
+do not replace those gates. Raw receipts stay in owner-private audit storage.

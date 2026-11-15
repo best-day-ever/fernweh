@@ -42,7 +42,9 @@ The [integration ledger](upstream-integration-2026-11-14.md) and
 The draft reviews are [parent6](https://github.com/best-day-ever/fernweh/pull/6),
 [Client5](https://github.com/best-day-ever/fernweh-client/pull/5), and
 [Linux Host7](https://github.com/best-day-ever/fernweh-host-linux/pull/7).
-Final native platform/package results are recorded there before promotion.
+Both Client profiles pass their complete native Mac and Windows gates. Linux
+package/loss qualification remains open after a failed repeat and measured
+endpoint receive-buffer loss; retain its evidence and thresholds before promotion.
 
 Installed streaming is still separate: macOS15/27 Client and26.7/27 Host sessions,
 Windows streaming, shared control/tablets and Blender/Unreal immersive workflows

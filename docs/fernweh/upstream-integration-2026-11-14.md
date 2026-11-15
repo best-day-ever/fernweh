@@ -51,3 +51,20 @@ to the coordinated upgrade above. Hosted Actions remain disabled; validation is 
 repositories are now public after the authorized history audit recorded in
 [the publication receipt](review.md). The integration branches remain unfinished.
 No binaries are published.
+
+
+## 15 November continuation
+
+Current main and the coordinated frontend/dependency work are now reconciled
+in the candidate. Qt display/clipboard/shared-view parity, Windows adapters,
+Native10 compiler layout, optional metrics/configuration and native build
+isolation have concrete repairs and regressions. The custom native listener
+retains the canonical bounded datagram burst capacity. Native Mac/Windows builds
+and the exact per-platform results are recorded in the
+[continued review receipt](review.md#15-november-coordinated-plank-1418-integration).
+
+The package/loss gate remains open after an intermittent failed native loss
+trial; retain its evidence and thresholds. Installed/hardware acceptance is
+separate. The remaining-integration table above records the14November baseline,
+not the current list of unresolved source repairs. See the maintained
+[candidate status](plank-1.4.18-candidate.md) before promotion.
