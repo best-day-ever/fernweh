@@ -279,6 +279,19 @@ pub(crate) struct OwnedUdpSockets {
     tracked: Vec<(u64, std::os::fd::OwnedFd)>,
 }
 
+// Effective getsockopt capacity, not the requested SO_RCVBUF value. This is
+// a controlled-loss measurement prerequisite, not product/fleet configuration.
+#[cfg(target_os = "linux")]
+const LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES: usize = 4 * 1024 * 1024;
+
+#[cfg(target_os = "linux")]
+fn sufficient_loss_receive_capacity(capacities: &[usize]) -> bool {
+    capacities.len() == 3
+        && capacities
+            .iter()
+            .all(|capacity| *capacity >= LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES)
+}
+
 impl OwnedUdpSockets {
     pub fn before_endpoints() -> io::Result<Self> {
         Ok(Self {
@@ -297,6 +310,7 @@ impl OwnedUdpSockets {
         {
             use std::os::fd::BorrowedFd;
             let tables = udp_tables()?;
+            let mut capacities = Vec::new();
             for (inode, fd) in process_socket_fds()? {
                 if self.existing.contains(&inode) || !udp_inode_present(&tables, inode) {
                     continue;
@@ -308,12 +322,27 @@ impl OwnedUdpSockets {
                 let actual = socket2::SockRef::from(&owned).recv_buffer_size()?;
                 parse_kernel_drops(&tables, inode)?;
                 eprintln!("fec_loss_owned_udp_inode={inode} receive_buffer_bytes={actual}");
+                capacities.push(actual);
                 self.tracked.push((inode, owned));
             }
             if self.tracked.len() != 3 {
                 return Err(io::Error::other(
                     "expected exactly server, client and proxy UDP sockets",
                 ));
+            }
+            // Print every owned socket's actual capacity before explaining a
+            // prerequisite failure; no frame/timing measurement has begun yet.
+            if !sufficient_loss_receive_capacity(&capacities) {
+                let policy = |name| {
+                    std::fs::read_to_string(format!("/proc/sys/net/core/{name}"))
+                        .map(|value| value.trim().to_owned())
+                        .unwrap_or_else(|_| "unavailable".into())
+                };
+                return Err(io::Error::other(format!(
+                    "Linux controlled-loss fixture requires effective SO_RCVBUF >= {LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES} bytes on all three owned sockets; observed={capacities:?} rmem_max={} rmem_default={}; review the benchmark environment prerequisite before measuring (no setting was changed)",
+                    policy("rmem_max"),
+                    policy("rmem_default")
+                )));
             }
         }
         Ok(())
@@ -330,7 +359,7 @@ impl OwnedUdpSockets {
                 total += drops;
             }
             eprintln!(
-                "fec_loss_owned_udp_kernel_drops={total} controlled_loss_only={}",
+                "fec_loss_owned_udp_kernel_drops={total} owned_kernel_loss_free={}",
                 total == 0
             );
             Ok(Some(total))
@@ -338,11 +367,32 @@ impl OwnedUdpSockets {
         #[cfg(not(target_os = "linux"))]
         {
             eprintln!(
-                "fec_loss_owned_udp_kernel_drops=unavailable controlled_loss_only=unavailable"
+                "fec_loss_owned_udp_kernel_drops=unavailable owned_kernel_loss_free=unavailable"
             );
             Ok(None)
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn controlled_loss_receive_prerequisite_covers_every_owned_socket() {
+    let minimum = LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES;
+    assert!(sufficient_loss_receive_capacity(&[
+        minimum, minimum, minimum
+    ]));
+    assert!(sufficient_loss_receive_capacity(&[
+        minimum * 2,
+        minimum,
+        minimum * 4
+    ]));
+    for index in 0..3 {
+        let mut capacities = [minimum; 3];
+        capacities[index] -= 1;
+        assert!(!sufficient_loss_receive_capacity(&capacities));
+    }
+    assert!(!sufficient_loss_receive_capacity(&[]));
+    assert!(!sufficient_loss_receive_capacity(&[minimum; 2]));
 }
 
 #[cfg(target_os = "linux")]

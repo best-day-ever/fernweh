@@ -289,6 +289,22 @@ source/repair equivalence, reliable recovery and C ABI checks with
 `run-plank-transport-native-loopback.sh --functional-only`. The Linux builder
 continues to run the full suite, including performance.
 
+The Linux controlled-loss receiver fixture requires at least 4 MiB of effective
+`SO_RCVBUF` capacity on its three owned UDP sockets: client, server and proxy.
+It prints every actual capacity and stops before the timed matrix if any is
+smaller. This is a measurement prerequisite, not a Linux Host fleet policy or a
+product startup requirement. The Host generally sends media to Mac/Windows
+clients; a loopback receiver's limitation does not establish their requirements.
+The product's bounded 4 MiB request remains best-effort. Linux can clamp that
+request, and reports doubled bookkeeping capacity through `getsockopt`; see
+the [socket manual](https://man7.org/linux/man-pages/man7/socket.7.html).
+Inspect `sysctl net.core.rmem_max net.core.rmem_default` alongside the reported
+effective capacities before qualification. Build scripts never change them.
+If a separately reviewed temporary benchmark ceiling is needed, preserve the
+receive default and persistent files, record protected process/socket state,
+and use an independent bounded restore guard. Record the temporary ceiling,
+actual capacities and verified restoration with the exact-source result.
+
 The credential-free `dependency-tests / transport-macos` job exports
 `macos-transport-qualification-<run-id>`. Verify its source commit, Kymux pin,
 SHA-256 and `sender-timing` feature selection against the Mac Host candidate.
@@ -301,14 +317,16 @@ Preserve Terminal and active Host sessions, retain the report, and remove the
 temporary files. Package signing does not establish this performance gate or
 installed streaming acceptance; record both separately.
 
-Its dedicated test-only proxy reports
-the effective socket receive buffer and Linux per-socket kernel drops separately
-from deliberately injected loss. `controlled_loss_only=false` means extra local
-drops occurred (or the counter is unavailable on that OS); do not describe that
-run as an exact-loss measurement. A complete recovery pass still exercises at
-least the deliberate loss. Any frame failure remains a failure, regardless of
-proxy drops. Do not loosen assertions, add retries, tune machine-wide sysctls,
-or change product pacing/FEC/latency to hide a fixture limitation.
+Its dedicated test-only proxy reports the effective receive buffer and its own
+Linux kernel drops separately from deliberately injected loss.
+`proxy_controlled_loss_only` is scoped to that proxy. The Linux fixture also
+checks the exact three owned endpoint/proxy socket inodes: `owned_kernel_loss_free`
+describes only those kernel counters, not every QUIC/router/FEC loss layer.
+Unavailable counters remain unavailable on other OSes. Keep complete recovery,
+timing/FEC and kernel-loss evidence distinct; zero kernel drops do not establish
+frame recovery. Retain final metrics before rejecting a nonzero owned kernel
+drop count, and preserve every failed trial. Do not loosen assertions, add
+retries or change product pacing/FEC/latency to hide a fixture limitation.
 
 For native transport lifecycle changes, run the Rust completion tests and the
 real C ABI stress runner on Linux and the dedicated Mac:
