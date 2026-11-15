@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Interactive app distribution: copy to Applications, uninstall by trashing app.
 set -euo pipefail
+
+plank_macos_client_check_binary_target() {
+    local file=$1 macos_min=$2 minos
+    # Drain all output: closing the pipe early can make otool fail under pipefail.
+    minos=$(otool -l "$file" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/&&!seen{minimum=$2; seen=1} END{if(seen) print minimum}') || return
+    [[ -n $minos ]] && [[ $(printf '%s\n%s\n' "$minos" "$macos_min" | sort -V | tail -1) == "$macos_min" ]] ||
+        { echo "deployment target gate: $file minos=${minos:-none} > $macos_min" >&2; return 1; }
+}
+
+# Sourcing exposes the production gate for focused filesystem/process checks.
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 [[ $# == 2 && $1 == /* && $2 == /* ]] || { echo 'usage: build-macos-client-dmg.sh CLEAN_SOURCE NEW_OUTPUT' >&2; exit 2; }
 source_root=$1
 output=$2
@@ -10,6 +21,7 @@ plank_macos_client_target
 : "${PLANK_NOTARY_PROFILE:?Keychain profile required}"
 : "${PLANK_QT_ROOT:?}"
 python3 "$source_root/tests/packaging/test-macos-qt-deployment.py"
+python3 "$source_root/tests/packaging/test-macos-dmg-minimum.py"
 test -z "$(git -C "$source_root" status --porcelain)"
 test -z "$(git -C "$source_root/apps/client" status --porcelain)"
 source "$source_root/scripts/package/package-version.sh"
@@ -55,9 +67,7 @@ while IFS= read -r -d '' file; do
     # pipe early, causing SIGPIPE under pipefail and silently skipping signing.
     file_kind=$(file -b "$file")
     [[ $file_kind == *Mach-O* ]] || continue
-    minos=$(otool -l "$file" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
-    [[ -n $minos ]] && [[ $(printf '%s\n%s\n' "$minos" "$macos_min" | sort -V | tail -1) == "$macos_min" ]] ||
-        { echo "deployment target gate: $file minos=${minos:-none} > $macos_min" >&2; exit 1; }
+    plank_macos_client_check_binary_target "$file" "$macos_min"
 done < <(find "$app" -type f -print0)
 echo "macos_deployment_target_gate=pass min=$macos_min"
 # The base build installs the approved Client icon; every packaging path must
