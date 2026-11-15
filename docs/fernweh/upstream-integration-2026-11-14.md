@@ -71,3 +71,15 @@ acceptance is separate. The remaining-integration table above records the
 14 November baseline,
 not the current list of unresolved source repairs. See the maintained
 [candidate status](plank-1.4.18-candidate.md) before promotion.
+
+
+## Authorized source promotion
+
+The operator subsequently requests proper PR merges and deployment. Host7 and
+Client5 are merged with preserved history; parent6 carries their actual merge
+commits and the final packaging repairs. Source/native package checks are the
+source-promotion boundary. Fresh mainline installers and installed/hardware
+acceptance remain required before binary publication and rollout; the earlier
+candidate bytes are never relabelled as main builds. See the current
+[release gates](plank-1.4.18-candidate.md) and
+[source promotion receipt](review.md#15-november-source-promotion-and-release-preparation).

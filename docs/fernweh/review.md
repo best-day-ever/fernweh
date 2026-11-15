@@ -303,7 +303,7 @@ transport/dependency changes. Source checkpoint: parent `8911ad1d`, Client
 `d7c5155c`, Linux Host `503fc870`. The runtime transport repair is already in
 `ef1cc84c`; later changes add test preparation, artifact selection and receipts.
 
-The source reviews remain drafts: [parent 6](https://github.com/best-day-ever/fernweh/pull/6),
+At this native checkpoint the source reviews remained drafts: [parent 6](https://github.com/best-day-ever/fernweh/pull/6),
 [Client 5](https://github.com/best-day-ever/fernweh-client/pull/5), and
 [Host 7](https://github.com/best-day-ever/fernweh-host-linux/pull/7).
 No installer feed, deployment pin, installed product, driver, desktop or
@@ -429,3 +429,50 @@ immersive workflows, release soaks and Linux Client qualification remain open.
 No source-main promotion, installation or binary publication follows from these
 uninstalled checks. Hosted Actions remains disabled. Raw receipts stay in
 owner-private audit storage; technical evidence stays in the repositories.
+
+
+## 15 November: source promotion and release preparation
+
+The operator subsequently authorizes proper PR merges and deployment. Source
+integration is distinct from binary acceptance: [Host7](https://github.com/best-day-ever/fernweh-host-linux/pull/7)
+merges as `7cf682dc`, followed by [Client5](https://github.com/best-day-ever/fernweh-client/pull/5)
+as `95460128`. Their reviewed trees are preserved, including the named 1.2.37
+Client notes. [Parent6](https://github.com/best-day-ever/fernweh/pull/6) pins the
+actual published component merges. Shared version 1.2.37 is reserved; no release
+asset, installed product or feed is promoted by these source merges.
+
+Renewed configured Client checks pass Mac 884 and Windows 572 cases, with their
+recorded two Linux-only/five Windows broker skips and two socket cases each.
+The private Windows candidate also passes actual MSI identity, complete payload,
+service extraction and limited-user ACL gates. The private Linux candidate
+passes native source/input/lifecycle/transport/FFI and strict uninstalled RPM
+checks. Its runtime and exact shipping-feature test ELF match the accepted
+six matrices, so version/docs/staging-only changes do not trigger a timed rerun.
+The canonical input repeat selects 105 passes/three kernel-UHID skips; the prior
+expanded 107-pass audit additionally selected the CUDA-layout and retained-IDR
+scheduler regressions. No selection or threshold was weakened.
+
+Release preparation repairs two staging contracts. Windows no longer copies a
+licence from the removed h264bitstream library, while retaining the Client
+licence and strict new-output checks. Mac deployment previously failed on unused
+SQL drivers before its post-deployment cleanup could run. A copied deployment
+tool and private `qt.conf` now select a SQLite-only SQL view, preserving other
+plugin categories and original Qt paths. Twelve executed process/filesystem
+cases and real native deployment pass; 107 binaries meet closure/macOS 15 checks,
+and bundled offscreen QML/SQLite load successfully. Qualified Qt content remains
+unchanged and the exact scratch is removed. No dependency error is ignored.
+
+The UDP constructor hooks select the existing machine-wide shared Cargo target,
+preventing source-local artifacts on builders without a global target setting.
+Six executed hook cases preserve locked/offline/release/features, source cwd,
+two jobs and the mandatory two-test result. Actual native socket checks pass.
+The parent root suite reports 166 tests: 163 passes and three native-Linux staging
+skips on Mac. All seven staging/manifest cases pass on Linux. Sixteen collector
+cases pass after correcting an old padded-version fixture to use the canonical
+DMG identity; the production collector is unchanged.
+
+Final installers must be freshly built from merged main, with signatures,
+notarization where required, immutable provenance and exact hashes. Do not
+relabel a feature candidate as a main build. The installed-session/hardware
+acceptance listed above remains open before binary promotion. Source is ALPHA;
+these merges do not certify a new installed streaming release.
