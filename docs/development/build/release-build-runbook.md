@@ -321,9 +321,9 @@ The runner verifies the selected ELF, makes a root-owned temporary copy and
 permits only the two exact VBR/CBR loopback tests, three trials each. It retains
 only four fixture environment inputs for those selected invocations; Cargo,
 compilation, packaging, installed Host and runtime services remain unprivileged.
-Each selected invocation has a fixed external120-second TERM timeout with
-KILL after10seconds. This bounds process cleanup independently of the controller;
-the100ms frame deadlines and all measurement criteria remain unchanged.
+Each selected invocation has a fixed external TERM timeout of 120 seconds and
+KILL after 10 additional seconds. This bounds cleanup independently of the
+controller; the 100 ms frame deadlines and all measurement criteria remain unchanged.
 The trusted SHA identifies an operator-reviewed fixture artifact. Hash validation
 is not a privilege-delegation sandbox for untrusted executables. The runner
 changes no sudoers rules, setcap attributes or persistent privileges.
