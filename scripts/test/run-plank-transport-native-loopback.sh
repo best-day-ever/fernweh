@@ -48,7 +48,9 @@ cargo test ${cargo_profile_args[@]+"${cargo_profile_args[@]}"} --locked --offlin
   -p plank-transport -p kyproto --lib protocol::driver::av
 
 if [[ ${SC_NATIVE_CARGO_PROFILE:-release} == release && $performance == 1 ]]; then
-  bash "$repo_root/scripts/test/run-source-first-fec.sh" "${CARGO_TARGET_DIR:-$crate_dir/target}"
+  target_dir=$(cargo metadata --locked --offline --no-deps --format-version=1 --manifest-path "$crate_dir/Cargo.toml" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+  bash "$repo_root/scripts/test/run-source-first-fec.sh" "$target_dir"
 fi
 
 # Exact test filters must execute a test, not report success with zero matches.

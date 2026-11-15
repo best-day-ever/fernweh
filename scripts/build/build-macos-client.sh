@@ -27,10 +27,8 @@ version=$PLANK_PACKAGE_VERSION
 client="$source_root/apps/client"
 test "$(qmake -query QT_VERSION)" = 6.10.2
 test "$(rustc --version | awk '{print $2}')" = 1.99.1
-# A restored dependency cache may predate the posted-pointer fix. Rebuild SDL
-# alone when its patch, target or installed binary no longer matches the stamp.
-bash "$source_root/scripts/build/ensure-macos-client-sdl.sh" "$source_root"
-python3 "$source_root/tests/packaging/test-macos-sdl-posted-pointer.py" "$PLANK_MAC_CLIENT_DEPS/src/SDL3-3.4.2"
+# Mac sessions use the Qt/native input owner. The legacy SDL posted-pointer
+# patch qualifies the separate SDL frontend and is not an input to this build.
 python3 "$source_root/tests/packaging/test-macos-client-target.py"
 python3 "$source_root/tests/packaging/test-macos-client-version-cache.py"
 python3 "$source_root/tests/packaging/test-macos-app-icons.py"
@@ -166,7 +164,7 @@ fi
 python3 "$source_root/scripts/test/check-client-broker-profile.py" \
     "$build/app/plank-client.app/Contents/MacOS/plank-client" --broker "${FERNWEH_BROKER_ENABLED:-0}"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in hostpolling clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
+for suite in qtinputruntime macqtsession windowsresources hostpolling clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
     if [[ ${FERNWEH_BROKER_ENABLED:-0} != 1 ]]; then
         case $suite in windowsdevicekey|fernwehupdater|plankbroker) continue ;; esac
     fi

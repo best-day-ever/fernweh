@@ -103,7 +103,7 @@ CARGO_TARGET_DIR="$build_dir/quinn-tests" cargo test --release --locked --offlin
   --lib tests::plank_telemetry_snapshot_is_owned_and_preserves_queue_counters -- --exact
 rg -q '^#define PLANK_TRANSPORT_ABI_VERSION 15u$' \
   "${plank_transport_dir}/include/plank_transport.h" || {
-  echo "host requires PLANK transport ABI 14" >&2
+  echo "host requires PLANK transport ABI 15" >&2
   exit 1
 }
 rg -Fq 'uint32_t max_udp_payload_size;' \
