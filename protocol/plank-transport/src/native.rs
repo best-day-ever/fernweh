@@ -1019,6 +1019,8 @@ mod tests {
 
     async fn run_native_loss_matrix(peak_video_bps: u64) {
         crate::init_crypto_once();
+        let mut endpoint_sockets = super::loss_proxy::OwnedUdpSockets::before_endpoints()
+            .expect("failed to snapshot existing UDP sockets");
         let (certificate_path, private_key_path, certificate_sha256) = test_certificate_paths();
         let certificate = kynet::cert::load_cert_from_pem_file(&certificate_path)
             .await
@@ -1130,6 +1132,9 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         let expected_payload = payload.clone();
+        endpoint_sockets
+            .track_new_endpoints()
+            .expect("failed to observe loss-test endpoint UDP sockets");
         let sender_stats = server_connection.stats_provider();
         let receiver_stats = client_connection.stats_provider();
         let submitted_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -1265,6 +1270,17 @@ mod tests {
         }
         // Report/validate the proxy even when the frame-order assertion failed.
         proxy.finish();
+        let endpoint_kernel_drops = endpoint_sockets
+            .finish()
+            .expect("failed to read loss-test endpoint kernel counters");
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            endpoint_kernel_drops,
+            Some(0),
+            "loss matrix included uncontrolled endpoint/proxy kernel drops"
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(endpoint_kernel_drops, None);
         let received = received
             .expect("loss-test receiver timed out")
             .expect("loss-test receiver task failed");

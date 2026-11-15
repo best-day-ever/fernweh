@@ -109,8 +109,9 @@ class DependencyCacheTests(unittest.TestCase):
         for forbidden in ('curl ', 'cmake -', 'cargo fetch', 'aqt install-qt'):
             self.assertNotIn(forbidden, source)
         cargo = (ROOT / 'scripts/ci/dependencies/cargo.sh').read_text()
-        self.assertEqual(cargo.count('cargo fetch --locked'), 2)
+        self.assertEqual(cargo.count('cargo fetch --locked'), 3)
         self.assertIn('third_party/quinn-proto-0.11.19/Cargo.toml', cargo)
+        self.assertIn('third_party/quinn-udp-0.5.16/Cargo.toml', cargo)
 
     def test_platform_verification_is_not_bypassed(self):
         with patch.object(cache.platform, 'system', return_value='Darwin'), \

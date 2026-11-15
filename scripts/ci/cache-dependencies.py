@@ -39,7 +39,9 @@ def dependency_inputs(root, product, component):
         paths.update((RECIPES + 'rust.sh', 'rust-toolchain.toml'))
     elif component == 'cargo':
         paths.update((RECIPES + 'cargo.sh', 'protocol/plank-transport/Cargo.lock',
-                      'protocol/plank-transport/Cargo.toml'))
+                      'protocol/plank-transport/Cargo.toml',
+                      'third_party/quinn-udp-0.5.16/Cargo.toml',
+                      'third_party/quinn-udp-0.5.16/Cargo.lock'))
         if product == 'linux-host':
             paths.update(('third_party/quinn-proto-0.11.19/Cargo.toml',
                           'third_party/quinn-proto-0.11.19/Cargo.lock'))

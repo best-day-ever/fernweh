@@ -427,6 +427,7 @@ dependencies = [
  "kyproto",
  "quinn",
  "quinn-proto",
+ "quinn-udp",
  "ring",
  "rustls",
  "socket2",
@@ -494,8 +495,6 @@ dependencies = [
 [[package]]
 name = "quinn-udp"
 version = "0.5.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
