@@ -352,7 +352,8 @@
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                     typeof(self) owner = weakSelf; if (!owner) return;
                     @synchronized(owner) {
-                        [owner->_sharedStreams removeObject:weakStream];
+                        PLANKMacPreviewSession *stopped = weakStream;
+                        if (stopped) [owner->_sharedStreams removeObject:stopped];
                     }
                     [owner releaseDisplayGeneration:generation completion:nil];
                 });

@@ -50,7 +50,7 @@ impl Pacer {
     /// The 5/4 ratio used here comes from the suggestion that N = 1.25 in the draft IETF RFC for
     /// QUIC.
     #[cfg(test)]
-    fn delay(
+    pub(super) fn delay(
         &mut self,
         smoothed_rtt: Duration,
         bytes_to_send: u64,

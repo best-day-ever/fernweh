@@ -24,6 +24,7 @@ case "$role:$ID:$VERSION_ID" in
       autoconf automake clang cmake curl-minimal git libtool make nasm ninja-build patch \
       pkgconf-pkg-config ripgrep rpm-build cpio wget xz tar gzip python3 \
       gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
+      gcc-toolset-14-libasan-devel gcc-toolset-14-libubsan-devel \
       "${PLANK_HOST_CUDA_PACKAGES[@]}" \
       glib2-devel libcap-devel libdrm-devel libevdev-devel \
       libX11-devel libxcb-devel libXcomposite-devel libXcursor-devel libXfixes-devel \

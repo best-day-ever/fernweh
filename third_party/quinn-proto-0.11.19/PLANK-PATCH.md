@@ -30,6 +30,8 @@ because it is a higher independently published version.
 
 Linux Host packaging runs `connection::datagrams::plank_tests`, upstream
 `connection::datagrams::tests` and the feature-enabled owned-snapshot test.
+The test-only pacing compatibility wrapper remains visible to sibling
+connection tests; production visibility and pacing behavior are unchanged.
 Transport tests also cover the real bounded adapter logger and native loss
 matrix. Component results do not replace installed session/loss acceptance.
 

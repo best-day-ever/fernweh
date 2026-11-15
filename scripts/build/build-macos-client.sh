@@ -164,7 +164,7 @@ fi
 python3 "$source_root/scripts/test/check-client-broker-profile.py" \
     "$build/app/plank-client.app/Contents/MacOS/plank-client" --broker "${FERNWEH_BROKER_ENABLED:-0}"
 # Run shared topology and toolbar geometry on every Mac Client candidate.
-for suite in qtinputruntime macqtsession windowsresources hostpolling clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
+for suite in mediafeatures qtdisplaylayout qtinputruntime macqtsession windowsresources hostpolling clientinstances windowsdevicekey fernwehupdater outputtopology plankdisplaymode planktoolbarlogic sessionhotkeys plankpresentation desktopstage macquitshortcut macapplication macpen plankbroker plankbitrate nvenc420profile macclipboardsync displayplanner decodercaps pacershutdown authenticationtakeover changelog hosttlsguard hosttruststore mackeyboardcapture macmetaloverlay macrawwacom hostchoices wacomtransportpolicy plankclientpolicy windowswacom windowsfileclipboard collaboration macfileclipboard; do
     if [[ ${FERNWEH_BROKER_ENABLED:-0} != 1 ]]; then
         case $suite in windowsdevicekey|fernwehupdater|plankbroker) continue ;; esac
     fi

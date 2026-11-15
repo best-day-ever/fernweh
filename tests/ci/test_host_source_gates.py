@@ -7,6 +7,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class HostSourceGateTests(unittest.TestCase):
+    def test_native_build_does_not_install_operating_system_packages(self):
+        build = (ROOT / 'scripts/ci/build.sh').read_text()
+        self.assertNotRegex(build, r'(?m)^\s*(?:sudo\s+)?dnf\s+install\b')
+        self.assertIn('PLANK_NATIVE10_SANITIZER_CXX', build)
+        provisioning = (ROOT / 'scripts/ci/install-linux-deps.sh').read_text()
+        self.assertIn('gcc-toolset-14-libasan-devel', provisioning)
+        self.assertIn('gcc-toolset-14-libubsan-devel', provisioning)
+
     def test_host_input_gate_exercises_reservation_and_uhid_lifetimes(self):
         build = (ROOT / 'scripts/ci/test-linux-host-input.sh').read_text()
         fixture = (ROOT / 'tests/input/linux-recovery/CMakeLists.txt').read_text()

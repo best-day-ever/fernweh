@@ -155,6 +155,11 @@ Full platform packages take substantial disk space/time; check free space first.
 For a native Rocky builder, use the `linux-host` role in the same bootstrap and
 package runbooks. GPU/session/Wacom acceptance runs on a dedicated test Host,
 not on a GPU-less package builder. Build does not install onto any workstation.
+Operating-system packages are provisioned separately, never by the build phase.
+Sanitizer checks normally use the pinned GCC toolset. A prequalified native
+Clang can be selected explicitly with `PLANK_NATIVE10_SANITIZER_CXX` when its
+sanitizer runtime is already present; this does not change the product compiler
+or omit the ASan/UBSan checks.
 
 ## macOS Host
 
@@ -169,7 +174,7 @@ unset PLANK_MACOS_SIGNING_IDENTITY PLANK_MACOS_INSTALLER_IDENTITY
 unset PLANK_MACOS_TEAM_ID PLANK_NOTARY_PROFILE
 source scripts/package/package-version.sh
 plank_load_package_version "$PLANK_SOURCE_ROOT"
-PLANK_MACOS_SOURCE_FIRST=1 bash scripts/build/build-macos-transport.sh \
+bash scripts/build/build-macos-transport.sh \
     "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/transport"
 PLANK_MACOS_HOST_VERSION="$PLANK_PACKAGE_VERSION" bash scripts/build/build-macos-host.sh \
     "$PLANK_SOURCE_ROOT" "$PLANK_WORK_ROOT/host-build" \

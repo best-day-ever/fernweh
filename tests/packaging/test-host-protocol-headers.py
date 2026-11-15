@@ -34,7 +34,7 @@ class HostProtocolHeaders(unittest.TestCase):
             with self.subTest(language=language):
                 subprocess.run([compiler, "-x", language, "-std=" + standard,
                                 "-Werror", "-fsyntax-only", "-I", str(self.root / "src"), "-"],
-                               input='#include "Limelight.h"\n#include "plank.h"\n',
+                               input='#include "Limelight.h"\n#include "Input.h"\n#include "plank.h"\n',
                                text=True, check=True, capture_output=True)
 
     def test_reject_recursive_dependencies(self):
@@ -53,6 +53,11 @@ class HostProtocolHeaders(unittest.TestCase):
 
     def test_reject_extra_header(self):
         (self.root / "src/Video.h").touch()
+        with self.assertRaises(ValueError):
+            CHECK.validate(self.root)
+
+    def test_input_declarations_are_required(self):
+        (self.root / "src/Input.h").unlink()
         with self.assertRaises(ValueError):
             CHECK.validate(self.root)
 
