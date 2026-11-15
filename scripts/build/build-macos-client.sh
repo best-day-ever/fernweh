@@ -37,7 +37,7 @@ python3 "$source_root/tests/packaging/test-macos-app-icons.py"
 # installer, so its install/uninstall package gates do not apply here.
 python3 "$source_root/tests/packaging/test-macos-fullscreen.py" "$source_root"
 mkdir -p "$build/tests"
-CARGO_BUILD_JOBS=2 cargo test --locked --offline --release \
+CARGO_BUILD_JOBS=2 cargo test --target-dir "$HOME/.cargo/shared-target" --locked --offline --release \
     --manifest-path "$source_root/third_party/quinn-udp-0.5.16/Cargo.toml" \
     --features plank-bounded-receive-buffer --test tests plank_receive_buffer -- --nocapture \
     2>&1 | tee "$build/tests/quinn-udp-sockets.log"
