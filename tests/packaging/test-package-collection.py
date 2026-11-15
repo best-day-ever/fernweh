@@ -30,7 +30,8 @@ class CollectionTests(unittest.TestCase):
 
     def arguments(self, branch='main', content=b'fixture'):
         suffix = '' if branch == 'main' else '-' + branch
-        package = self.root / ('BDE-fernweh_1.2.3' + suffix + '_arm64.dmg')
+        version = (self.root / 'packaging/VERSION').read_text().strip()
+        package = self.root / ('BDE-fernweh_' + version + suffix + '_arm64.dmg')
         package.write_bytes(content)
         return SimpleNamespace(source_root=self.root, source_commit='HEAD', package=package,
             product='client', platform='macos', architecture='arm64', target_os='macos-27',
@@ -269,7 +270,6 @@ class CollectionTests(unittest.TestCase):
                 'version-test', str(ROOT / 'scripts/package/package-version.sh'), branch, str(self.root)], text=True)
             self.assertEqual(values.splitlines(), [version, '1.2.00'])
             args = self.arguments(branch)
-            args.package = args.package.rename(args.package.with_name('plank-client_' + version + '_arm64.dmg'))
             MODULE.collect(args)
             channel = 'releases' if branch == 'main' else 'candidates'
             directory = self.root / 'artifacts/packages' / channel / version
