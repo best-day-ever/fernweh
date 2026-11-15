@@ -39,6 +39,8 @@ class ProductDependencyCacheTests(unittest.TestCase):
             'protocol/plank-transport/Cargo.toml', 'protocol/plank-transport/Cargo.lock',
             'third_party/quinn-proto-0.11.19/Cargo.toml',
             'third_party/quinn-proto-0.11.19/Cargo.lock',
+            'third_party/quinn-udp-0.5.16/Cargo.toml',
+            'third_party/quinn-udp-0.5.16/Cargo.lock',
             'scripts/build/build-paths.sh', 'scripts/build/build-client-ffmpeg.sh',
             'scripts/build/bootstrap-macos-client-deps.sh', 'scripts/build/macos-client-target.sh',
             'scripts/build/relocate-openssl-pc.py', 'scripts/build/sanitize-ffmpeg-build-info.py',
@@ -113,6 +115,11 @@ class ProductDependencyCacheTests(unittest.TestCase):
         for name in ('Cargo.lock', 'Cargo.toml'):
             self.assert_changes_only('third_party/quinn-proto-0.11.19/' + name,
                                      {('linux-host', 'cargo')})
+
+    def test_udp_socket_test_inputs_only_invalidate_product_cargo(self):
+        for name in ('Cargo.lock', 'Cargo.toml'):
+            self.assert_changes_only('third_party/quinn-udp-0.5.16/' + name,
+                                     {(product, 'cargo') for product in cache.PRODUCTS})
 
     def test_rust_toolchain_invalidates_rust_and_cargo_not_libraries(self):
         expected = {(product, component) for product in cache.PRODUCTS

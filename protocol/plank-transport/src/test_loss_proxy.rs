@@ -261,11 +261,131 @@ impl LossProxy {
     pub fn finish(&mut self) -> Option<u64> {
         let drops = self.join().expect("loss proxy failed");
         eprintln!(
-            "fec_loss_proxy_kernel_drops={drops:?} controlled_loss_only={}",
+            "fec_loss_proxy_kernel_drops={drops:?} proxy_controlled_loss_only={}",
             drops == Some(0)
         );
         drops
     }
+}
+
+/// Observe only UDP sockets created by this test, never machine-wide counters.
+/// The exact loss matrix runs alone and keeps its endpoints live while these
+/// descriptors are discovered. Owned duplicates keep counters readable through
+/// proxy shutdown and are closed with the monitor.
+pub(crate) struct OwnedUdpSockets {
+    #[cfg(target_os = "linux")]
+    existing: std::collections::HashSet<u64>,
+    #[cfg(target_os = "linux")]
+    tracked: Vec<(u64, std::os::fd::OwnedFd)>,
+}
+
+impl OwnedUdpSockets {
+    pub fn before_endpoints() -> io::Result<Self> {
+        Ok(Self {
+            #[cfg(target_os = "linux")]
+            existing: process_socket_fds()?
+                .into_iter()
+                .map(|(inode, _)| inode)
+                .collect(),
+            #[cfg(target_os = "linux")]
+            tracked: Vec::new(),
+        })
+    }
+
+    pub fn track_new_endpoints(&mut self) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::BorrowedFd;
+            let tables = udp_tables()?;
+            for (inode, fd) in process_socket_fds()? {
+                if self.existing.contains(&inode) || !udp_inode_present(&tables, inode) {
+                    continue;
+                }
+                // These newly created server/client/proxy sockets remain live
+                // in the caller until finish(). Duplicate rather than own the
+                // runtime's descriptor or keep an unowned raw FD for later.
+                let owned = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned()?;
+                let actual = socket2::SockRef::from(&owned).recv_buffer_size()?;
+                parse_kernel_drops(&tables, inode)?;
+                eprintln!("fec_loss_owned_udp_inode={inode} receive_buffer_bytes={actual}");
+                self.tracked.push((inode, owned));
+            }
+            if self.tracked.len() != 3 {
+                return Err(io::Error::other(
+                    "expected exactly server, client and proxy UDP sockets",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn finish(&self) -> io::Result<Option<u64>> {
+        #[cfg(target_os = "linux")]
+        {
+            let tables = udp_tables()?;
+            let mut total = 0;
+            for (inode, _owned) in &self.tracked {
+                let drops = parse_kernel_drops(&tables, *inode)?;
+                eprintln!("fec_loss_owned_udp_inode={inode} kernel_drops={drops}");
+                total += drops;
+            }
+            eprintln!(
+                "fec_loss_owned_udp_kernel_drops={total} controlled_loss_only={}",
+                total == 0
+            );
+            Ok(Some(total))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            eprintln!(
+                "fec_loss_owned_udp_kernel_drops=unavailable controlled_loss_only=unavailable"
+            );
+            Ok(None)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn udp_tables() -> io::Result<String> {
+    Ok(std::fs::read_to_string("/proc/self/net/udp")?
+        + &std::fs::read_to_string("/proc/self/net/udp6")?)
+}
+
+#[cfg(target_os = "linux")]
+fn udp_inode_present(tables: &str, inode: u64) -> bool {
+    tables.lines().any(|line| {
+        line.split_whitespace()
+            .nth(9)
+            .and_then(|field| field.parse::<u64>().ok())
+            == Some(inode)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn process_socket_fds() -> io::Result<Vec<(u64, std::os::fd::RawFd)>> {
+    let mut sockets = Vec::new();
+    for entry in std::fs::read_dir("/proc/self/fd")? {
+        let entry = entry?;
+        let target = match std::fs::read_link(entry.path()) {
+            Ok(target) => target,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let target = target.to_string_lossy();
+        if let Some(inode) = target
+            .strip_prefix("socket:[")
+            .and_then(|value| value.strip_suffix(']'))
+        {
+            let inode = inode.parse().map_err(io::Error::other)?;
+            let fd = entry
+                .file_name()
+                .to_string_lossy()
+                .parse()
+                .map_err(io::Error::other)?;
+            sockets.push((inode, fd));
+        }
+    }
+    Ok(sockets)
 }
 
 impl Drop for LossProxy {
@@ -431,4 +551,37 @@ fn socket_counter_selects_exact_inode_and_rejects_missing_data() {
     assert_eq!(parse_kernel_drops(table, 123).unwrap(), 17);
     assert!(parse_kernel_drops(table, 124).is_err());
     assert!(parse_kernel_drops("header\n", 123).is_err());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn owned_socket_monitor_excludes_untracked_drops_and_detects_its_own() {
+    use std::os::fd::{AsRawFd, OwnedFd};
+    use std::os::unix::fs::MetadataExt;
+    let owned = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let unrelated = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    for socket in [&owned, &unrelated] {
+        socket2::SockRef::from(socket)
+            .set_recv_buffer_size(4096)
+            .unwrap();
+    }
+    let inode = std::fs::metadata(format!("/proc/self/fd/{}", owned.as_raw_fd()))
+        .unwrap()
+        .ino();
+    let descriptor: OwnedFd = owned.try_clone().unwrap().into();
+    let monitor = OwnedUdpSockets {
+        existing: Default::default(),
+        tracked: vec![(inode, descriptor)],
+    };
+    let flood = |address| {
+        for _ in 0..512 {
+            sender.send_to(&[0_u8; 1344], address).unwrap();
+        }
+    };
+    flood(unrelated.local_addr().unwrap());
+    assert!(kernel_drops(&unrelated).unwrap().unwrap() > 0);
+    assert_eq!(monitor.finish().unwrap(), Some(0));
+    flood(owned.local_addr().unwrap());
+    assert!(monitor.finish().unwrap().unwrap() > 0);
 }

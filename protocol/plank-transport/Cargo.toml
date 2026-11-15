@@ -23,6 +23,8 @@ kyproto = { path = "../../third_party/kyber-kymux/kyproto" }
 kymux-types = { path = "../../third_party/kyber-kymux/kymux-types" }
 quinn-proto = { version = "=0.11.19", default-features = false }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+# Enable the same socket contract for Kynet and the native listener's runtime.
+quinn-udp = { version = "=0.5.16", default-features = false, features = ["plank-bounded-receive-buffer"] }
 ring = "0.17"
 rustls = { version = "0.23.46", default-features = false, features = ["logging", "std", "tls12"] }
 subtle = "2.6"
@@ -33,3 +35,4 @@ tokio = { version = "1.54.1", features = ["io-util", "macros", "net", "rt-multi-
 # Keep the same Quinn release with PLANK telemetry shared by production and the
 # standalone probes. See third_party/quinn-proto-0.11.19/PLANK-PATCH.md.
 quinn-proto = { path = "../../third_party/quinn-proto-0.11.19" }
+quinn-udp = { path = "../../third_party/quinn-udp-0.5.16" }
