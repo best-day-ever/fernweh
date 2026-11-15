@@ -1321,7 +1321,7 @@ mod tests {
         eprintln!(
             "fec_loss_matrix_frames={TOTAL_FRAMES} source={source} missing={missing} unrecovered={unrecovered}"
         );
-        assert_eq!(unrecovered, 0);
+        assert_eq!(fec.video_fec_source_symbols_unrecovered, Some(0));
 
         // Retain delivered-frame, timing and FEC evidence even when the
         // independent kernel-loss measurement fails. Acceptance remains zero.

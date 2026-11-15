@@ -292,6 +292,17 @@ fn sufficient_loss_receive_capacity(capacities: &[usize]) -> bool {
             .all(|capacity| *capacity >= LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES)
 }
 
+#[cfg(target_os = "linux")]
+fn fixture_socket_preparation_opt_in(value: Option<&std::ffi::OsStr>) -> io::Result<bool> {
+    match value {
+        None => Ok(false),
+        Some(value) if value == "1" => Ok(true),
+        Some(_) => Err(io::Error::other(
+            "PLANK_TEST_FORCE_OWNED_RCVBUF must be exactly 1 when explicitly enabled",
+        )),
+    }
+}
+
 impl OwnedUdpSockets {
     pub fn before_endpoints() -> io::Result<Self> {
         Ok(Self {
@@ -330,6 +341,40 @@ impl OwnedUdpSockets {
                     "expected exactly server, client and proxy UDP sockets",
                 ));
             }
+            if fixture_socket_preparation_opt_in(
+                std::env::var_os("PLANK_TEST_FORCE_OWNED_RCVBUF").as_deref(),
+            )? {
+                use std::os::fd::AsRawFd;
+                for ((inode, owned), capacity) in self.tracked.iter().zip(capacities.iter_mut()) {
+                    if *capacity >= LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES {
+                        continue;
+                    }
+                    let requested =
+                        LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES as libc::c_int;
+                    // Only these three newly owned fixture sockets are eligible.
+                    // The live FD and c_int remain valid throughout setsockopt;
+                    // CAP_NET_ADMIN is required, with no global-policy fallback.
+                    let result = unsafe {
+                        libc::setsockopt(
+                            owned.as_raw_fd(),
+                            libc::SOL_SOCKET,
+                            libc::SO_RCVBUFFORCE,
+                            (&requested as *const libc::c_int).cast(),
+                            std::mem::size_of_val(&requested) as libc::socklen_t,
+                        )
+                    };
+                    if result != 0 {
+                        return Err(io::Error::other(format!(
+                            "explicit fixture socket preparation requires CAP_NET_ADMIN: {}",
+                            io::Error::last_os_error()
+                        )));
+                    }
+                    *capacity = socket2::SockRef::from(owned).recv_buffer_size()?;
+                    eprintln!(
+                        "fec_loss_owned_udp_inode={inode} fixture_force_requested_bytes={requested} receive_buffer_bytes={capacity}"
+                    );
+                }
+            }
             // Print every owned socket's actual capacity before explaining a
             // prerequisite failure; no frame/timing measurement has begun yet.
             if !sufficient_loss_receive_capacity(&capacities) {
@@ -339,7 +384,7 @@ impl OwnedUdpSockets {
                         .unwrap_or_else(|_| "unavailable".into())
                 };
                 return Err(io::Error::other(format!(
-                    "Linux controlled-loss fixture requires effective SO_RCVBUF >= {LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES} bytes on all three owned sockets; observed={capacities:?} rmem_max={} rmem_default={}; review the benchmark environment prerequisite before measuring (no setting was changed)",
+                    "Linux controlled-loss fixture requires effective SO_RCVBUF >= {LOSS_QUALIFICATION_MIN_EFFECTIVE_RECEIVE_BYTES} bytes on all three owned sockets; observed={capacities:?} rmem_max={} rmem_default={}; review the benchmark environment prerequisite before measuring (no global setting was changed)",
                     policy("rmem_max"),
                     policy("rmem_default")
                 )));
@@ -393,6 +438,17 @@ fn controlled_loss_receive_prerequisite_covers_every_owned_socket() {
     }
     assert!(!sufficient_loss_receive_capacity(&[]));
     assert!(!sufficient_loss_receive_capacity(&[minimum; 2]));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn fixture_socket_preparation_requires_explicit_opt_in() {
+    use std::ffi::OsStr;
+    assert!(!fixture_socket_preparation_opt_in(None).unwrap());
+    assert!(fixture_socket_preparation_opt_in(Some(OsStr::new("1"))).unwrap());
+    for invalid in ["", "0", "true", "yes"] {
+        assert!(fixture_socket_preparation_opt_in(Some(OsStr::new(invalid))).is_err());
+    }
 }
 
 #[cfg(target_os = "linux")]
