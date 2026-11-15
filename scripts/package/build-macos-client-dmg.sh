@@ -9,6 +9,7 @@ plank_macos_client_target
 : "${PLANK_MACOS_SIGNING_IDENTITY:?Developer ID Application SHA1 required}"
 : "${PLANK_NOTARY_PROFILE:?Keychain profile required}"
 : "${PLANK_QT_ROOT:?}"
+python3 "$source_root/tests/packaging/test-macos-qt-deployment.py"
 test -z "$(git -C "$source_root" status --porcelain)"
 test -z "$(git -C "$source_root/apps/client" status --porcelain)"
 source "$source_root/scripts/package/package-version.sh"
@@ -24,8 +25,9 @@ ditto "$build/app/plank-client.app" "$app"
 if [[ ${FERNWEH_BROKER_ENABLED:-0} == 1 && ${FERNWEH_UPDATES_ENABLED:-0} == 1 ]]; then
     cp "$source_root/scripts/package/fernweh-install-update.sh" "$app/Contents/Resources/fernweh-install-update.sh"
 fi
-"$PLANK_QT_ROOT/bin/macdeployqt" "$app" \
-    "-qmldir=$source_root/apps/client/app/gui" -always-overwrite -no-strip
+python3 "$source_root/scripts/package/deploy-macos-client-qt.py" \
+    --qt-root "$PLANK_QT_ROOT" --app "$app" \
+    --qml-dir "$source_root/apps/client/app/gui" --scratch-parent "$output"
 # macdeployqt needs the build target's original executable name. Rename only
 # after deployment so macOS uses the product name for its app menu and process.
 mv "$app/Contents/MacOS/plank-client" "$app/Contents/MacOS/BDE fernweh"
@@ -34,13 +36,15 @@ mv "$app/Contents/MacOS/plank-client" "$app/Contents/MacOS/BDE fernweh"
 # macdeployqt selects Cocoa only; retain the small offscreen plugin so the
 # shipped executable can also run our headless version/diagnostic checks.
 cp "$PLANK_QT_ROOT/plugins/platforms/libqoffscreen.dylib" "$app/Contents/PlugIns/platforms/"
-# Qt deploys server database plugins that PLANK never loads. Keep only SQLite
-# for Qt's optional local-storage implementation; no ODBC/Mimer/PostgreSQL/etc.
-# dependencies should enter the app. The independent closure gate still checks
-# every retained binary, so this is not an exception to dependency validation.
+# The private deployment view excludes unused SQL drivers before macdeployqt
+# resolves their dependencies. Require SQLite and reject an unexpected driver;
+# the independent closure gate below still checks every retained binary.
+test -f "$app/Contents/PlugIns/sqldrivers/libqsqlite.dylib"
 for plugin in "$app/Contents/PlugIns/sqldrivers/"*.dylib; do
     [[ -f "$plugin" ]] || continue
-    [[ ${plugin##*/} == libqsqlite.dylib ]] || rm "$plugin"
+    [[ ${plugin##*/} == libqsqlite.dylib ]] || {
+        echo "Unexpected SQL plugin in Client: $plugin" >&2; exit 1;
+    }
 done
 # Every Mach-O must load on the oldest supported macOS: a dependency built for a
 # newer target would make the whole app refuse to launch there.
