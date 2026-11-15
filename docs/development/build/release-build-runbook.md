@@ -300,10 +300,13 @@ request, and reports doubled bookkeeping capacity through `getsockopt`; see
 the [socket manual](https://man7.org/linux/man-pages/man7/socket.7.html).
 Inspect `sysctl net.core.rmem_max net.core.rmem_default` alongside the reported
 effective capacities before qualification. Build scripts never change them.
-If a separately reviewed temporary benchmark ceiling is needed, preserve the
-receive default and persistent files, record protected process/socket state,
-and use an independent bounded restore guard. Record the temporary ceiling,
-actual capacities and verified restoration with the exact-source result.
+A separately reviewed Linux fixture preparation may use `SO_RCVBUFFORCE` on
+only those three newly owned test sockets, requiring `CAP_NET_ADMIN`. Elevate
+only an explicitly selected trusted loopback test executable, never Cargo,
+the build, Host or runtime services. Keep the default/unprivileged path as an
+explanatory prerequisite failure. Record actual per-socket capacities and
+protected state; the sockets close with the fixture even after termination.
+Do not change global receive ceilings/defaults or grant persistent privileges.
 
 The credential-free `dependency-tests / transport-macos` job exports
 `macos-transport-qualification-<run-id>`. Verify its source commit, Kymux pin,
@@ -326,7 +329,8 @@ Unavailable counters remain unavailable on other OSes. Keep complete recovery,
 timing/FEC and kernel-loss evidence distinct; zero kernel drops do not establish
 frame recovery. Retain final metrics before rejecting a nonzero owned kernel
 drop count, and preserve every failed trial. Do not loosen assertions, add
-retries or change product pacing/FEC/latency to hide a fixture limitation.
+retries, tune machine-wide sysctls, or change product pacing/FEC/latency to hide
+a fixture limitation.
 
 For native transport lifecycle changes, run the Rust completion tests and the
 real C ABI stress runner on Linux and the dedicated Mac:
