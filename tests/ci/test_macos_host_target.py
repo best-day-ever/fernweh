@@ -164,6 +164,8 @@ Path(os.environ['TEST_ARGS']).write_text(json.dumps(sys.argv[1:]))
                     # Isolated stubs: no sudo, package scripts, compiler or Git state changes.
                     for command in ('sudo', 'git'):
                         executable(base / 'bin' / command, '#!/bin/bash\nexit 0\n')
+                    executable(base / 'cargo' / 'bin' / 'cargo',
+                               '#!/bin/bash\nprintf "test result: ok. 2 passed; 0 failed;\\n"\n')
                     env = dict(os.environ, PLANK_SOURCE_ROOT=str(source),
                                PLANK_WORK_ROOT=str(base / 'work'), PLANK_CARGO_ROOT=str(base / 'cargo'),
                                PLANK_RUSTUP_ROOT=str(base / 'rustup'), PLANK_CI_SIGNED=signed,
