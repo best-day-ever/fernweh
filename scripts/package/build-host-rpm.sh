@@ -133,7 +133,6 @@ install -D -m 0644 "$repo_dir/third_party/kyber-kymux/COPYING.md" \
 install -D -m 0644 "$repo_dir/packaging/README.md" \
   "$payload_dir/usr/share/doc/plank-host/README.md"
 mkdir -p "$payload_dir/usr/share/plank"
-cp -aL "$build_dir/assets/." "$payload_dir/usr/share/plank/"
 install -D -m 0644 "$repo_dir/apps/host/linux/src_assets/linux/assets/collaboration-ui.py" \
   "$payload_dir/usr/share/plank/collaboration-ui.py"
 

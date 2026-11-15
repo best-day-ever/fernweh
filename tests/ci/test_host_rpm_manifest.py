@@ -2,6 +2,8 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +36,51 @@ LOG_DIRECTORY = '/var/log/plank drwx------ root root'
 
 
 class HostRpmManifestTests(unittest.TestCase):
+    def stage_resources(self, root, helper=True, stale_assets=False):
+        script = (ROOT / 'scripts/package/build-host-rpm.sh').read_text()
+        start = script.index('mkdir -p "$payload_dir/usr/share/plank"')
+        staging = script[start:script.index('\nsource_epoch=', start)]
+        source = root / 'source'
+        build = root / 'build'
+        payload = root / 'payload'
+        build.mkdir()
+        if helper:
+            path = source / 'apps/host/linux/src_assets/linux/assets/collaboration-ui.py'
+            path.parent.mkdir(parents=True)
+            path.write_text('# required collaboration helper fixture\n')
+        if stale_assets:
+            path = build / 'assets/web/index.html'
+            path.parent.mkdir(parents=True)
+            path.write_text('retired web asset')
+        command = 'set -euo pipefail\nrepo_dir=$1\nbuild_dir=$2\npayload_dir=$3\n' + staging
+        result = subprocess.run(['bash', '-c', command, 'resource-staging-fixture',
+                                 str(source), str(build), str(payload)], text=True, capture_output=True)
+        return result, payload
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Executes Linux GNU install staging')
+    def test_resources_stage_without_retired_build_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, payload = self.stage_resources(Path(temporary))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            helper = payload / 'usr/share/plank/collaboration-ui.py'
+            self.assertEqual(helper.read_text(), '# required collaboration helper fixture\n')
+            self.assertEqual(helper.stat().st_mode & 0o777, 0o644)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Executes Linux GNU install staging')
+    def test_missing_required_collaboration_helper_still_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, _payload = self.stage_resources(Path(temporary), helper=False, stale_assets=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('collaboration-ui.py', result.stderr)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Executes Linux GNU install staging')
+    def test_stale_cache_web_assets_are_not_imported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, payload = self.stage_resources(Path(temporary), stale_assets=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((payload / 'usr/share/plank/web').exists())
+            self.assertTrue((payload / 'usr/share/plank/collaboration-ui.py').is_file())
+
     def check_manifest(self, files=FILES, log_directory=LOG_DIRECTORY):
         script = (ROOT / 'scripts/package/build-host-rpm.sh').read_text()
         gate = script[script.index('rpm -qpl "$rpm_file" >/dev/null'):
