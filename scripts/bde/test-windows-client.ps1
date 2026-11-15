@@ -10,6 +10,7 @@ if (!$vsRoot) { throw 'MSVC x64 tools are required' }
 $env:PATH = "$QtRoot\bin;$SourceRoot\apps\client\libs\windows\lib\x64;$env:PATH"
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:PLANK_REPO_ROOT = $SourceRoot
+$env:PLANK_CLIENT_SOURCE = Join-Path $SourceRoot 'apps/client'
 # The clipboard suites use the test process's Windows clipboard, so they run
 # sequentially. Run on a builder desktop without personal clipboard contents.
 foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'hostchoices', 'sessionhotkeys', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'windowsresources', 'sdlmicrophone', 'mediafeatures', 'qtdisplaylayout', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
