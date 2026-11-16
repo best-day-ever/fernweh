@@ -30,6 +30,7 @@ if not exist "%PLANK_SOURCE_ROOT%\packaging\VERSION" (
 )
 for /f "usebackq delims=" %%I in ("%PLANK_SOURCE_ROOT%\packaging\VERSION") do set "PLANK_RELEASE_VERSION=%%I"
 set "PLANK_CLIENT_VERSION=%PLANK_RELEASE_VERSION%-windows-dev"
+if defined PLANK_BUILD_BRANCH if /I not "%PLANK_BUILD_BRANCH%"=="main" set "PLANK_CLIENT_VERSION=%PLANK_RELEASE_VERSION%-%PLANK_BUILD_BRANCH%"
 if "%PLANK_WINDOWS_RELEASE_BUILD%"=="1" set "PLANK_CLIENT_VERSION=%PLANK_RELEASE_VERSION%"
 
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"

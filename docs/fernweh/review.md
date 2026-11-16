@@ -476,3 +476,32 @@ notarization where required, immutable provenance and exact hashes. Do not
 relabel a feature candidate as a main build. The installed-session/hardware
 acceptance listed above remains open before binary promotion. Source is ALPHA;
 these merges do not certify a new installed streaming release.
+
+## 16 November: Windows immersive mouse
+
+Client implementation `fb77f588` adds the SDL adapter for Windows, the live
+Mouse control and Ctrl+Alt+Shift+M. Capture is off each session, capability-gated
+and unavailable to collaboration guests. Reliable END acknowledgement precedes
+absolute reanchoring; bounded pending input keeps its ordering. Focus loss,
+reconnect, window/layout changes, tablet takeover and teardown cancel capture.
+Raw tablet enqueue shares the capture-start ordering boundary.
+
+Native MSVC/Qt6.10.2 builds pass for both profiles. Broker-enabled tests report
+25 suites/598 passes/five platform skips; direct-only reports20 suites/412
+passes/no skips. Both include22 capture-state and17 shortcut cases and the two
+real UDP socket checks. Broker updater validation adds seven MSI identity cases
+and nine helper paths. The first SSH secure-session test fails because that
+public-key logon lacks DPAPI access. The unchanged real secure-session and CNG
+tests pass with the existing signed-in user's limited token; the initial failure
+is retained. No key permissions or encryption were weakened.
+
+The candidate launcher reaches its ready state with a responding native window
+and an isolated portable profile. Focused Mac component checks pass22 capture
+and17 shortcut cases. Root checks pass166 cases with four platform skips;
+deployment generation passes13. Changed-content privacy and whitespace checks
+pass separately in Client and parent.
+
+Windows physical mouse/tablet, live stream toggle/release/reconnect, Blender,
+Unreal and multiple-display acceptance remain open. Build, component, startup
+and package checks support an ALPHA update; they do not certify those workflows.
+The existing Mac and Linux Host packages retain their independent pins.

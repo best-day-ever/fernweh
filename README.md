@@ -162,15 +162,15 @@ adapters and stream-window close handling.
 
 ### Immersive mouse
 
-The merged Mac Qt Client → Linux X11 Host path adds session-scoped, unaccelerated
-relative pixel movement for applications such as Blender and Unreal. A toolbar
+The Mac Qt and Windows SDL Clients add session-scoped, unaccelerated relative
+pixel movement through the Linux X11 Host for applications such as Blender and Unreal. A toolbar
 action and **Ctrl+Alt+Shift+M** enter or release capture; completion is ordered
 before returning to absolute pointing. Focus, reconnect, layout and tablet
 transitions cancel capture. Shared guests cannot claim it.
 
-**The standard Mac package builder still selects SDL.** Enabling immersive mouse
-in that build requires the Qt frontend's display/clipboard/sharing parity work.
-Installed Blender/Unreal acceptance remains open. See the
+It starts off each session, with no saved global preference. The standard Mac
+package builder selects Qt; Windows uses SDL's native relative mouse path.
+Physical Windows streaming and full Blender/Unreal/tablet acceptance remain open. See the
 [integration ledger](docs/fernweh/upstream-integration-2026-11-14.md).
 
 ### Optional broker, relay and authentication

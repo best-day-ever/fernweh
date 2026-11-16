@@ -148,7 +148,7 @@ any particular user's physical display event.
 | Windows raw USB Wacom and Windows Ink normalized pen fallback | Client [49](https://github.com/best-day-ever/plank-client/pull/49); `docs/bde/windows-tablet.md` in Client | Pressure/tilt/eraser/buttons in fallback; pad/ring/touch depend on successful raw device forwarding and physical tests. |
 | Required virtual input readiness and first X11 wheel notch | Host [14](https://github.com/best-day-ever/plank-host-linux/pull/14), [26](https://github.com/best-day-ever/plank-host-linux/pull/26); `19214c4d`, `a82acd13` | Retry failed input-worker startup rather than presenting a video-only session. |
 
-### Immersive mouse: merged source, default-build parity open
+### Immersive mouse
 
 Original Client [78](https://github.com/best-day-ever/plank-client/pull/78), Host
 [38](https://github.com/best-day-ever/plank-host-linux/pull/38),
@@ -160,8 +160,10 @@ Mac Qt Client → Linux X11 carries unaccelerated pixel motion; toolbar or
 Ctrl+Alt+Shift+M toggles it. Ordered END_ACK/held-input handling resynchronizes
 absolute pointing. Focus/Space/reconnect/layout/tablet transitions cancel it;
 shared guests cannot claim capture. It starts off for each session. The standard
-Mac builder still chooses SDL; Qt display/file/sharing parity and installed
-Blender/Unreal acceptance remain open. [Current status](upstream-integration-2026-11-14.md).
+Mac builder now selects Qt. The Windows SDL adapter adds the same opt-in mode
+in the1.2.38 candidate, including native relative input, acknowledged release
+and serialized tablet takeover. Windows package/installed acceptance and full
+Blender/Unreal/tablet workflows remain separate qualification work.
 
 ## Authentication, broker and desktop lifecycle
 

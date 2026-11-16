@@ -111,6 +111,14 @@ archive and SDL3_ttf. The build locates MSVC with `vswhere`, builds the locked
 native Rust transport and then the shared qmake Client. The test runner always includes deployment, clipboard, input and display checks;
 broker/device-key/updater suites run when broker support is selected.
 
+Run the secure-session and device-key tests with the signed-in user's token.
+An SSH public-key login can lack access to that user's DPAPI master key even
+when the same account is signed in; an `Access is denied` result there does
+not qualify secure storage. Keep the failed evidence and run the real tests
+in the interactive user's context without bypassing DPAPI or weakening key
+permissions. Clipboard tests need a separate test desktop with no personal
+clipboard contents.
+
 To assemble an optional local MSI, set `PLANK_WINDOWS_RELEASE_BUILD=1` before
 building, then use [stage/build scripts and WiX 4.0.6](../bde/windows-client-installer.md).
 This retains the existing Fernweh MSI family. Hash-verified unsigned ALPHA
