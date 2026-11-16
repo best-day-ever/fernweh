@@ -33,7 +33,7 @@ if (!(Select-String -Path $udpLog -SimpleMatch 'test result: ok. 2 passed;')) {
 }
 # The clipboard suites use the test process's Windows clipboard, so they run
 # sequentially. Run on a builder desktop without personal clipboard contents.
-foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'hostchoices', 'sessionhotkeys', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'windowsresources', 'sdlmicrophone', 'mediafeatures', 'qtdisplaylayout', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
+foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'hostchoices', 'sessionhotkeys', 'immersivemouse', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'windowsresources', 'sdlmicrophone', 'mediafeatures', 'qtdisplaylayout', 'macpen', 'fernwehupdater', 'displayplanner', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
     if ($env:FERNWEH_BROKER_ENABLED -ne '1' -and $suite -in @('fernwehupdater', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker')) {
         continue
     }
