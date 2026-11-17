@@ -58,10 +58,18 @@ fn relay_never_needs_broker_private_key_but_broker_still_validates_it() {
         policy.replace("\"studio\"", "\"root\""),
         policy.replace("port_min = 29001", "port_min = 0"),
         format!("{policy}\n[diagnostics]\ndirectory = \"relative\"\nenabled_until_unix = 1\n"),
-        format!("{policy}\n[diagnostics]\ndirectory = \"/tmp/reports\"\nenabled_until_unix = 0\n"),
+        format!("{policy}\n[diagnostics]\ndirectory = \"/tmp/reports\"\n"),
     ] {
         assert_ne!(invalid, policy);
         fs::write(&config, invalid).unwrap();
         assert!(!run(relay, &config, "--print-ruleset").status.success());
     }
+
+    // An explicit zero cutoff enables ongoing reception, without admitting a
+    // relative directory or requiring the relay to open the API signing key.
+    fs::write(&config, format!("{policy}\n[diagnostics]\ndirectory = \"/tmp/reports\"\nenabled_until_unix = 0\n")).unwrap();
+    let loaded = plank_broker::config::Config::load_for_relay(&config).unwrap();
+    assert!(loaded.diagnostics.unwrap().enabled_at(u64::MAX));
+    assert!(run(relay, &config, "--print-ruleset").status.success());
+    assert!(!run(broker, &config, "check-config").status.success());
 }
