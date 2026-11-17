@@ -36,15 +36,23 @@ Choose a new desktop size here before connecting and reconnect to use a changed
 saved setup. This Client update does not change the Host's handling of live
 resolution changes made inside GNOME.
 
-## Older hosts and remote Macs
+## Fixed desktop sizes
 
-Only hosts that require fixed layouts show the compatibility editor. **Match
+Hosts and video formats that require fixed layouts show a simpler editor. **Match
 this computer** resolves the desktop automatically on each connection; it has
 no editable resolution picker. Choose a fixed desktop instead to request a
 specific resolution. These choices use the same single **Save** action.
 
-A remote Mac preview includes its requested desktop mode and scale. Older Linux
+A remote Mac preview includes its requested desktop mode and scale. Linux
 hosts also offer existing physical screens or one/two virtual desktops. Their
 optional advanced stream sizing changes encoded frame size, independently of
-the desktop layout. Modern Linux hosts use individual screen sizes and do not
-show these compatibility controls.
+the desktop layout. Modern Linux hosts use individual screen sizes when the
+selected video format supports them. Software formats without that support
+show the fixed-size editor instead; choose **One virtual desktop** to request
+an exact size such as 3840 × 2160. Save a changed video format in workstation
+settings, then reopen **Screens** to review the controls for that format.
+
+Changing video quality alone preserves a saved fixed layout. Workstation
+settings show **Keep the saved fixed layout** while it is in use. Choosing
+**Use my display setup** or **Custom for this workstation** is an explicit
+change; opening Screens loads the chosen saved setup before you edit it.
