@@ -17,6 +17,7 @@ import time
 REQUESTS = "support-requests"
 REPORTS = "support-reports"
 MAX_BUNDLE = 193 * 1024
+RETENTION = 14 * 86400
 
 
 def private_directory(path, create=False):
@@ -73,6 +74,8 @@ def operate(directory, user, command, ttl=600, request_id=None, now=None):
     # This spool is bounded to 128 completed bundles by the receiver.
     for path in sorted(folder.glob(prefix + "-*.json"))[:128]:
         value = read_json(path, MAX_BUNDLE)
+        if now - value["received_unix"] > RETENTION:
+            continue
         bundle = value["bundle"]
         if request_id is not None and bundle["request_id"] != request_id:
             continue

@@ -76,6 +76,8 @@ before filtering credentials, authentication/clipboard/payload entries,
 endpoints, emails, paths and long opaque identifiers. Other logged context,
 including device/renderer details, is private administrator data. Redaction is
 best effort; do not publish bundles or treat them as anonymous telemetry.
+The broker sweeps expired bundles at startup and hourly even after collection
+expires; operator reads exclude expired bundles immediately.
 
 ## Storage and isolation
 

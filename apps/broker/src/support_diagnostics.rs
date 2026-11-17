@@ -53,6 +53,49 @@ fn enabled(b: &Broker) -> Option<Config> {
     b.cfg.diagnostics.clone().filter(|cfg| now() < cfg.enabled_until_unix)
 }
 
+/// Called independently of collection requests, including after beta expiry.
+/// Operator reads also filter by receipt time and never expose expired logs.
+pub async fn cleanup(b: &Arc<Broker>) -> std::io::Result<()> {
+    let Some(cfg) = b.cfg.diagnostics.clone() else { return Ok(()) };
+    let permit = b
+        .diagnostic_writer
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| std::io::Error::other("diagnostics writer closed"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        prune_reports(&cfg, now())
+    })
+    .await
+    .map_err(|_| std::io::Error::other("diagnostics cleanup failed"))?
+}
+
+fn prune_reports(cfg: &Config, time: u64) -> std::io::Result<()> {
+    private_directory(&cfg.directory, false)?;
+    let directory = cfg.directory.join(REPORTS);
+    if !directory.try_exists()? {
+        return Ok(());
+    }
+    private_directory(&directory, false)?;
+    for (scanned, entry) in fs::read_dir(&directory)?.enumerate() {
+        if scanned > MAX_REPORTS + 32 {
+            return Err(std::io::Error::other("diagnostics spool exceeds limit"));
+        }
+        let entry = entry?;
+        let meta = fs::symlink_metadata(entry.path())?;
+        if !meta.is_file() {
+            return Err(std::io::Error::other("unsafe diagnostics spool entry"));
+        }
+        let age =
+            time.saturating_sub(meta.modified()?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
+        if age > RETENTION || (entry.path().extension().is_some_and(|e| e == "tmp") && age > 3600) {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 fn private_directory(path: &Path, create: bool) -> std::io::Result<()> {
     if create {
         match fs::DirBuilder::new().mode(0o700).create(path) {
@@ -306,6 +349,22 @@ mod tests {
         assert!(read_request(&cfg, "artist", time).unwrap().is_some());
         std::os::unix::fs::symlink(cfg.directory.join(REQUESTS), cfg.directory.join(REPORTS)).unwrap();
         assert!(matches!(store(&cfg, "artist", &"0".repeat(64), &bundle(), time), Err(StoreError::Io)));
+        fs::remove_dir_all(cfg.directory).unwrap();
+    }
+    #[test]
+    fn support_retention_does_not_need_another_upload() {
+        let cfg = setup();
+        let time = now();
+        request(&cfg, time);
+        store(&cfg, "artist", &"0".repeat(64), &bundle(), time).unwrap();
+        let directory = cfg.directory.join(REPORTS);
+        let path = fs::read_dir(&directory).unwrap().next().unwrap().unwrap().path();
+        fs::File::open(&path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(time - RETENTION - 1))
+            .unwrap();
+        prune_reports(&cfg, time).unwrap();
+        assert!(!path.exists());
         fs::remove_dir_all(cfg.directory).unwrap();
     }
 }

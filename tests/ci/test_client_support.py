@@ -50,13 +50,16 @@ class ClientSupportTest(unittest.TestCase):
             path = directory / (prefix + "-" + request_id + ".json")
             path.write_text(json.dumps(value))
             path.chmod(0o600)
-        listing = support.operate(self.root, "artist", "list")
+        listing = support.operate(self.root, "artist", "list", now=100)
         self.assertEqual(len(listing), 2)
         self.assertNotIn("log_tail", json.dumps(listing))
-        bundles = support.operate(self.root, "artist", "read", request_id="a"*32)
+        bundles = support.operate(self.root, "artist", "read", request_id="a"*32, now=100)
         self.assertEqual(len(bundles), 1)
         self.assertEqual(bundles[0]["username"], "artist")
         self.assertEqual(bundles[0]["bundle"]["log_tail"], "renderer reset\n")
+        self.assertEqual(support.operate(self.root, "artist", "list", now=100+support.RETENTION+1), [])
+        self.assertEqual(support.operate(self.root, "artist", "read", request_id="a"*32,
+                                         now=100+support.RETENTION+1), [])
 
     def test_untrusted_identifiers_and_public_files_are_refused(self):
         for user in ["../../other", "$(command)", "", "artist name"]:
