@@ -630,4 +630,3 @@ The fake-backed focused suite passes 13 diagnostic cases, including exact
 expiry boundaries and authentication on all three ongoing-collection routes.
 Native system-feature tests, installed reception and scheduled collection
 acceptance remain deployment gates; source merge does not claim those results.
-
