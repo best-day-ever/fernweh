@@ -4,6 +4,41 @@ Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE
 Fernweh as an enhanced PLANK fork. No new release version, binary asset, feed
 publication, installed app or service deployment is part of this task.
 
+## 17 November: Windows fullscreen and requested diagnostics candidate
+
+The integrated candidate restores the fullscreen flag, window-event flush
+counter and cleanup-wait defaults lost during Qt/SDL reconciliation. Missing
+SDL decoders are recreated from state; rejected barriers and reconnect drainage
+cannot leave window events suppressed. Requested diagnostics add expiring,
+account-scoped, bounded redacted application logs over the existing pinned,
+device-bound connection and opt-out. See [operation](diagnostics.md),
+[contract](../../protocol/client-support-diagnostics.md) and
+[source version1.2.42](../releases/1.2.42.md).
+
+Focused native Qt collector tests pass28 cases, including active-stream upload,
+redaction, account changes, opt-out cancellation and checkpoint/poll contention.
+Native Linux system broker tests pass144 cases plus relay integration. Four
+operator tests pass. Root CI passes170 cases with3 expected skips. The native
+Mac SDL bootstrap/barrier regression passes9 cases, including queue saturation,
+filtered enqueue and reconnect drainage. Peer review finds no remaining source
+blocker after independent retention and event-barrier corrections.
+
+The configured native Windows integrated candidate passes615 cases across26
+suites, zero failures and5 expected skips, plus2 UDP regressions and7 MSI/9
+installer-helper paths. Its MSI builds successfully with protected builder
+services preserved. A preserved earlier package passes three real fullscreen
+round trips with fresh marker frames, while the affected package fails the
+same fullscreen/freshness checks. The exact extracted MSI runtime passes28 source-pixel/Client-marker and window
+state observations across startup, three fullscreen round trips and manual
+disconnect/rejoin for both H.264 and HEVC10-bit4:4:4 at1920×1080. Exact-format
+software decoding is verified; this sparse-marker test does not qualify60fps
+performance. A separate early black startup observation is retained; controlled
+untouched cold-start repeats and the paired final runs pass without a decoder
+workaround. Final main-source package, normal-owner UHD, automatic network
+recovery and installed-upgrade acceptance remain separate gates. The default
+direct-only Windows build also passes421 cases across21 suites. No new binary
+is promoted by this source receipt.
+
 ## 17 November: display setup compatibility controls
 
 The Advanced display page now shows its fixed-layout section only for known

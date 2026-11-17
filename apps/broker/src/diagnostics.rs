@@ -234,6 +234,9 @@ fn store(cfg: &Config, username: &str, report: &Report, now: u64) -> Result<(), 
         let filename = entry.file_name();
         let filename = filename.to_string_lossy();
         let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.is_dir() && matches!(filename.as_ref(), crate::support_diagnostics::REQUESTS | crate::support_diagnostics::REPORTS) {
+            continue;
+        }
         if !metadata.is_file() {
             return Err(StoreError::Io);
         }

@@ -223,6 +223,19 @@ async fn serve(cfg: Config) -> Result<()> {
             }
         });
     }
+    {
+        let b = broker.clone();
+        tokio::spawn(async move {
+            let mut t = tokio::time::interval(Duration::from_secs(3600));
+            t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                t.tick().await;
+                if plank_broker::support_diagnostics::cleanup(&b).await.is_err() {
+                    warn!("support diagnostics cleanup failed");
+                }
+            }
+        });
+    }
     let shutdown = async {
         let mut term =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");

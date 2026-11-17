@@ -10,6 +10,7 @@ pub mod broker;
 pub mod config;
 pub mod device;
 pub mod diagnostics;
+pub mod support_diagnostics;
 pub mod directory;
 pub mod enrol;
 pub mod hbac;
