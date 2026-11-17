@@ -20,7 +20,9 @@ and presents on the same surface. It also covers decoder teardown without a
 subsequent resize, preserved control/close events and a saturated event queue.
 The maintained Windows and Mac runners include the suite. A rejected or
 filtered window-flush barrier does not increment its pending count; completion
-is bounded at zero. Both producer and consumer run on the session event thread.
+is bounded at zero. Both producer and consumer run on the session event thread. The common local
+dispatch consumes barrier completions during reconnect as well as playback, so
+a reconnect drain cannot lose a successfully queued barrier.
 The regression covers queue-full/filter rejection and subsequent recovery. This regression
 does not claim to reproduce a particular graphics driver's notification loss
 or qualify hardware decoding and full streaming on every Windows GPU.
