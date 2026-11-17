@@ -40,7 +40,7 @@ answer; absence of a bundle is not proof that the stream is healthy.
   "report": {
     "schema": 1,
     "report_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "version": "1.2.40",
+    "version": "1.2.41",
     "platform": "windows",
     "os_version": "11",
     "started_unix": 1794900000,

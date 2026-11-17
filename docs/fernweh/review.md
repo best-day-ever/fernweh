@@ -12,7 +12,7 @@ decoder removal explicitly schedules replacement even without a size event.
 The new broker extension and Client collector support expiring account-scoped
 requests for a bounded redacted application log while the app is open. See
 [operation](diagnostics.md), [contract](../../protocol/client-support-diagnostics.md)
-and [source version1.2.40](../releases/1.2.40.md).
+and [source version1.2.41](../releases/1.2.41.md).
 
 Focused native Qt collector tests pass27 cases, including active-stream upload,
 redaction, account change and opt-out cancellation. Broker fake-backed tests
