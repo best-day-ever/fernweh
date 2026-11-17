@@ -4,6 +4,32 @@ Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE
 Fernweh as an enhanced PLANK fork. No new release version, binary asset, feed
 publication, installed app or service deployment is part of this task.
 
+## 17 November: display setup compatibility controls
+
+The Advanced display page now shows its fixed-layout section only for known
+Hosts without display arrangements, including Mac Hosts. Arrangement-capable
+Linux Hosts use the normal per-monitor resolution controls and one Save action.
+The decision follows Host capabilities rather than the selected encoding, so
+choosing a software encoding does not reveal the duplicate controls. Unknown
+Hosts do not advertise compatibility controls before their capabilities are known.
+Existing saved profiles and the fixed-layout implementation remain intact.
+
+Client change `75cefd91` passes native Qt6.10.2/offscreen checks of the actual
+dialog, controller and temporary QSettings: Looks like, preset and custom
+Save/reload, plus rendered visibility for modern Linux, its software-encoding
+fallback, older Linux, Mac and unknown Hosts (6 QtTest cases including setup
+and cleanup). Monitor/decoder inputs and the broker API are fixtures; this is
+not an installed streaming test. The13 deployment-validator cases and all four
+direct/broker/configured/direct-again builds pass, each with7 QtTest cases;
+invalid pins are rejected. Changed-content privacy and whitespace checks pass.
+No Client installer, release feed or live deployment is changed by this source fix.
+
+The next Mac Client release is1.2.39, built from the merged main tree. Its release
+scope is this display-setup clarification; live GNOME modeset capture recovery
+remains a separate investigation.
+
+![Advanced display setup on a modern Linux Host, without duplicate fixed-layout controls](images/display-setup-linux.png)
+
 ## Review entry points
 
 - [What changed over PLANK](enhancements.md), including inherited capabilities,
