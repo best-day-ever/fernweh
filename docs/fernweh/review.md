@@ -4,6 +4,25 @@ Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE
 Fernweh as an enhanced PLANK fork. No new release version, binary asset, feed
 publication, installed app or service deployment is part of this task.
 
+## 17 November: Windows fullscreen and requested diagnostics candidate
+
+The candidate restores retained SDL runtime defaults lost during Qt integration:
+the fullscreen flag, window-event flush counter and cleanup state. Fullscreen
+decoder removal explicitly schedules replacement even without a size event.
+The new broker extension and Client collector support expiring account-scoped
+requests for a bounded redacted application log while the app is open. See
+[operation](diagnostics.md), [contract](../../protocol/client-support-diagnostics.md)
+and [source version1.2.40](../releases/1.2.40.md).
+
+Focused native Qt collector tests pass27 cases, including active-stream upload,
+redaction, account change and opt-out cancellation. Broker fake-backed tests
+pass142 unit cases plus the relay-configuration integration case; four support
+cases exercise exact device proofs, request/account scoping, idempotency,
+permissions/symlink refusal and independent quota. Four operator-tool tests pass.
+Native Windows build/package and exact installed fullscreen acceptance are still
+pending; these source/component results do not establish hardware acceptance or
+publish a new binary.
+
 ## 17 November: display setup compatibility controls
 
 The Advanced display page now shows its fixed-layout section only for known

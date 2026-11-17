@@ -472,6 +472,9 @@ async fn no_store(mut r: Response) -> Response {
 pub fn router(b: Arc<Broker>) -> Router {
     Router::new()
         .route("/v1/client-updates/macos-arm64", get(crate::updates::manifest))
+        .route("/v1/diagnostics/support-request", get(crate::support_diagnostics::poll))
+        .route("/v1/diagnostics/support", post(crate::support_diagnostics::submit)
+            .layer(DefaultBodyLimit::max(crate::support_diagnostics::MAX_BODY)))
         .route("/v1/client-updates/macos-arm64/{filename}", get(crate::updates::download))
         .route("/v1/client-updates/windows-x64", get(crate::updates::windows_manifest))
         .route("/v1/client-updates/windows-x64/{filename}", get(crate::updates::windows_download))
