@@ -628,5 +628,9 @@ a broker-only extension and does not require another Client build.
 
 The fake-backed focused suite passes 13 diagnostic cases, including exact
 expiry boundaries and authentication on all three ongoing-collection routes.
+Native testing passes 146 broker cases, then identifies an old entrypoint
+fixture treating zero as invalid. The updated fixture requires an explicit
+cutoff, accepts ongoing reception, and retains relative-path and private-key
+isolation checks. The complete native gate must pass before deployment.
 Native system-feature tests, installed reception and scheduled collection
 acceptance remain deployment gates; source merge does not claim those results.
