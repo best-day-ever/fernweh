@@ -6,6 +6,14 @@ publication, installed app or service deployment is part of this task.
 
 ## 17 November: Windows fullscreen and requested diagnostics candidate
 
+The final source also records bounded reconnect progress: first decoded frame
+and surface dimensions, negotiated/requested geometry, and one two-second
+visibility/import/draw/swap snapshot per generation. A controlled exposed UHD
+reconnect resumes the retained decoder with matching3840×2160 dimensions and
+live presentation progress. An earlier stale-picture observation had uncontrolled
+window visibility and does not establish a decoder recovery defect. No additional
+renderer reset is introduced. The out-of-tree Windows QML fixture lookup is fixed.
+
 The integrated candidate restores the fullscreen flag, window-event flush
 counter and cleanup-wait defaults lost during Qt/SDL reconciliation. Missing
 SDL decoders are recreated from state; rejected barriers and reconnect drainage
