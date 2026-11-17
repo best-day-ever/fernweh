@@ -537,3 +537,29 @@ Windows physical mouse/tablet, live stream toggle/release/reconnect, Blender,
 Unreal and multiple-display acceptance remain open. Build, component, startup
 and package checks support an ALPHA update; they do not certify those workflows.
 The existing Mac and Linux Host packages retain their independent pins.
+
+## 17 November: display setup clarity
+
+Client display setup now starts in Basic, with readable high-resolution size
+choices and a persistent next-connection preview. Advanced owns exact dimensions,
+placement and output preference. Save collects the entire dimension form before
+replanning, validates it without partial mutation, and also commits a focused
+field. Cancel and Escape discard unsaved edits. Existing profiles remain intact.
+
+Modern Linux sessions fit the desktop in their viewer irrespective of the
+old profile scaling field. That unused picker is removed from their editor;
+compatibility hosts get a separate editor and the same single Save action.
+Automatic compatibility matching no longer offers a manual resolution it would
+ignore. Known arrangement-capable hosts also reject fixed-layout writes in the
+controller. Mac compatibility previews use the connection's window/fullscreen
+viewport and desktop-scale resolver.
+
+The new isolated QML/controller suite passes18 cases, including Retina and
+standard-DPI choices, persistence, focused Save, invalid geometry, Cancel,
+capability-cache gating, compatibility Save and selected/primary screens.
+Synthetic renders were inspected at1100×1000 and900×700; their smaller-window
+Basic preview and controls remain visible. The Mac release script now runs
+this suite. Direct, broker, configured and disabled-again resource compilation
+and root checks are recorded with the release. Probe/decoder/broker fixtures
+are distinct from native GUI and live-stream hardware acceptance. No Host
+capture fix or new streaming qualification is claimed.
