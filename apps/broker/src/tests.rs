@@ -2065,6 +2065,23 @@ async fn diagnostics_are_disabled_without_configuration_and_after_beta_expiry() 
 }
 
 #[tokio::test]
+async fn ongoing_diagnostics_still_require_authenticated_device_proofs() {
+    let h = harness_cfg(FakeKerberos::new(&[]), |cfg| {
+        cfg.diagnostics = Some(crate::diagnostics::Config {
+            directory: "/nonexistent".into(), enabled_until_unix: 0,
+        });
+    });
+    let app = crate::api::router(h.b);
+    for (method, path) in [("POST", "/v1/diagnostics"),
+                           ("GET", "/v1/diagnostics/support-request"),
+                           ("POST", "/v1/diagnostics/support")] {
+        let response = app.clone().oneshot(Request::builder().method(method).uri(path)
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
 async fn mac_admission_is_explicit_hbac_bound_and_preserves_linux_gssapi() {
     let key = crate::mac_admission::tests::TestKey::new(WS1);
     let h = harness_cfg(FakeKerberos::new(&[("anna", "pw123456"), ("bob", "pw123456")]), |cfg| {

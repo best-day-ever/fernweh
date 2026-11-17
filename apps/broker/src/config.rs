@@ -497,8 +497,8 @@ impl Config {
             mac.validate_policy()?;
         }
         if let Some(diagnostics) = &self.diagnostics {
-            if !diagnostics.directory.is_absolute() || diagnostics.enabled_until_unix == 0 {
-                bail!("diagnostics requires an absolute directory and an explicit beta expiry");
+            if !diagnostics.directory.is_absolute() {
+                bail!("diagnostics requires an absolute directory");
             }
         }
         if let Some(updates) = &self.client_updates {

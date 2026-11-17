@@ -50,7 +50,7 @@ fn now() -> u64 {
 }
 
 fn enabled(b: &Broker) -> Option<Config> {
-    b.cfg.diagnostics.clone().filter(|cfg| now() < cfg.enabled_until_unix)
+    b.cfg.diagnostics.clone().filter(|cfg| cfg.enabled_at(now()))
 }
 
 /// Called independently of collection requests, including after beta expiry.
