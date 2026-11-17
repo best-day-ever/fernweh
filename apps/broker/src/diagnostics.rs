@@ -24,7 +24,13 @@ const USER_HOURLY_CAP: usize = 6;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub directory: PathBuf,
+    /// Zero explicitly enables ongoing collection. An absent section stays off.
     pub enabled_until_unix: u64,
+}
+impl Config {
+    pub fn enabled_at(&self, now: u64) -> bool {
+        self.enabled_until_unix == 0 || now < self.enabled_until_unix
+    }
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -169,7 +175,7 @@ impl Report {
 pub async fn submit(State(b): State<Arc<Broker>>, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
     let Some(cfg) = b.cfg.diagnostics.clone() else { return StatusCode::NOT_FOUND.into_response() };
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-    if now >= cfg.enabled_until_unix {
+    if !cfg.enabled_at(now) {
         return StatusCode::NOT_FOUND.into_response();
     }
     let auth = match crate::api::device_bearer(&headers, "POST", uri.path(), &body) {
@@ -283,6 +289,17 @@ fn store(cfg: &Config, username: &str, report: &Report, now: u64) -> Result<(), 
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn collection_window_has_an_explicit_ongoing_mode_and_exact_expiry() {
+        let mut cfg = Config { directory: "/private/diagnostics".into(), enabled_until_unix: 100 };
+        assert!(cfg.enabled_at(99));
+        assert!(!cfg.enabled_at(100));
+        assert!(!cfg.enabled_at(101));
+        cfg.enabled_until_unix = 0;
+        assert!(cfg.enabled_at(0));
+        assert!(cfg.enabled_at(u64::MAX));
+    }
     #[test]
     fn lifecycle_is_optional_strict_and_survives_private_storage() {
         let old = crate::tests::diagnostic_report(1);

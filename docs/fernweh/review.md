@@ -618,3 +618,16 @@ this suite. Direct, broker, configured and disabled-again resource compilation
 and root checks are recorded with the release. Probe/decoder/broker fixtures
 are distinct from native GUI and live-stream hardware acceptance. No Host
 capture fix or new streaming qualification is claimed.
+# Ongoing diagnostic reception
+
+An explicitly configured diagnostics section may use `enabled_until_unix = 0`
+for ongoing collection. An absent section remains disabled; positive cutoffs,
+private retention, device proofs and all existing quotas remain effective.
+Summary and support routes use the same collection-window predicate. This is
+a broker-only extension and does not require another Client build.
+
+The fake-backed focused suite passes 13 diagnostic cases, including exact
+expiry boundaries and authentication on all three ongoing-collection routes.
+Native system-feature tests, installed reception and scheduled collection
+acceptance remain deployment gates; source merge does not claim those results.
+

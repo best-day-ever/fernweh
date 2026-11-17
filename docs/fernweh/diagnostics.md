@@ -6,6 +6,15 @@ and Client must both include [requested diagnostics](../../protocol/client-suppo
 Existing Clients keep their previous summary behavior; a request cannot add
 this capability to an older installed app.
 
+Collection remains disabled when the broker has no `[diagnostics]` section.
+Inside an explicitly configured section, `enabled_until_unix = 0` selects
+ongoing collection; a positive value retains the existing UTC cutoff. This
+applies to both ordinary summaries and requested logs. Retention, request
+expiry, authentication, quotas and the Client's diagnostic setting still apply.
+Operators may schedule requests and archive received bundles privately to
+automate QA; this does not turn a bounded recent log tail into every historical
+log or make an offline or blocked Client observable.
+
 The operator tool uses administrator SSH and runs as the broker service account.
 It does not require inbound access to the Client, a public admin API or an
 artist finding a file. Use the exact broker account name. From the source tree:
