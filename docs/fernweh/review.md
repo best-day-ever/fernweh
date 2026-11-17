@@ -4,6 +4,18 @@ Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE
 Fernweh as an enhanced PLANK fork. No new release version, binary asset, feed
 publication, installed app or service deployment is part of this task.
 
+## 17 November: Linux capture geometry repair
+
+Host [9](https://github.com/best-day-ever/fernweh-host-linux/pull/9) validates
+NvFBC dimensions and BGRA capacity before acquiring or copying an image. Invalid
+frames request the existing complete capture reinitialization. Eleven focused
+native tests pass; the actual-production snapshot fixture improves from two of
+nine passing cases to nine of nine. Native logical-viewport grow, shrink and
+reverse transitions produce five exact source/capture RGB matches, with layout,
+power, preferences and service identities restored. This is standalone capture
+evidence; installed streaming and input acceptance follow packaging. See
+[1.2.43](../releases/1.2.43.md).
+
 ## 17 November: Windows fullscreen and requested diagnostics candidate
 
 The final source also records bounded reconnect progress: first decoded frame
