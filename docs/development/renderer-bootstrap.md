@@ -18,7 +18,10 @@ and demonstrates that the previous event wait has nothing to dispatch. The
 state-driven path initializes a real software renderer, verifies its pixels,
 and presents on the same surface. It also covers decoder teardown without a
 subsequent resize, preserved control/close events and a saturated event queue.
-The maintained Windows and Mac runners include the suite. This regression
+The maintained Windows and Mac runners include the suite. A rejected or
+filtered window-flush barrier does not increment its pending count; completion
+is bounded at zero. Both producer and consumer run on the session event thread.
+The regression covers queue-full/filter rejection and subsequent recovery. This regression
 does not claim to reproduce a particular graphics driver's notification loss
 or qualify hardware decoding and full streaming on every Windows GPU.
 
