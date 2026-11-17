@@ -43,9 +43,15 @@ direct/broker/configured/direct-again builds pass, each with7 QtTest cases;
 invalid pins are rejected. Changed-content privacy and whitespace checks pass.
 No Client installer, release feed or live deployment is changed by this source fix.
 
-The next Mac Client release is1.2.39, built from the merged main tree. Its release
-scope is this display-setup clarification; live GNOME modeset capture recovery
-remains a separate investigation.
+The initial1.2.39 Mac package passed build/signing/notarization but remained
+unpublished after native GUI inspection found an inconsistent older capability
+cache: pre-authentication server-info flags were stored beside a valid
+authenticated arrangement description. The follow-up recognizes that valid
+description in saved previews and caches future flags from the authenticated
+topology snapshot. Its exact stale-cache fixture fails before the repair and
+passes afterward; normal sizing/persistence and old-Host/Mac visibility remain
+covered. The next Mac release is1.2.40 from a fresh main build. Live GNOME modeset
+capture recovery remains a separate investigation.
 
 ![Advanced display setup on a modern Linux Host, without duplicate fixed-layout controls](images/display-setup-linux.png)
 
