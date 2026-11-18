@@ -4,7 +4,31 @@ Read `AGENTS.md` and the relevant build runbook first. Machine-specific access,
 credentials, captures and operational evidence belong in the external private
 notes, never in Git.
 
-## Current — direct Linux CUDA/NVENC lifecycle repair
+## Fernweh candidate — Windows cursor, pen and per-monitor presentation
+
+Feature branch `codex/windows-input-display`, Client
+[`16`](https://github.com/best-day-ever/fernweh-client/pull/16), parent
+[`27`](https://github.com/best-day-ever/fernweh/pull/27). Both are drafts for
+physical qualification. Runtime source: parent
+`dc944bac63c04eb911071cc23780ae3320cb539a` and Client
+`dbe7ec649cd9c334e21c3fff1c6e273941606da8`.
+Later documentation commits do not change those candidate runtime sources.
+Unchanged pins: Linux Host `190ded1b704145bac4a58e7f02f97c2ef39e0ccb`,
+Kyber `9e1a7e304abe4ad6b42a7a10ef41eae2b16fb31f`, Client common-C
+`80d9923b434067a2f43d192674c1685e9f0918f1` and qmdnsengine
+`920c097ffa742e2968290f15d4dde6693aec02e5`.
+
+Candidate version is `1.2.44-windows-input-display`. The installed/published
+release and update feeds are separate. Native direct-only/broker gates and
+candidate hash are recorded in [the review receipt](docs/fernweh/review.md).
+The operator is preparing a physical Windows test box and owns two-monitor and
+tablet/driver qualification; follow the
+[acceptance checklist](docs/development/plans/windows-input-display.md#hardware-qualification).
+Synthetic D3D targets and native window tests do not prove physical colour
+output, tablet behavior or sustained stream performance. No deployment or
+feed promotion follows from this candidate.
+
+## Earlier PLANK — direct Linux CUDA/NVENC lifecycle repair
 
 Host [36](https://github.com/best-day-ever/plank-host-linux/pull/36), integrated by
 [124](https://github.com/best-day-ever/plank/pull/124), keeps direct CUDA teardown
