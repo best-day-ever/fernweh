@@ -1,3 +1,39 @@
+## 18 November 2026 — Windows input/display candidate
+
+Draft [Client16](https://github.com/best-day-ever/fernweh-client/pull/16) and
+[parent27](https://github.com/best-day-ever/fernweh/pull/27) add the owned Win32
+remote-cursor overlay, complete native pen samples with optional system WinTab
+pressure/contact, and cropped per-monitor D3D11 presentation. Windows planning,
+launch and windowed/fullscreen transitions share one capability policy. Existing
+Vulkan software presentation checks ten-bit output precision on every target;
+no codec, chroma or bit-depth downgrade enables additional displays. Selected
+adapters retain attribution to Culley Bunker / SkulleyFX Client8280fc48.
+
+Native MSVC/Qt6.10.2 application builds pass for both profiles at parent
+`dc944bac` / Client `dbe7ec64`: 33 broker-enabled suites with 714 passes and five
+expected POSIX/helper skips; 27 direct-only suites with 506 passes and zero skips. Both run the two
+real UDP regressions. MSI validation passes seven identity cases, nine helper
+paths and actual installer-service extraction/limited-user ACL gates. Portable
+pen/cursor fixtures pass 18 cases; root CI runs 171 tests with four platform skips.
+
+The production identity shader preserves all 1,024 values per colour channel
+across two cropped ten-bit targets in a D3D WARP software readback fixture;
+the eight-bit case passes separately. Limited-user Win32 fixtures check cursor
+ownership, owner replacement, transparent hit testing, focus preservation and
+cleanup. The initial invisible SSH-window-station failure is retained; native
+window tests run on a signed-in window station, while clipboard tests remain
+outside the personal desktop. These checks do not qualify physical displays,
+actual hardware decoding, tablets or sustained stream performance.
+
+Unsigned candidate `1.2.44-windows-input-display`: 73,295,606-byte MSI, SHA256
+`53e73d637ff1b580ffc24b14704f9c30ed512dc354df6a52de45c69128f728e2`.
+The application embeds the branch version; numeric MSI/resource metadata retains
+the 1.2.44 family. The operator owns physical test-box qualification using the
+[checklist](../development/plans/windows-input-display.md#hardware-qualification).
+WinTab-only tilt is not implemented; Ink supplies tilt when available. No
+installed application, release pin or update feed changes; both PRs stay drafts.
+Later documentation commits do not change this candidate's runtime sources.
+
 ## 18 November 2026 — network diagnostics Client1.2.44
 
 Broker producer PR25 and Client PR15 retain merge history. The coordinated
