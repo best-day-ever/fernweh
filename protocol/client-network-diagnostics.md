@@ -68,7 +68,9 @@ clock one-way latency or privileged Wi-Fi/location access is required.
 
 The version1 score combines loss, p95RTT, jitter and measured bandwidth fit.
 Download fit uses the selected stream bitrate, or150Mbit/s when no stream exists;
-upload uses a5Mbit/s product heuristic. Loss and bandwidth cap the overall score.
+upload uses a5Mbit/s product heuristic. Loss, bandwidth and severe latency/jitter cap the overall score. Upload callback
+delays remain visible without being treated as proof of a stalled Client; its
+independent UDP scheduler provides that evidence.
 Store component scores, reasons, markers and raw evidence together. Incomplete,
 locally limited, inconsistent or unavailable measurements return an inconclusive
 assessment with no numeric score. A200Mbit/s ceiling cannot certify a faster
