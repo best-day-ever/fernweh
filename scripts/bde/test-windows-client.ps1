@@ -33,8 +33,8 @@ if (!(Select-String -Path $udpLog -SimpleMatch 'test result: ok. 2 passed;')) {
 }
 # The clipboard suites use the test process's Windows clipboard, so they run
 # sequentially. Run on a builder desktop without personal clipboard contents.
-foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'hostchoices', 'sessionhotkeys', 'rendererbootstrap', 'immersivemouse', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'windowsresources', 'sdlmicrophone', 'mediafeatures', 'qtdisplaylayout', 'macpen', 'fernwehupdater', 'displayplanner', 'displaysetupcontroller', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
-    if ($env:FERNWEH_BROKER_ENABLED -ne '1' -and $suite -in @('fernwehupdater', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'plankbroker')) {
+foreach ($suite in @('deployment', 'clientinstances', 'outputtopology', 'internetconnectivity', 'plankclientpolicy', 'hostchoices', 'sessionhotkeys', 'rendererbootstrap', 'immersivemouse', 'desktopstage', 'windowsclipboardsync', 'windowsfileclipboard', 'windowswacom', 'windowsresources', 'sdlmicrophone', 'mediafeatures', 'qtdisplaylayout', 'macpen', 'fernwehupdater', 'displayplanner', 'displaysetupcontroller', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'diagnosticnetworkprobe', 'plankbroker', 'pacershutdown', 'dxgipresentation')) {
+    if ($env:FERNWEH_BROKER_ENABLED -ne '1' -and $suite -in @('fernwehupdater', 'windowsbrokersessionstore', 'windowsdevicekey', 'betadiagnostics', 'diagnosticnetworkprobe', 'plankbroker')) {
         continue
     }
     $directory = Join-Path $BuildDir $suite

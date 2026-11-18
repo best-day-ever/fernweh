@@ -63,6 +63,7 @@ run_shared_client_test() {
 # These small policy/network fixtures need no application objects; fail early.
 if [[ ${FERNWEH_BROKER_ENABLED:-0} == 1 ]]; then
     run_shared_client_test betadiagnostics
+    run_shared_client_test diagnosticnetworkprobe
 fi
 python3 "$client/deployment/test_configure.py"
 run_shared_client_test deployment
