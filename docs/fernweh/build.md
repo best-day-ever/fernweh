@@ -117,7 +117,11 @@ when the same account is signed in; an `Access is denied` result there does
 not qualify secure storage. Keep the failed evidence and run the real tests
 in the interactive user's context without bypassing DPAPI or weakening key
 permissions. Clipboard tests need a separate test desktop with no personal
-clipboard contents.
+clipboard contents. The `windowsplatform` suite also needs the signed-in user
+window station: it creates and destroys its own Win32 windows and checks owner,
+focus, hit testing and visibility. A noninteractive SSH window station cannot
+qualify those GUI properties. Run that suite through the same limited-user
+adapter as the key tests; keep clipboard tests outside the personal desktop.
 
 To assemble an optional local MSI, set `PLANK_WINDOWS_RELEASE_BUILD=1` before
 building, then use [stage/build scripts and WiX 4.0.6](../bde/windows-client-installer.md).
