@@ -1,3 +1,24 @@
+## 18 November 2026 — network diagnostics Client1.2.44
+
+Broker producer PR25 and Client PR15 retain merge history. The coordinated
+Client pin includes the fixed two-minute authenticated probe, capped streaming
+HTTPS goodput, cancellation/retry guards and independent logs from windows
+sharing a sign-in. The score preserves upload callback delays without claiming
+that TCP backpressure proves a stalled Client; severe timing issues cap its
+aggregate score.
+
+Native verification:161 Linux broker cases plus the actual relay entrypoint;
+49 Mac Qt invocations/943 passes/two expected skips plus native helpers,
+transport and signed/notarized package gates;28 Windows suites/653 passes/five
+expected skips plus transport, MSI and protected-service checks. The identical
+Mac package launches on macOS15.7.4 and27; the Windows installer upgrades42→44
+without changing protected preferences, sessions, services or boot identity.
+Direct/broker/configured/direct-again deployment fixtures pass. An authenticated
+live worker completes the full UDP and HTTPS plan and returns a private receipt.
+Installed streaming/probe acceptance and hosted feed publication are recorded
+separately; these source and package checks do not certify every employee's
+hardware or network.
+
 # Source review and publication record
 
 Prepared 13 November 2026 for Finn's review. This is a source preparation of BDE

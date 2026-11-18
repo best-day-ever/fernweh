@@ -696,6 +696,27 @@ pub(crate) mod tests {
         assert!(assessment(&c, &s, None)["score"].is_null());
     }
     #[test]
+    fn upload_backpressure_does_not_claim_the_client_scheduler_stalled() {
+        let mut c = healthy_client();
+        c.upload.as_mut().unwrap().producer_late_ticks = 51;
+        let a = assessment(&c, &healthy_server(), Some(50_000));
+        assert_eq!(a["score"], 100);
+        assert!(a["markers"].as_array().unwrap().contains(&serde_json::json!("client_upload_callback_delays")));
+        c.max_scheduler_gap_ms = 1000;
+        assert!(assessment(&c, &healthy_server(), None)["score"].is_null());
+    }
+    #[test]
+    fn fast_bandwidth_cannot_hide_severe_latency_or_jitter() {
+        let mut c = healthy_client();
+        let s = healthy_server();
+        c.rtt_us.fill(300000);
+        assert!(assessment(&c, &s, None)["score"].as_u64().unwrap() <= 25);
+        c = healthy_client();
+        c.jitter_us = 65000;
+        assert!(assessment(&c, &s, None)["score"].as_u64().unwrap() <= 25);
+    }
+
+    #[test]
     fn strict_counter_contract_rejects_inconsistent_or_extra_data() {
         let mut c = healthy_client();
         c.received += 1;
@@ -944,8 +965,12 @@ pub fn assessment(client: &ClientStats, server: &ServerStats, requested_down_kbp
         || client.late_sends > client.sent / 20
         || server.rate_limited > 0
         || server.replied < server.received
-        || server.download.producer_late_ticks > 20
-        || client.upload.as_ref().is_some_and(|u| u.producer_late_ticks > 20);
+        || server.download.producer_late_ticks > 20;
+    // Qt upload callback delays can also be TCP backpressure. Preserve them as
+    // evidence; the independent UDP scheduler decides whether the Client stalled.
+    if client.upload.as_ref().is_some_and(|u| u.producer_late_ticks > 20) {
+        markers.push("client_upload_callback_delays");
+    }
     if locally_limited {
         markers.push("test_endpoint_or_scheduler_limited");
     }
@@ -969,9 +994,19 @@ pub fn assessment(client: &ClientStats, server: &ServerStats, requested_down_kbp
         None
     };
     let score = if reason.is_none() {
-        Some(loss_score.min(down_score.unwrap().min(up_score.unwrap())).min(
-            (loss_score * 4 + latency_score * 2 + jitter_score + down_score.unwrap().min(up_score.unwrap()) * 3) / 10,
-        ))
+        Some(
+            loss_score
+                .min(down_score.unwrap().min(up_score.unwrap()))
+                .min(latency_score + 25)
+                .min(jitter_score + 25)
+                .min(
+                    (loss_score * 4
+                        + latency_score * 2
+                        + jitter_score
+                        + down_score.unwrap().min(up_score.unwrap()) * 3)
+                        / 10,
+                ),
+        )
     } else {
         None
     };
