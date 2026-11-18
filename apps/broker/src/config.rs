@@ -42,6 +42,9 @@ pub struct Config {
     /// Beta-only diagnostic collection, disabled unless explicitly configured.
     #[serde(default)]
     pub diagnostics: Option<crate::diagnostics::Config>,
+    /// Fixed on-demand network probes; no UDP listener unless explicitly set.
+    #[serde(default)]
+    pub network_diagnostics: Option<crate::network_diagnostics::Config>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -493,6 +496,16 @@ impl Config {
     }
 
     fn validate_policy(&self) -> Result<()> {
+        if let Some(network) = &self.network_diagnostics {
+            let port = network.listen.port();
+            if self.diagnostics.is_none()
+                || !network.listen.is_ipv4()
+                || port < 1024
+                || (self.relay.port_min..=self.relay.port_max).contains(&port)
+            {
+                bail!("network diagnostics requires diagnostics and a separate unprivileged IPv4 UDP port");
+            }
+        }
         if let Some(mac) = &self.mac_admission {
             mac.validate_policy()?;
         }

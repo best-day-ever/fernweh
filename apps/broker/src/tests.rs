@@ -69,17 +69,32 @@ async fn windows_updates_are_independent_and_require_complete_published_artifact
     });
     let app = crate::api::router(h.b);
     let get = |url: &str| Request::builder().uri(url).body(Body::empty()).unwrap();
-    assert_eq!(app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::NOT_FOUND);
-    std::fs::write(win.join("current.json"), serde_json::json!({
-        "version":"1.1.040", "sha256":hex::encode(crate::util::sha256(bytes)), "size":bytes.len()
-    }).to_string()).unwrap();
-    assert_eq!(app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    std::fs::write(
+        win.join("current.json"),
+        serde_json::json!({
+            "version":"1.1.040", "sha256":hex::encode(crate::util::sha256(bytes)), "size":bytes.len()
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
     std::fs::write(win.join("1.1.040.msi"), b"partial").unwrap();
-    assert_eq!(app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
     std::fs::write(win.join("1.1.040.msi"), bytes).unwrap();
     let response = app.clone().oneshot(get("/v1/client-updates/windows-x64")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let feed: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(),4096).await.unwrap()).unwrap();
+    let feed: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(feed["platform"], "windows-x64");
     assert_eq!(feed["product_name"], "BDE fernweh");
     assert_eq!(feed["upgrade_code"], "{F598C7E9-ECA2-432F-B0C0-41F9E1201F8F}");
@@ -87,8 +102,13 @@ async fn windows_updates_are_independent_and_require_complete_published_artifact
     let response = app.clone().oneshot(get(feed["url"].as_str().unwrap())).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "application/x-msi");
-    assert_eq!(axum::body::to_bytes(response.into_body(),4096).await.unwrap().as_ref(), bytes);
-    for url in ["/v1/client-updates/windows-x64/1.1.039.msi", "/v1/client-updates/windows-x64/1.1.040.dmg", "/v1/client-updates/macos-arm64", "/v1/client-updates/macos-arm64/1.1.040.msi"] {
+    assert_eq!(axum::body::to_bytes(response.into_body(), 4096).await.unwrap().as_ref(), bytes);
+    for url in [
+        "/v1/client-updates/windows-x64/1.1.039.msi",
+        "/v1/client-updates/windows-x64/1.1.040.dmg",
+        "/v1/client-updates/macos-arm64",
+        "/v1/client-updates/macos-arm64/1.1.040.msi",
+    ] {
         assert_eq!(app.clone().oneshot(get(url)).await.unwrap().status(), StatusCode::NOT_FOUND, "{url}");
     }
     std::fs::write(win.join("current.json"), r#"{"version":"../secret","sha256":"bad","size":0}"#).unwrap();
@@ -139,8 +159,10 @@ fn harness_cfg(krb: FakeKerberos, tweak: impl FnOnce(&mut Config)) -> H {
         rule("plank_remote_anna", &[user("anna")], &[host("ws1"), hostgroup("remote-nested")], &[svc("plank-remote")]),
         rule("plank_remote_bob", &[user("bob")], &[host("ws1")], &[svc("plank-remote")]),
     ]);
-    let dir =
-        Arc::new(FakeDirectory::new(v, vec![("anna", anna()), ("bob", UserView { disabled: false, dn: user("bob"), groups: vec![] })]));
+    let dir = Arc::new(FakeDirectory::new(
+        v,
+        vec![("anna", anna()), ("bob", UserView { disabled: false, dn: user("bob"), groups: vec![] })],
+    ));
     let krb = Arc::new(krb);
     let relay = Arc::new(FakeRelay::default());
     let prober = Arc::new(FakeProber {
@@ -674,10 +696,14 @@ async fn collaboration_users_keep_independent_relay_leases_on_a_busy_host() {
     h.b.logout(&guest).await.unwrap();
     assert_eq!(h.b.lease_count(), 1);
     assert!(h.relay_calls().contains(&RelayRequest::Close {
-        client: Ipv4Addr::new(203, 0, 113, 7), port: guest_route.port, flush: true,
+        client: Ipv4Addr::new(203, 0, 113, 7),
+        port: guest_route.port,
+        flush: true,
     }));
     assert!(!h.relay_calls().contains(&RelayRequest::Close {
-        client: Ipv4Addr::new(203, 0, 113, 7), port: owner_route.port, flush: true,
+        client: Ipv4Addr::new(203, 0, 113, 7),
+        port: owner_route.port,
+        flush: true,
     }));
     assert!(h.b.keepalive(IP, &owner, WS1).await.is_ok());
     assert_eq!(h.b.keepalive(IP, &guest, WS1).await.unwrap_err(), ApiError::Unauthorized);
@@ -1515,13 +1541,15 @@ mod device_sessions {
     #[tokio::test]
     async fn support_diagnostics_keep_device_proofs_bound_to_method_path_and_body() {
         use std::os::unix::fs::PermissionsExt;
-        let dir=std::env::temp_dir().join(format!("plank-bound-support-{}",rand::random::<u64>()));
+        let dir = std::env::temp_dir().join(format!("plank-bound-support-{}", rand::random::<u64>()));
         std::fs::create_dir(&dir).unwrap();
-        std::fs::set_permissions(&dir,std::fs::Permissions::from_mode(0o700)).unwrap();
-        let h=harness_cfg(kdc(),|cfg| cfg.diagnostics=Some(crate::diagnostics::Config{
-            directory:dir.clone(),enabled_until_unix:u64::MAX}));
-        let d=TestDevice::new(); let token=h.bound_login(&d).await.session_token;
-        let app=crate::api::router(h.b.clone());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let h = harness_cfg(kdc(), |cfg| {
+            cfg.diagnostics = Some(crate::diagnostics::Config { directory: dir.clone(), enabled_until_unix: u64::MAX })
+        });
+        let d = TestDevice::new();
+        let token = h.bound_login(&d).await.session_token;
+        let app = crate::api::router(h.b.clone());
         for (method,path,body,expected) in [
             ("GET","/v1/diagnostics/support-request",String::new(),StatusCode::NO_CONTENT),
             ("POST","/v1/diagnostics/support",serde_json::json!({"schema":1,
@@ -1539,6 +1567,180 @@ mod device_sessions {
                     if correct {expected} else {StatusCode::UNAUTHORIZED});
             }
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_diagnostics_keep_requests_device_bound_private_and_idempotent() {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("fernweh-network-auth-{}", rand::random::<u64>()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let h = harness_cfg(kdc(), |cfg| {
+            cfg.diagnostics = Some(crate::diagnostics::Config { directory: dir.clone(), enabled_until_unix: 0 });
+            cfg.network_diagnostics =
+                Some(crate::network_diagnostics::Config { listen: "127.0.0.1:40000".parse().unwrap() });
+        });
+        h.b.network_probes.listener_ready.store(true, std::sync::atomic::Ordering::Release);
+        let d = TestDevice::new();
+        let token = h.bound_login(&d).await.session_token;
+        let app = crate::api::router(h.b.clone());
+        let request = |method: &str, path: &str, body: &str, correct: bool| {
+            let p = proof(&d, method, path, h.now(), &token, if correct { body.as_bytes() } else { b"tampered" });
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .extension(ConnectInfo(SocketAddr::new(IP, 32000)))
+                .header("authorization", format!("Bearer {token}"))
+                .header("x-plank-device-time", h.now().to_string())
+                .header("x-plank-device-proof", base64::engine::general_purpose::STANDARD.encode(p.signature))
+                .body(Body::from(body.to_owned()))
+                .unwrap()
+        };
+        for (method, path, body, expected) in [
+            ("GET", "/v1/diagnostics/network-request", "", StatusCode::NO_CONTENT),
+            (
+                "POST",
+                "/v1/diagnostics/network/start",
+                r#"{"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","client_instance":"cccccccccccccccccccccccccccccccc"}"#,
+                StatusCode::FORBIDDEN,
+            ),
+            ("POST", "/v1/diagnostics/network/finish", "{}", StatusCode::BAD_REQUEST),
+        ] {
+            assert_eq!(
+                app.clone().oneshot(request(method, path, body, false)).await.unwrap().status(),
+                StatusCode::UNAUTHORIZED
+            );
+            assert_eq!(app.clone().oneshot(request(method, path, body, true)).await.unwrap().status(), expected);
+        }
+        let requests = dir.join(crate::network_diagnostics::REQUESTS);
+        std::fs::DirBuilder::new().mode(0o700).create(&requests).unwrap();
+        let real_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let body = serde_json::json!({"schema":1,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issued_unix":real_now,"expires_unix":real_now+600});
+        let write_request = |user: &str, value: &serde_json::Value| {
+            let path = requests.join(format!("{}.json", hex::encode(crate::util::sha256(user.as_bytes()))));
+            let mut f =
+                std::fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(path).unwrap();
+            f.write_all(value.to_string().as_bytes()).unwrap();
+        };
+        write_request("bob", &body);
+        assert_eq!(
+            app.clone().oneshot(request("GET", "/v1/diagnostics/network-request", "", true)).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        write_request("anna", &body);
+        let polled = app.clone().oneshot(request("GET", "/v1/diagnostics/network-request", "", true)).await.unwrap();
+        assert_eq!(polled.status(), StatusCode::OK);
+        assert_eq!(polled.headers()["cache-control"], "no-store");
+        let start =
+            r#"{"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","client_instance":"cccccccccccccccccccccccccccccccc"}"#;
+        let response =
+            app.clone().oneshot(request("POST", "/v1/diagnostics/network/start", start, true)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let grant: serde_json::Value =
+            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+        let transfer_request = |grant: &serde_json::Value, direction: &str, signed: bool| {
+            let id = grant["probe_id"].as_str().unwrap();
+            let path = format!("/v1/diagnostics/network/throughput/{id}/{direction}");
+            let mut request = Request::builder()
+                .method(if direction == "upload" { "POST" } else { "GET" })
+                .uri(path)
+                .extension(ConnectInfo(SocketAddr::new(IP, 32000)));
+            if signed {
+                let key = ring::hmac::Key::new(
+                    ring::hmac::HMAC_SHA256,
+                    &hex::decode(grant["probe_secret"].as_str().unwrap()).unwrap(),
+                );
+                let tag = ring::hmac::sign(&key, format!("FWNB1\n{id}\n{direction}").as_bytes());
+                request = request.header("x-fernweh-probe-proof", hex::encode(tag.as_ref()));
+            }
+            if direction == "upload" {
+                request = request.header("content-length", crate::network_probe::BANDWIDTH_BYTES);
+            }
+            request.body(Body::empty()).unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(transfer_request(&grant, "download", false)).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            app.clone().oneshot(transfer_request(&grant, "upload", true)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            app.clone().oneshot(transfer_request(&grant, "upload", true)).await.unwrap().status(),
+            StatusCode::CONFLICT
+        );
+        let other = start.replace("cccccccccccccccccccccccccccccccc", "dddddddddddddddddddddddddddddddd");
+        assert_eq!(
+            app.clone().oneshot(request("POST", "/v1/diagnostics/network/start", &other, true)).await.unwrap().status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        let finish=serde_json::json!({"schema":1,"request_id":body["request_id"],"client_instance":grant["client_instance"],
+            "probe_id":grant["probe_id"],"report":diagnostic_report(701),"network":crate::network_probe::tests::healthy_client()}).to_string();
+        assert_eq!(
+            app.clone()
+                .oneshot(request("POST", "/v1/diagnostics/network/finish", &finish, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        let folder = dir.join(crate::network_diagnostics::REPORTS);
+        let path = std::fs::read_dir(&folder).unwrap().next().unwrap().unwrap().path();
+        assert_eq!(std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.contains(grant["probe_secret"].as_str().unwrap()));
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(value["bundle"]["network"]["assessment"]["grade"], "inconclusive");
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(
+            app.clone()
+                .oneshot(request("POST", "/v1/diagnostics/network/finish", &finish, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+        write_request(
+            "anna",
+            &serde_json::json!({"schema":1,"request_id":body["request_id"],"issued_unix":real_now-600,"expires_unix":real_now-1}),
+        );
+        assert_eq!(
+            app.clone()
+                .oneshot(request("POST", "/v1/diagnostics/network/finish", &finish, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        write_request(
+            "anna",
+            &serde_json::json!({"schema":1,"request_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","issued_unix":real_now,"expires_unix":real_now+600}),
+        );
+        let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/diagnostics/network/start",
+                &start.replace("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let next: serde_json::Value =
+            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+        assert_eq!(
+            app.clone().oneshot(request("POST", "/v1/logout", "{}", true)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            app.oneshot(transfer_request(&next, "download", true)).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1785,7 +1987,10 @@ mod device_sessions {
                 h.dir.users.lock().unwrap().get_mut("anna").unwrap().disabled = true;
             }
             h.clock.advance(Duration::from_secs(h.cfg.ldap.cache_ttl_secs));
-            assert_eq!(h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.unwrap_err(), ApiError::Unauthorized);
+            assert_eq!(
+                h.b.list_hosts(IP, hosts_bearer(&d, &token, h.now())).await.unwrap_err(),
+                ApiError::Unauthorized
+            );
             assert!(h.sessions.load_all().is_empty());
             assert!(!h.krb.destroyed.lock().unwrap().is_empty());
         }
@@ -1794,7 +1999,11 @@ mod device_sessions {
     #[tokio::test]
     async fn removed_host_permission_ends_relay_and_direct_sessions() {
         for direct in [false, true] {
-            let h = harness_cfg(kdc(), |cfg| { if direct { direct_lan(cfg); } });
+            let h = harness_cfg(kdc(), |cfg| {
+                if direct {
+                    direct_lan(cfg);
+                }
+            });
             let d = TestDevice::new();
             let token = h.bound_login(&d).await.session_token;
             let ip = if direct { LAN } else { IP };
@@ -1807,9 +2016,18 @@ mod device_sessions {
             h.clock.advance(Duration::from_secs(h.cfg.ldap.cache_ttl_secs));
             h.b.reap().await;
             assert!(h.sessions.load_all().is_empty());
-            assert_eq!(h.b.list_hosts(ip, hosts_bearer(&d, &token, h.now())).await.unwrap_err(), ApiError::Unauthorized);
+            assert_eq!(
+                h.b.list_hosts(ip, hosts_bearer(&d, &token, h.now())).await.unwrap_err(),
+                ApiError::Unauthorized
+            );
             if !direct {
-                assert!(h.relay.calls.lock().unwrap().iter().any(|call| matches!(call, RelayRequest::Close { flush: true, .. })));
+                assert!(h
+                    .relay
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|call| matches!(call, RelayRequest::Close { flush: true, .. })));
             }
         }
     }
@@ -1844,7 +2062,9 @@ mod device_sessions {
     #[tokio::test]
     async fn mac_admission_requires_mfa_and_fresh_device_proof() {
         let key = crate::mac_admission::tests::TestKey::new(WS1);
-        let h = harness_cfg(kdc(), |cfg| { cfg.mac_admission = Some(key.config.clone()); });
+        let h = harness_cfg(kdc(), |cfg| {
+            cfg.mac_admission = Some(key.config.clone());
+        });
         assert!(h.login_from(IP, "anna", "secret", "wrong").await.is_err());
         let d = TestDevice::new();
         let token = h.bound_login(&d).await.session_token;
@@ -1909,68 +2129,88 @@ pub(crate) fn diagnostic_report(id: usize) -> serde_json::Value {
 #[tokio::test]
 async fn support_diagnostics_require_an_operator_request_and_scope_it_to_the_account() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("plank-support-{}",rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("plank-support-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
-    std::fs::set_permissions(&dir,std::fs::Permissions::from_mode(0o700)).unwrap();
-    let requests=dir.join(crate::support_diagnostics::REQUESTS);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let requests = dir.join(crate::support_diagnostics::REQUESTS);
     std::fs::create_dir(&requests).unwrap();
-    std::fs::set_permissions(&requests,std::fs::Permissions::from_mode(0o700)).unwrap();
-    let h=harness_cfg(FakeKerberos::new(&[("anna","secret123456")]),|cfg| {
-        cfg.diagnostics=Some(crate::diagnostics::Config{directory:dir.clone(),enabled_until_unix:u64::MAX});
+    std::fs::set_permissions(&requests, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let h = harness_cfg(FakeKerberos::new(&[("anna", "secret123456")]), |cfg| {
+        cfg.diagnostics = Some(crate::diagnostics::Config { directory: dir.clone(), enabled_until_unix: u64::MAX });
     });
-    let token=h.login().await;
-    let app=crate::api::router(h.b.clone());
-    let get=|token:&str| Request::builder().uri("/v1/diagnostics/support-request")
-        .header("authorization",format!("Bearer {token}")).body(Body::empty()).unwrap();
-    let post=|body:serde_json::Value| Request::builder().method("POST").uri("/v1/diagnostics/support")
-        .header("authorization",format!("Bearer {token}")).header("content-type","application/json")
-        .body(Body::from(body.to_string())).unwrap();
-    let body=serde_json::json!({"schema":1,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "report":diagnostic_report(1),"log_tail":"DXGI reset 0x887a0005\n"});
-    assert_eq!(app.clone().oneshot(get("bogus")).await.unwrap().status(),StatusCode::UNAUTHORIZED);
-    assert_eq!(app.clone().oneshot(get(&token)).await.unwrap().status(),StatusCode::NO_CONTENT);
-    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(),StatusCode::FORBIDDEN);
-    let time=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let request=serde_json::json!({"schema":1,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "issued_unix":time,"expires_unix":time+600});
-    let write=|user:&str,value:&serde_json::Value| {
-        let path=requests.join(format!("{}.json",hex::encode(crate::util::sha256(user.as_bytes()))));
-        std::fs::write(&path,value.to_string()).unwrap();
-        std::fs::set_permissions(path,std::fs::Permissions::from_mode(0o600)).unwrap();
+    let token = h.login().await;
+    let app = crate::api::router(h.b.clone());
+    let get = |token: &str| {
+        Request::builder()
+            .uri("/v1/diagnostics/support-request")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
     };
-    write("bob",&request);
-    assert_eq!(app.clone().oneshot(get(&token)).await.unwrap().status(),StatusCode::NO_CONTENT);
-    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(),StatusCode::FORBIDDEN);
-    write("anna",&request);
-    let response=app.clone().oneshot(get(&token)).await.unwrap();
-    assert_eq!(response.status(),StatusCode::OK);
-    assert_eq!(response.headers()["cache-control"],"no-store");
-    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(),StatusCode::ACCEPTED);
-    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(),StatusCode::ACCEPTED);
-    let reports=dir.join(crate::support_diagnostics::REPORTS);
-    assert_eq!(std::fs::read_dir(&reports).unwrap().count(),1);
-    let path=std::fs::read_dir(&reports).unwrap().next().unwrap().unwrap().path();
-    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode()&0o777,0o600);
-    let saved:serde_json::Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(saved["username"],"anna");
-    let mut expected=body.clone(); expected["report"]["stream"]=serde_json::Value::Null;
-    assert_eq!(saved["bundle"],expected);
+    let post = |body: serde_json::Value| {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/diagnostics/support")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let body = serde_json::json!({"schema":1,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "report":diagnostic_report(1),"log_tail":"DXGI reset 0x887a0005\n"});
+    assert_eq!(app.clone().oneshot(get("bogus")).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(app.clone().oneshot(get(&token)).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(), StatusCode::FORBIDDEN);
+    let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let request = serde_json::json!({"schema":1,"request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issued_unix":time,"expires_unix":time+600});
+    let write = |user: &str, value: &serde_json::Value| {
+        let path = requests.join(format!("{}.json", hex::encode(crate::util::sha256(user.as_bytes()))));
+        std::fs::write(&path, value.to_string()).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    write("bob", &request);
+    assert_eq!(app.clone().oneshot(get(&token)).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(), StatusCode::FORBIDDEN);
+    write("anna", &request);
+    let response = app.clone().oneshot(get(&token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(), StatusCode::ACCEPTED);
+    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(), StatusCode::ACCEPTED);
+    let reports = dir.join(crate::support_diagnostics::REPORTS);
+    assert_eq!(std::fs::read_dir(&reports).unwrap().count(), 1);
+    let path = std::fs::read_dir(&reports).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["username"], "anna");
+    let mut expected = body.clone();
+    expected["report"]["stream"] = serde_json::Value::Null;
+    assert_eq!(saved["bundle"], expected);
     assert!(!std::fs::read_to_string(path).unwrap().contains(&token));
-    let mut expired=request.clone(); expired["expires_unix"]=serde_json::json!(time);
-    write("anna",&expired);
-    assert_eq!(app.clone().oneshot(get(&token)).await.unwrap().status(),StatusCode::NO_CONTENT);
-    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(),StatusCode::FORBIDDEN);
-    write("anna",&request);
-    let mut large=body.clone(); large["log_tail"]=serde_json::json!("x".repeat(65537));
-    assert_eq!(app.clone().oneshot(post(large)).await.unwrap().status(),StatusCode::BAD_REQUEST);
-    let mut unknown=body.clone(); unknown["path"]=serde_json::json!("/unrelated");
-    assert_eq!(app.clone().oneshot(post(unknown)).await.unwrap().status(),StatusCode::BAD_REQUEST);
-    let mut controls=body.clone(); controls["log_tail"]=serde_json::json!("\u{1b}[2J");
-    assert_eq!(app.clone().oneshot(post(controls)).await.unwrap().status(),StatusCode::BAD_REQUEST);
+    let mut expired = request.clone();
+    expired["expires_unix"] = serde_json::json!(time);
+    write("anna", &expired);
+    assert_eq!(app.clone().oneshot(get(&token)).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.clone().oneshot(post(body.clone())).await.unwrap().status(), StatusCode::FORBIDDEN);
+    write("anna", &request);
+    let mut large = body.clone();
+    large["log_tail"] = serde_json::json!("x".repeat(65537));
+    assert_eq!(app.clone().oneshot(post(large)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let mut unknown = body.clone();
+    unknown["path"] = serde_json::json!("/unrelated");
+    assert_eq!(app.clone().oneshot(post(unknown)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let mut controls = body.clone();
+    controls["log_tail"] = serde_json::json!("\u{1b}[2J");
+    assert_eq!(app.clone().oneshot(post(controls)).await.unwrap().status(), StatusCode::BAD_REQUEST);
     // Adding the exact support subdirectories must not break old report uploads.
-    let ordinary=Request::builder().method("POST").uri("/v1/diagnostics")
-        .header("authorization",format!("Bearer {token}")).body(Body::from(diagnostic_report(2).to_string())).unwrap();
-    assert_eq!(app.oneshot(ordinary).await.unwrap().status(),StatusCode::ACCEPTED);
+    let ordinary = Request::builder()
+        .method("POST")
+        .uri("/v1/diagnostics")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(diagnostic_report(2).to_string()))
+        .unwrap();
+    assert_eq!(app.oneshot(ordinary).await.unwrap().status(), StatusCode::ACCEPTED);
     std::fs::remove_dir_all(dir).unwrap();
 }
 #[tokio::test]
@@ -2067,16 +2307,17 @@ async fn diagnostics_are_disabled_without_configuration_and_after_beta_expiry() 
 #[tokio::test]
 async fn ongoing_diagnostics_still_require_authenticated_device_proofs() {
     let h = harness_cfg(FakeKerberos::new(&[]), |cfg| {
-        cfg.diagnostics = Some(crate::diagnostics::Config {
-            directory: "/nonexistent".into(), enabled_until_unix: 0,
-        });
+        cfg.diagnostics = Some(crate::diagnostics::Config { directory: "/nonexistent".into(), enabled_until_unix: 0 });
     });
     let app = crate::api::router(h.b);
-    for (method, path) in [("POST", "/v1/diagnostics"),
-                           ("GET", "/v1/diagnostics/support-request"),
-                           ("POST", "/v1/diagnostics/support")] {
-        let response = app.clone().oneshot(Request::builder().method(method).uri(path)
-            .body(Body::empty()).unwrap()).await.unwrap();
+    for (method, path) in
+        [("POST", "/v1/diagnostics"), ("GET", "/v1/diagnostics/support-request"), ("POST", "/v1/diagnostics/support")]
+    {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().method(method).uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -67,16 +67,37 @@ pub struct Lifecycle {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StartupPhase {
-    Prepared, Initializing, Negotiating, TransportReady, CreatingWindow,
-    WindowCreated, CreatingDecoder, DecoderReady,
+    Prepared,
+    Initializing,
+    Negotiating,
+    TransportReady,
+    CreatingWindow,
+    WindowCreated,
+    CreatingDecoder,
+    DecoderReady,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminationReason {
-    Unknown, InitializationFailed, StartupFailed, Cancelled, WindowCreationFailed,
-    DecoderFailed, DisplayFailed, QuitEvent, WindowClose, Hotkey, Toolbar,
-    ApplicationExit, ThreadInterrupted, ConnectionTerminated, SessionTakenOver,
-    ReconnectFailed, ReconnectTimeout, SessionDestroyed, FrameFormatChanged,
+    Unknown,
+    InitializationFailed,
+    StartupFailed,
+    Cancelled,
+    WindowCreationFailed,
+    DecoderFailed,
+    DisplayFailed,
+    QuitEvent,
+    WindowClose,
+    Hotkey,
+    Toolbar,
+    ApplicationExit,
+    ThreadInterrupted,
+    ConnectionTerminated,
+    SessionTakenOver,
+    ReconnectFailed,
+    ReconnectTimeout,
+    SessionDestroyed,
+    FrameFormatChanged,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -145,13 +166,22 @@ impl Report {
         let safe_version = |s: &str| {
             !s.is_empty() && s.len() <= 96 && s.bytes().all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))
         };
-        self.schema == 1 && self.stream.as_ref().is_none_or(|s|s.profile <= 255 && s.capture <= 255 && s.width <= 32768 && s.height <= 32768 && s.fps <= 1000 && s.bitrate_kbps <= 10000000)
+        self.schema == 1
+            && self.stream.as_ref().is_none_or(|s| {
+                s.profile <= 255
+                    && s.capture <= 255
+                    && s.width <= 32768
+                    && s.height <= 32768
+                    && s.fps <= 1000
+                    && s.bitrate_kbps <= 10000000
+            })
             && self.report_id.len() == 32
             && self.report_id.bytes().all(|c| c.is_ascii_hexdigit())
             && safe_version(&self.version)
             && safe_version(&self.os_version)
             && self.duration_ms <= 7 * 86400 * 1000
-            && self.displays.len() <= 16 && self.displays_end.len() <= 16
+            && self.displays.len() <= 16
+            && self.displays_end.len() <= 16
             && self.samples.len() <= 120
             && self.events.len() <= 32
             && self.displays.iter().chain(self.displays_end.iter()).all(|d| {
@@ -240,7 +270,15 @@ fn store(cfg: &Config, username: &str, report: &Report, now: u64) -> Result<(), 
         let filename = entry.file_name();
         let filename = filename.to_string_lossy();
         let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.is_dir() && matches!(filename.as_ref(), crate::support_diagnostics::REQUESTS | crate::support_diagnostics::REPORTS) {
+        if metadata.is_dir()
+            && matches!(
+                filename.as_ref(),
+                crate::support_diagnostics::REQUESTS
+                    | crate::support_diagnostics::REPORTS
+                    | crate::network_diagnostics::REQUESTS
+                    | crate::network_diagnostics::REPORTS
+            )
+        {
             continue;
         }
         if !metadata.is_file() {
@@ -313,30 +351,35 @@ mod tests {
         });
         let report: Report = serde_json::from_value(body.clone()).unwrap();
         assert!(report.validate());
-        let vocabulary:serde_json::Value=serde_json::from_str(include_str!("../../../protocol/fixtures/client-lifecycle-vocabulary.json")).unwrap();
+        let vocabulary: serde_json::Value =
+            serde_json::from_str(include_str!("../../../protocol/fixtures/client-lifecycle-vocabulary.json")).unwrap();
         for phase in vocabulary["phases"].as_array().unwrap() {
             for reason in vocabulary["termination_reasons"].as_array().unwrap() {
-                let mut candidate=body.clone();
-                candidate["lifecycle"]["phase"]=phase.clone();
-                candidate["lifecycle"]["termination_reason"]=reason.clone();
-                let decoded:Report=serde_json::from_value(candidate.clone()).unwrap();
+                let mut candidate = body.clone();
+                candidate["lifecycle"]["phase"] = phase.clone();
+                candidate["lifecycle"]["termination_reason"] = reason.clone();
+                let decoded: Report = serde_json::from_value(candidate.clone()).unwrap();
                 assert!(decoded.validate());
-                assert_eq!(serde_json::to_value(decoded).unwrap()["lifecycle"],candidate["lifecycle"]);
+                assert_eq!(serde_json::to_value(decoded).unwrap()["lifecycle"], candidate["lifecycle"]);
             }
         }
-        let dir = std::env::temp_dir().join(format!("plank-lifecycle-{}",rand::random::<u64>()));
+        let dir = std::env::temp_dir().join(format!("plank-lifecycle-{}", rand::random::<u64>()));
         std::fs::create_dir(&dir).unwrap();
-        std::fs::set_permissions(&dir,std::fs::Permissions::from_mode(0o700)).unwrap();
-        let cfg=Config{directory:dir.clone(),enabled_until_unix:u64::MAX};
-        store(&cfg,"anna",&report,1).unwrap();
-        let path=std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
-        let saved:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        assert_eq!(saved["report"]["lifecycle"],body["lifecycle"]);
-        for (key,value) in [("phase","arbitrary-local-path"),("termination_reason","arbitrary-error-text"),("message","raw-log")] {
-            let mut invalid=body.clone(); invalid["lifecycle"][key]=serde_json::json!(value);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let cfg = Config { directory: dir.clone(), enabled_until_unix: u64::MAX };
+        store(&cfg, "anna", &report, 1).unwrap();
+        let path = std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved["report"]["lifecycle"], body["lifecycle"]);
+        for (key, value) in
+            [("phase", "arbitrary-local-path"), ("termination_reason", "arbitrary-error-text"), ("message", "raw-log")]
+        {
+            let mut invalid = body.clone();
+            invalid["lifecycle"][key] = serde_json::json!(value);
             assert!(serde_json::from_value::<Report>(invalid).is_err());
         }
-        let mut invalid=body; invalid["lifecycle"]["error_code"]=serde_json::json!(i64::MAX);
+        let mut invalid = body;
+        invalid["lifecycle"]["error_code"] = serde_json::json!(i64::MAX);
         assert!(serde_json::from_value::<Report>(invalid).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -361,16 +404,17 @@ mod tests {
     }
     #[test]
     fn disk_storage_enforces_global_cap_without_deleting_retained_reports() {
-        let dir=std::env::temp_dir().join(format!("plank-diagnostic-cap-{}",rand::random::<u64>()));
+        let dir = std::env::temp_dir().join(format!("plank-diagnostic-cap-{}", rand::random::<u64>()));
         std::fs::create_dir(&dir).unwrap();
-        std::fs::set_permissions(&dir,std::fs::Permissions::from_mode(0o700)).unwrap();
-        for i in 0..MAX_FILES { std::fs::write(dir.join(format!("fixture-{i}.json")),b"{}").unwrap(); }
-        let cfg=Config{directory:dir.clone(),enabled_until_unix:u64::MAX};
-        let report:Report=serde_json::from_value(crate::tests::diagnostic_report(1)).unwrap();
-        let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        assert!(matches!(store(&cfg,"anna",&report,now),Err(StoreError::Full)));
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(),MAX_FILES);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for i in 0..MAX_FILES {
+            std::fs::write(dir.join(format!("fixture-{i}.json")), b"{}").unwrap();
+        }
+        let cfg = Config { directory: dir.clone(), enabled_until_unix: u64::MAX };
+        let report: Report = serde_json::from_value(crate::tests::diagnostic_report(1)).unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        assert!(matches!(store(&cfg, "anna", &report, now), Err(StoreError::Full)));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), MAX_FILES);
         std::fs::remove_dir_all(dir).unwrap();
     }
-
 }

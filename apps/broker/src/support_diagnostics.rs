@@ -43,6 +43,8 @@ pub struct Bundle {
     request_id: String,
     report: Report,
     log_tail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_instance: Option<String>,
 }
 
 fn now() -> u64 {
@@ -65,7 +67,9 @@ pub async fn cleanup(b: &Arc<Broker>) -> std::io::Result<()> {
         .map_err(|_| std::io::Error::other("diagnostics writer closed"))?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        prune_reports(&cfg, now())
+        let time = now();
+        prune_reports(&cfg, time)?;
+        crate::network_diagnostics::cleanup(&cfg.directory.join(crate::network_diagnostics::REPORTS), time)
     })
     .await
     .map_err(|_| std::io::Error::other("diagnostics cleanup failed"))?
@@ -96,7 +100,7 @@ fn prune_reports(cfg: &Config, time: u64) -> std::io::Result<()> {
     Ok(())
 }
 
-fn private_directory(path: &Path, create: bool) -> std::io::Result<()> {
+pub(crate) fn private_directory(path: &Path, create: bool) -> std::io::Result<()> {
     if create {
         match fs::DirBuilder::new().mode(0o700).create(path) {
             Ok(()) => (),
@@ -112,8 +116,17 @@ fn private_directory(path: &Path, create: bool) -> std::io::Result<()> {
 }
 
 fn read_request(cfg: &Config, user: &str, time: u64) -> std::io::Result<Option<SupportRequest>> {
+    read_request_from(cfg, user, time, REQUESTS)
+}
+
+pub(crate) fn read_request_from(
+    cfg: &Config,
+    user: &str,
+    time: u64,
+    folder: &str,
+) -> std::io::Result<Option<SupportRequest>> {
     private_directory(&cfg.directory, false)?;
-    let directory = cfg.directory.join(REQUESTS);
+    let directory = cfg.directory.join(folder);
     if !directory.try_exists()? {
         return Ok(None);
     }
@@ -167,7 +180,11 @@ pub async fn poll(State(b): State<Arc<Broker>>, uri: Uri, headers: HeaderMap) ->
     })
     .await;
     let mut response = match result {
-        Ok(Ok(Some(request))) => Json(request).into_response(),
+        Ok(Ok(Some(request))) => {
+            let mut value = serde_json::to_value(request).unwrap();
+            value["client_instance_supported"] = serde_json::json!(true);
+            Json(value).into_response()
+        }
         Ok(Ok(None)) => StatusCode::NO_CONTENT.into_response(),
         _ => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     };
@@ -190,6 +207,10 @@ pub async fn submit(State(b): State<Arc<Broker>>, uri: Uri, headers: HeaderMap, 
         Err(_) => return ApiError::BadRequest.into_response(),
     };
     if bundle.schema != 1
+        || bundle
+            .client_instance
+            .as_ref()
+            .is_some_and(|id| id.len() != 32 || !id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)))
         || !bundle.report.validate()
         || bundle.log_tail.len() > 64 * 1024
         || bundle.log_tail.chars().any(|c| c.is_control() && c != '\n' && c != '\t')
@@ -234,7 +255,8 @@ fn store(cfg: &Config, user: &str, session: &str, bundle: &Bundle, time: u64) ->
     let directory = cfg.directory.join(REPORTS);
     private_directory(&directory, true)?;
     let prefix = format!("{}-", hex::encode(sha256(user.as_bytes())));
-    let path = directory.join(format!("{prefix}{}-{session}.json", bundle.request_id));
+    let instance = bundle.client_instance.as_ref().map(|id| format!("-{id}")).unwrap_or_default();
+    let path = directory.join(format!("{prefix}{}-{session}{instance}.json", bundle.request_id));
     // An acknowledged retry is idempotent, without rewriting the original.
     if let Ok(meta) = fs::symlink_metadata(&path) {
         return if meta.is_file() { Ok(()) } else { Err(StoreError::Io) };
@@ -329,6 +351,23 @@ mod tests {
             store(&cfg, "other-artist", &format!("{:064x}", 6), &bundle(), time),
             Err(StoreError::NoRequest)
         ));
+        fs::remove_dir_all(cfg.directory).unwrap();
+    }
+    #[test]
+    fn separate_processes_sharing_one_login_keep_both_log_tails() {
+        let cfg = setup();
+        let time = now();
+        request(&cfg, time);
+        let mut first = bundle();
+        first.client_instance = Some("1".repeat(32));
+        let mut second = bundle();
+        second.client_instance = Some("2".repeat(32));
+        second.log_tail = "second process renderer failed\n".into();
+        store(&cfg, "artist", &"0".repeat(64), &first, time).unwrap();
+        store(&cfg, "artist", &"0".repeat(64), &second, time).unwrap();
+        store(&cfg, "artist", &"0".repeat(64), &first, time).unwrap();
+        let files: Vec<_> = fs::read_dir(cfg.directory.join(REPORTS)).unwrap().collect();
+        assert_eq!(files.len(), 2);
         fs::remove_dir_all(cfg.directory).unwrap();
     }
     #[test]

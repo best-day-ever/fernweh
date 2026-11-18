@@ -16,7 +16,7 @@ import time
 
 REQUESTS = "support-requests"
 REPORTS = "support-reports"
-MAX_BUNDLE = 193 * 1024
+MAX_BUNDLE = 225 * 1024
 RETENTION = 14 * 86400
 
 
@@ -40,7 +40,7 @@ def read_json(path, limit):
         return json.loads(data)
 
 
-def operate(directory, user, command, ttl=600, request_id=None, now=None):
+def operate(directory, user, command, ttl=600, request_id=None, now=None, network=False):
     now = int(time.time()) if now is None else now
     if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,128}", user):
         raise ValueError("invalid account name")
@@ -49,7 +49,7 @@ def operate(directory, user, command, ttl=600, request_id=None, now=None):
     if command == "request":
         if not 1 <= ttl <= 900:
             raise ValueError("request lifetime must be 1 to 900 seconds")
-        folder = directory / REQUESTS
+        folder = directory / ("network-requests" if network else REQUESTS)
         private_directory(folder, create=True)
         request = {"schema": 1, "request_id": secrets.token_hex(16),
                    "issued_unix": now, "expires_unix": now + ttl}
@@ -66,7 +66,7 @@ def operate(directory, user, command, ttl=600, request_id=None, now=None):
         return request
     if request_id is not None and not re.fullmatch(r"[0-9a-f]{32}", request_id):
         raise ValueError("invalid request ID")
-    folder = directory / REPORTS
+    folder = directory / ("network-reports" if network else REPORTS)
     if not folder.exists():
         return []
     private_directory(folder)
@@ -88,7 +88,9 @@ def operate(directory, user, command, ttl=600, request_id=None, now=None):
                            "client_session": value["client_session"],
                            "version": report["version"], "platform": report["platform"],
                            "report_id": report["report_id"],
-                           "log_bytes": len(bundle["log_tail"].encode())})
+                           "log_bytes": len(bundle.get("log_tail", "").encode()),
+                           **({"client_instance":bundle["client_instance"]} if "client_instance" in bundle else {}),
+                           **({"network":bundle["network"]["assessment"]} if network else {})})
     return sorted(result, key=lambda r: r["received_unix"], reverse=True)
 
 
@@ -96,6 +98,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path("/var/lib/plank-broker/diagnostics"))
     parser.add_argument("--user", required=True, help="exact authenticated broker account")
+    parser.add_argument("--network", action="store_true", help="request/read the fixed two-minute network health test")
     parser.add_argument("--ssh", help="administrator SSH destination; runs as the broker service account")
     parser.add_argument("--output", type=Path, help="write JSON to a new owner-only local file")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -108,7 +111,10 @@ def main():
     try:
         if args.ssh:
             remote = ["sudo", "-n", "-u", "plank-broker", "python3", "-", "--directory", str(args.directory),
-                      "--user", args.user, args.command]
+                      "--user", args.user]
+            if args.network:
+                remote.append("--network")
+            remote.append(args.command)
             if args.command == "request":
                 remote += ["--ttl", str(args.ttl)]
             elif args.command == "read":
@@ -119,7 +125,7 @@ def main():
             data = child.stdout
         else:
             data = (json.dumps(operate(args.directory, args.user, args.command,
-                                     getattr(args, "ttl", 600), getattr(args, "request_id", None)),
+                                     getattr(args, "ttl", 600), getattr(args, "request_id", None), network=args.network),
                                indent=2) + "\n").encode()
         if args.output:
             fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

@@ -61,3 +61,25 @@ artist's other settings.
 Install/test the broker extension before rolling out the updated Client. Verify
 a request, received bundle, redaction and opt-out on a designated test account;
 component fixtures are separate from native installed streaming acceptance.
+
+## On-demand connection check
+
+With both updated broker and Client, request the fixed network plan using:
+
+```sh
+python3 scripts/diagnostics/client-support.py --ssh ops@broker.example.org \
+  --user artist --network request
+python3 scripts/diagnostics/client-support.py --ssh ops@broker.example.org \
+  --user artist --network list
+python3 scripts/diagnostics/client-support.py --ssh ops@broker.example.org \
+  --user artist --network --output network-report.json read <request-id>
+```
+
+Keep the Client open and signed in for about two minutes after it polls. One
+probe runs at a time. Upload/download each consume up to250MB at a200Mbit/s
+ceiling. The report combines capped HTTPS goodput, independent UDP packet loss,
+latency/jitter under load and local/server health evidence. It returns an
+explained score or an explicit inconclusive reason. See the
+[traffic, authorization and scoring contract](../../protocol/client-network-diagnostics.md)
+for limits and interpretation. Network probes run only on demand; ordinary
+scheduled application-log collection does not start bandwidth tests.

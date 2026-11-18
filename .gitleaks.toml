@@ -8,3 +8,14 @@ id = "literal-ssh-password"
 description = "Do not embed SSH passwords in source or operational notes"
 regex = '''(?i)\bSSHPASS\s*=\s*["']([^"'$\r\n]{4,})["']'''
 secretGroup = 1
+
+# The pre-existing public throwaway EC key moved into a shared TLS test fixture.
+# Require BOTH this exact test path and its known key material; other keys fail.
+[[rules]]
+id = "private-key"
+[[rules.allowlists]]
+description = "Public synthetic loopback TLS fixture; protects no real data"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/plankbroker/tlsfixtures\.h$''']
+regexes = ['''MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgczd2sUy0hEU5M5o/''']

@@ -17,7 +17,7 @@ to be distinguished without exposing a bearer or device private key.
 
 `GET /v1/diagnostics/support-request`, with an empty body:
 
-- `200`: `{"schema":1,"request_id":"<32 lowercase hex>","issued_unix":<seconds>,"expires_unix":<seconds>}`.
+- `200`: `{"schema":1,"request_id":"<32 lowercase hex>","issued_unix":<seconds>,"expires_unix":<seconds>,"client_instance_supported":true}`.
 - `204`: no current request; `404`: collection absent or expired.
 - Authentication/rate-limit failures retain their existing status codes.
 
@@ -37,6 +37,7 @@ answer; absence of a bundle is not proof that the stream is healthy.
 {
   "schema": 1,
   "request_id": "<32 lowercase hex>",
+  "client_instance": "<32 lowercase hex>",
   "report": {
     "schema": 1,
     "report_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -63,9 +64,12 @@ produces an empty session snapshot with Client version/platform instead.
 
 Only the active request for the authenticated account authorizes upload. A
 missing, replaced or expired request returns403. A successful upload returns202;
-an exact repeated request/session is acknowledged without rewriting its first
-bundle. Clients persist a bounded set of acknowledged request IDs so restarting
-the app does not resend the same request. Transient errors remain retryable and
+an exact repeated request/session/instance is acknowledged without rewriting its
+first bundle. When the poll advertises `client_instance_supported`, Clients add
+an optional per-process random32hex `client_instance`, so separate windows sharing
+a sign-in each return their log. Acknowledgments are process-local in this mode.
+Older Clients omit this field and retain request/session idempotency and bounded
+persistent acknowledgments; newer Clients use that legacy behavior with old servers. Transient errors remain retryable and
 never sign the user out or change a stream.
 
 Limits:64KiB UTF-8 log tail,512 lines,1024bytes/line,192KiB complete HTTP body,
@@ -84,7 +88,7 @@ expires; operator reads exclude expired bundles immediately.
 `support-requests` and `support-reports` are private0700 subdirectories of the
 configured diagnostics directory. Files are0600. Account filenames derive from
 SHA256 of the authenticated account. Completed bundles add the request ID and
-hashed session identity. Neither public endpoint accepts a path or filename.
+hashed session identity, plus the optional process instance. Neither public endpoint accepts a path or filename.
 Requests/log files must be regular files; symbolic links and public permissions
 are refused. The existing serialized diagnostic writer bounds disk work.
 

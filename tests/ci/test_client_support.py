@@ -39,6 +39,23 @@ class ClientSupportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             support.operate(self.root, "artist", "request")
 
+    def test_network_requests_are_separate_and_return_scores_without_payloads(self):
+        request = support.operate(self.root, "artist", "request", now=100, network=True)
+        self.assertTrue((self.root / "network-requests").is_dir())
+        self.assertFalse((self.root / support.REQUESTS).exists())
+        directory = self.root / "network-reports"
+        directory.mkdir(mode=0o700)
+        prefix = support.hashlib.sha256(b"artist").hexdigest()
+        value = {"received_unix":100,"client_session":"1"*64,"username":"artist","bundle":{
+            "request_id":request["request_id"],"report":{"version":"1.2.44","platform":"macos","report_id":"2"*32},
+            "network":{"assessment":{"score":90,"grade":"excellent"}}}}
+        path=directory/(prefix+"-"+request["request_id"]+".json")
+        path.write_text(json.dumps(value));path.chmod(0o600)
+        result=support.operate(self.root,"artist","list",now=100,network=True)
+        self.assertEqual(result[0]["network"]["score"],90)
+        self.assertEqual(result[0]["log_bytes"],0)
+        self.assertEqual(support.operate(self.root,"artist","list",now=100),[])
+
     def test_list_and_read_are_scoped_to_the_account_and_request(self):
         directory = self.root / support.REPORTS
         directory.mkdir(mode=0o700)
