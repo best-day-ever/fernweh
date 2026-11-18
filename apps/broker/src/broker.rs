@@ -354,6 +354,7 @@ pub struct Deps {
 pub struct Broker {
     pub cfg: Config,
     pub(crate) diagnostic_writer: Arc<tokio::sync::Semaphore>,
+    pub(crate) network_probes: crate::network_probe::Probes,
     d: Deps,
     direct_nets: Vec<ipnet::Ipv4Net>,
     st: Mutex<State>,
@@ -391,6 +392,7 @@ impl Broker {
         Arc::new(Broker {
             cfg,
             diagnostic_writer: Arc::new(tokio::sync::Semaphore::new(1)),
+            network_probes: crate::network_probe::Probes::default(),
             d,
             direct_nets,
             st: Mutex::new(st),
@@ -817,14 +819,12 @@ impl Broker {
         // A bound session lives as long as the TGT can be renewed (the KDC may grant
         // less than asked); without a renewable ticket it falls back to the TGT end.
         let life = match &device {
-            Some(_) => ticket
-                .renew_till_unix
-                .max(ticket.end_unix)
-                .saturating_sub(unix)
-                .min(match self.cfg.limits.device_session_absolute_secs {
+            Some(_) => ticket.renew_till_unix.max(ticket.end_unix).saturating_sub(unix).min(
+                match self.cfg.limits.device_session_absolute_secs {
                     0 => i32::MAX as u64,
                     secs => secs,
-                }),
+                },
+            ),
             None => tgt_left.min(self.cfg.limits.session_absolute_secs),
         };
         let token = random_token();
@@ -919,6 +919,19 @@ impl Broker {
         }
         s.proofs.insert(tag, p.time);
         true
+    }
+
+    /// Revalidate the session behind a short-lived diagnostic transfer grant.
+    pub(crate) async fn diagnostic_session_live(&self, key: &[u8; 32]) -> bool {
+        let user = {
+            let st = self.st.lock().unwrap();
+            let Some(s) = st.sessions.get(key) else { return false };
+            if self.session_expired(s, self.d.clock.unix()).is_some() {
+                return false;
+            }
+            s.username.clone()
+        };
+        self.user(&user, false).await.ok().flatten().is_some_and(|u| !u.disabled)
     }
 
     /// A remembered login never replaces the current directory account check.
@@ -1236,8 +1249,7 @@ impl Broker {
             in_use_by: None,
             connected_users: if reason.is_none() { self.connected_users(fqdn) } else { Vec::new() },
             connectable: reason.is_none(),
-            shared_desktop: self.cfg.mac_admission.as_ref()
-                .filter(|cfg| cfg.hosts.contains_key(fqdn)).map(|_| true),
+            shared_desktop: self.cfg.mac_admission.as_ref().filter(|cfg| cfg.hosts.contains_key(fqdn)).map(|_| true),
             reason: reason.map(str::to_string),
         }
     }
@@ -1465,19 +1477,21 @@ impl Broker {
         // Configuration, never discovery metadata, selects this trust boundary.
         // The same authenticated session, HBAC assignment and pinned Host gates
         // above apply to both methods. Shared Mac users never receive an OS password.
-        let mac = self.cfg.mac_admission.as_ref()
+        let mac = self
+            .cfg
+            .mac_admission
+            .as_ref()
             .and_then(|cfg| cfg.hosts.get(host).map(|local| (cfg.clone(), local.clone())));
         let (gssapi_token, broker_token, local_username) = if let Some((cfg, local)) = mac {
             let issued = self.d.clock.unix();
             let host = host.to_string();
             let subject = user.clone();
             let local_for_signing = local.clone();
-            let token = tokio::task::spawn_blocking(move || {
-                cfg.issue(&host, &cert, &subject, &local_for_signing, issued)
-            })
-            .await
-            .map_err(|_| ApiError::Internal("Mac admission unavailable"))?
-            .map_err(|_| ApiError::Internal("Mac admission unavailable"))?;
+            let token =
+                tokio::task::spawn_blocking(move || cfg.issue(&host, &cert, &subject, &local_for_signing, issued))
+                    .await
+                    .map_err(|_| ApiError::Internal("Mac admission unavailable"))?
+                    .map_err(|_| ApiError::Internal("Mac admission unavailable"))?;
             (String::new(), Some(token), Some(local))
         } else {
             let krb = self.d.krb.clone();
@@ -1678,22 +1692,17 @@ impl Broker {
         // Check every remembered login, including closed clients, against current
         // account/HBAC policy. The directory cache bounds revocation latency;
         // this check never bumps the user's idle timer.
-        let sessions: Vec<_> = self
-            .st
-            .lock()
-            .unwrap()
-            .sessions
-            .iter()
-            .map(|(key, session)| (*key, session.username.clone()))
-            .collect();
+        let sessions: Vec<_> =
+            self.st.lock().unwrap().sessions.iter().map(|(key, session)| (*key, session.username.clone())).collect();
         for (key, user) in sessions {
             let Ok((_, assigned)) = self.assigned(&user, false).await else { continue };
             let revoked = {
                 let st = self.st.lock().unwrap();
                 assigned.is_empty()
-                    || st.sessions.get(&key).is_some_and(|session| {
-                        session.hosts_used.iter().any(|host| !assigned.contains(host))
-                    })
+                    || st
+                        .sessions
+                        .get(&key)
+                        .is_some_and(|session| session.hosts_used.iter().any(|host| !assigned.contains(host)))
             };
             if revoked {
                 // A new grant can be newer than the shared snapshot (especially
@@ -1703,9 +1712,10 @@ impl Broker {
                 let confirmed = {
                     let st = self.st.lock().unwrap();
                     fresh.is_empty()
-                        || st.sessions.get(&key).is_some_and(|session| {
-                            session.hosts_used.iter().any(|host| !fresh.contains(host))
-                        })
+                        || st
+                            .sessions
+                            .get(&key)
+                            .is_some_and(|session| session.hosts_used.iter().any(|host| !fresh.contains(host)))
                 };
                 if confirmed {
                     self.end_session(key, "access_revoked").await;

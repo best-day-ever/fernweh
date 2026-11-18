@@ -179,6 +179,7 @@ async fn serve(cfg: Config) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(cfg.listen).await.with_context(|| format!("bind {}", cfg.listen))?;
     let probe_every = Duration::from_secs(cfg.hosts.probe_interval_secs.max(1));
     let broker = Broker::new(cfg, deps);
+    plank_broker::network_diagnostics::start_udp(&broker).await?;
     broker.audit_start();
     // Device-bound sessions survive restarts (§14.3); their leases do not.
     let restored = broker.restore_sessions();

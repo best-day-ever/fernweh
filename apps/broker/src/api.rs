@@ -471,10 +471,26 @@ async fn no_store(mut r: Response) -> Response {
 
 pub fn router(b: Arc<Broker>) -> Router {
     Router::new()
+        .route("/v1/diagnostics/network-request", get(crate::network_diagnostics::poll))
+        .route(
+            "/v1/diagnostics/network/throughput/{id}/upload",
+            post(crate::network_bandwidth::upload).layer(DefaultBodyLimit::disable()),
+        )
+        .route("/v1/diagnostics/network/throughput/{id}/download", get(crate::network_bandwidth::download))
+        .route(
+            "/v1/diagnostics/network/start",
+            post(crate::network_diagnostics::start).layer(DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/v1/diagnostics/network/finish",
+            post(crate::network_diagnostics::finish).layer(DefaultBodyLimit::max(crate::network_diagnostics::MAX_BODY)),
+        )
         .route("/v1/client-updates/macos-arm64", get(crate::updates::manifest))
         .route("/v1/diagnostics/support-request", get(crate::support_diagnostics::poll))
-        .route("/v1/diagnostics/support", post(crate::support_diagnostics::submit)
-            .layer(DefaultBodyLimit::max(crate::support_diagnostics::MAX_BODY)))
+        .route(
+            "/v1/diagnostics/support",
+            post(crate::support_diagnostics::submit).layer(DefaultBodyLimit::max(crate::support_diagnostics::MAX_BODY)),
+        )
         .route("/v1/client-updates/macos-arm64/{filename}", get(crate::updates::download))
         .route("/v1/client-updates/windows-x64", get(crate::updates::windows_manifest))
         .route("/v1/client-updates/windows-x64/{filename}", get(crate::updates::windows_download))
