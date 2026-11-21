@@ -1,3 +1,22 @@
+## 22 November 2026 — QUIC receive headroom
+
+Candidate 1.2.52 from `0d49f29f` pins upstream Kymux `4ee4654` for
+bounded receive-buffer requests and client-side reporting of the capacity
+granted by the operating system. The encrypted media loopback reported
+4 MiB on both macOS and Windows with Rust 1.99.1. The existing Quinn UDP
+hook still supplies the native listener's request.
+
+A Linux package variant applies the upstream change over the previously
+qualified datagram-limit recovery changes. The exact transport test
+executable passed six 150 Mbps trials and recovered all 5,400 frames with
+zero test-owned socket drops. The Linux system-wide ceiling was unchanged.
+
+The signed and notarized Mac candidate passed UHD60 direct-route motion
+and input. Normal reconnect passed. A forced exit followed by a faster
+retry still reached the active-session conflict. The Windows MSI passed
+native component and packaging checks, and the Client launched in a real
+desktop session. A fresh Windows streaming run remains open.
+
 ## 18 November 2026 — network diagnostics Client1.2.44
 
 Broker producer PR25 and Client PR15 retain merge history. The coordinated
