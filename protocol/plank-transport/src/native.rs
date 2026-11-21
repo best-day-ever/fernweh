@@ -823,6 +823,15 @@ mod tests {
         assert!(received_video.header.is_key);
         assert_eq!(received_video.header.pts, 90_000);
         assert_eq!(received_video.payload, video_payload);
+        let receive_buffer = client_connection
+            .stats_provider()
+            .connection_stats()
+            .await
+            .udp_receive_buffer
+            .expect("native QUIC client must report its socket receive buffer");
+        assert_eq!(receive_buffer.requested_bytes, 4 * 1024 * 1024);
+        assert!(receive_buffer.reported_bytes > 0, "{receive_buffer:?}");
+        eprintln!("native_quic_client_receive_buffer={receive_buffer:?}");
         let video_protocol_stats = client_connection.protocol_stats();
         assert!(
             video_protocol_stats
