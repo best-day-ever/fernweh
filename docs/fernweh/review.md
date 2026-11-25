@@ -17,6 +17,20 @@ retry still reached the active-session conflict. The Windows MSI passed
 native component and packaging checks, and the Client launched in a real
 desktop session. A fresh Windows streaming run remains open.
 
+## 25 November 2026 — Plasma X11 display leases
+
+The Linux Host pauses an already-running KScreen module while a display
+arrangement is leased. On restore it resumes the same user-bus instance and
+leaves saved desktop settings in place. Native NVIDIA qualification reproduced
+the competing modeset and verified first-attempt exact-size capture with the
+guard. Two macOS client connections delivered full-size video and input and
+restored the desktop. The session-context suite passed all 19 cases.
+
+The [Linux Host change](https://github.com/best-day-ever/fernweh-host-linux/pull/11)
+is on Host main at `95ff558b`. The separately qualified
+`1.2.54-kscreen-display-lease` backport uses Host `61c5adbf` and assembly
+`3f8124c4` with the 1.2.43 greeter and transport baseline.
+
 ## 18 November 2026 — network diagnostics Client1.2.44
 
 Broker producer PR25 and Client PR15 retain merge history. The coordinated
