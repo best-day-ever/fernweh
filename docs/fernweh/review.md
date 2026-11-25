@@ -1,3 +1,16 @@
+## 25 November 2026 — reconnect during display restore
+
+The Linux Host keeps recovery ownership after a fallback restores a physical
+output. It verifies the arrangement against the current output snapshot
+before publishing its geometry and capture metadata. The owner can request
+the saved layout again through the existing display transition.
+
+The native Linux topology suite passed 19 cases and the Host HTTP source
+compiled on Rocky. A wire fixture gave the existing Mac parser the old
+response, the fixed response, and a still-active legacy layout. The parser
+rejected the old response with the reported error and accepted both valid
+layouts. [Linux Host PR](https://github.com/best-day-ever/fernweh-host-linux/pull/12).
+
 ## 25 November 2026 — macOS session teardown
 
 Cocoa can deliver a focus change inside native window destruction after a
