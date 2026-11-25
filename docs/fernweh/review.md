@@ -1,3 +1,15 @@
+## 25 November 2026 — macOS session teardown
+
+Cocoa can deliver a focus change inside native window destruction after a
+session fails to start. The session now releases input and stops observing
+application events before detaching and destroying its windows.
+
+On Apple Silicon with Qt 6.10.2 and SDK 27, a focused native stream window
+reproduced the segmentation fault with the previous Client. The fixed Client
+observed the same Cocoa focus change after the windows were detached, emitted
+both session completion signals once, and accepted a repeated finish call.
+This is a source integration. [Client PR](https://github.com/best-day-ever/fernweh-client/pull/20).
+
 ## 22 November 2026 — QUIC receive headroom
 
 Candidate 1.2.52 from `0d49f29f` pins upstream Kymux `4ee4654` for
