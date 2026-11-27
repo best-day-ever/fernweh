@@ -638,7 +638,8 @@ for required_cursor_token in \
   PLANK_TRANSPORT_EVENT_CURSOR_POSITION \
   localCursorThread \
   send_cursor_shape_control \
-  XFixesGetCursorImage \
+  '"xcb_xfixes_get_cursor_image"' \
+  '"xcb_xfixes_get_cursor_image_reply"' \
   XFixesSelectCursorInput \
   XQueryPointer \
   consume_shape_change \
