@@ -18,6 +18,7 @@ Requires:       firewalld-filesystem
 Requires:       openssl-libs
 Requires:       libXcomposite
 Requires:       libXext
+Requires:       libX11-xcb
 Requires:       logrotate
 Requires:       xorg-x11-server-Xorg
 Requires:       xorg-x11-server-utils
